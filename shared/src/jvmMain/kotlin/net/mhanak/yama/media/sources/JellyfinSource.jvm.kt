@@ -6,8 +6,8 @@ import org.jellyfin.sdk.model.ClientInfo
 import org.jellyfin.sdk.model.DeviceInfo
 
 actual fun createJellyfinInstance(clientInfo: ClientInfo, deviceInfo: DeviceInfo): Jellyfin {
-    return createJellyfin{
-        clientInfo
-        deviceInfo
+    return createJellyfin {
+        this.clientInfo = clientInfo
+        this.deviceInfo = deviceInfo
     }
 }

@@ -11,6 +11,8 @@ class JVMPlatform: Platform {
 
 actual fun getPlatform(): Platform = JVMPlatform()
 
+actual fun isTelevisionDevice(): Boolean = false
+
 // jvmMain
 actual fun getDeviceName(): String =
     InetAddress.getLocalHost().hostName ?: System.getProperty("os.name") ?: "Desktop"

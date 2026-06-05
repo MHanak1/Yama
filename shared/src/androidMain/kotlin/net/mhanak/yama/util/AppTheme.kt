@@ -11,9 +11,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 @Composable
-actual fun AppTheme(content: @Composable () -> Unit) {
+actual fun AppTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val darkTheme = isSystemInDarkTheme()
 
     val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         // Android 12+ → dynamic Material You colors

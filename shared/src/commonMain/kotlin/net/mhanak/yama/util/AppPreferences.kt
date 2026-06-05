@@ -17,4 +17,16 @@ object AppPreferences {
     var deviceId: String
         get() = settings.getString("device_id", "")
         set(value) { settings.putString("device_id", value) }
+
+    var blurEnabled: Boolean
+        get() = settings.getBoolean("blur_enabled", true)
+        set(value) { settings.putBoolean("blur_enabled", value) }
+
+    var uiOpacity: Float
+        get() = settings.getFloat("ui_opacity", 0.7f)
+        set(value) { settings.putFloat("ui_opacity", value) }
+
+    var themeMode: ThemeMode
+        get() = ThemeMode.entries.getOrElse(settings.getInt("theme_mode", ThemeMode.System.ordinal)) { ThemeMode.System }
+        set(value) { settings.putInt("theme_mode", value.ordinal) }
 }

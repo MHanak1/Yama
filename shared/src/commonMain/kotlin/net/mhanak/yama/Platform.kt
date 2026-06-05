@@ -12,3 +12,5 @@ expect fun getDeviceName(): String
 
 // commonMain
 expect fun getAppDataDir(): Path
+
+expect fun isTelevisionDevice(): Boolean

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cleartext HTTP is allowed globally because Jellyfin servers on local
+    networks are commonly HTTP-only. Restrict this if you ever distribute
+    a release build to untrusted environments.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
