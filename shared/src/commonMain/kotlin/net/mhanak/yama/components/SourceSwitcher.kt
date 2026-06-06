@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
@@ -56,22 +58,36 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
         if (expanded) runCatching { menuFocusRequester.requestFocus() }
     }
 
-    Box(modifier = modifier.padding(if (collapsed) 8.dp else 16.dp)) {
-        if (collapsed) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier
+            .padding(horizontal = if (collapsed) 8.dp else 16.dp, vertical = 8.dp),
+    ) {
+        // Fixed-height interactive area so the header doesn't change height between the collapsed
+        // (icon button) and expanded (outlined button) states — otherwise the rail jumps when it
+        // collapses.
+        Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
+            if (collapsed) {
                 IconButton(onClick = { expanded = true }) {
                     SourceIcon("Jellyfin")
                 }
-            }
-        } else {
-            GlassOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SourceIcon("Jellyfin")
-                    Spacer(Modifier.width(8.dp))
-                    Text(currentSession?.userName ?: "Jellyfin", style = MaterialTheme.typography.bodyLarge)
+            } else {
+                GlassOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SourceIcon("Jellyfin")
+                        Spacer(Modifier.width(8.dp))
+                        // Single line so the button doesn't wrap and grow vertically while the rail
+                        // is mid-expansion (it's narrower than the text for a few frames).
+                        Text(
+                            currentSession?.userName ?: "Jellyfin",
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                 }
-                Spacer(Modifier.width(4.dp))
-                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
             }
         }
 

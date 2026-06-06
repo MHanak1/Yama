@@ -1,5 +1,12 @@
 package net.mhanak.yama.views
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.plus
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -34,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
@@ -41,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.components.glassEffect
 import net.mhanak.yama.components.glassSource
+
+private const val TAB_ANIM_DURATION = 300
 
 enum class LibraryTab(val label: String, val icon: ImageVector) {
     Albums("Albums", Icons.Default.Album),
@@ -59,6 +70,8 @@ fun LibraryView(
     onGenreClick: (String) -> Unit,
     onPlaylistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    // Extra space added below the scrollable content so list ends clear the overlaid bottom bar.
+    bottomContentPadding: Dp = 0.dp,
 ) {
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
@@ -126,6 +139,7 @@ fun LibraryView(
             }
         },
     ) { innerPadding ->
+        val contentPadding = innerPadding.plus(PaddingValues(bottom = bottomContentPadding))
         if (externalTab == null) {
             // Narrow: swipeable pager
             HorizontalPager(
@@ -136,7 +150,7 @@ fun LibraryView(
             ) { page ->
                 LibraryTabContent(
                     tab = LibraryTab.entries[page],
-                    contentPadding = innerPadding,
+                    contentPadding = contentPadding,
                     onAlbumClick = onAlbumClick,
                     onArtistClick = onArtistClick,
                     onGenreClick = onGenreClick,
@@ -144,15 +158,27 @@ fun LibraryView(
                 )
             }
         } else {
-            // Wide: direct content driven by the sidebar
-            Box(
+            // Wide: rail-driven content, with a vertical slide mirroring the narrow pager's
+            // horizontal one — later tabs slide up from below, earlier tabs down from above.
+            AnimatedContent(
+                targetState = externalTab,
                 modifier = Modifier
                     .glassSource(zIndex = 1f)
-                    .fillMaxSize(),
-            ) {
+                    .fillMaxSize()
+                    // Clip so the vertically sliding tab content can't bleed up into the top bar.
+                    .clipToBounds(),
+                transitionSpec = {
+                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (slideInVertically(tween(TAB_ANIM_DURATION)) { h -> dir * h } + fadeIn(tween(TAB_ANIM_DURATION)))
+                        .togetherWith(
+                            slideOutVertically(tween(TAB_ANIM_DURATION)) { h -> -dir * h } + fadeOut(tween(TAB_ANIM_DURATION)),
+                        )
+                },
+                label = "libraryTab",
+            ) { tab ->
                 LibraryTabContent(
-                    tab = externalTab,
-                    contentPadding = innerPadding,
+                    tab = tab,
+                    contentPadding = contentPadding,
                     onAlbumClick = onAlbumClick,
                     onArtistClick = onArtistClick,
                     onGenreClick = onGenreClick,

@@ -1,44 +1,40 @@
 package net.mhanak.yama.screens
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavController
+import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
@@ -50,51 +46,21 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import net.mhanak.yama.components.AdaptiveNavigationLayout
-import net.mhanak.yama.components.AppearanceSettings
-import net.mhanak.yama.components.SidebarMode
+import net.mhanak.yama.components.AppBottomBar
+import net.mhanak.yama.components.AppNavRail
+import net.mhanak.yama.components.BottomBarDestination
 import net.mhanak.yama.components.SourceSwitcher
 import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.views.AlbumDetailView
 import net.mhanak.yama.views.ArtistDetailView
 import net.mhanak.yama.views.GenreDetailView
+import net.mhanak.yama.views.HomeView
 import net.mhanak.yama.views.LibraryTab
 import net.mhanak.yama.views.LibraryView
 import net.mhanak.yama.views.PlaylistDetailView
+import net.mhanak.yama.views.SettingsView
 
-private val DETAIL_DURATION = 320
-
-@Composable
-private fun SidebarNavItem(
-    selected: Boolean,
-    onClick: () -> Unit,
-    icon: @Composable () -> Unit,
-    label: String,
-    expanded: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
-    val contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .then(if (expanded) Modifier.padding(horizontal = 8.dp, vertical = 2.dp) else Modifier.padding(vertical = 2.dp))
-            .heightIn(min = 56.dp)
-            .clip(RoundedCornerShape(50))
-            .background(containerColor)
-            .clickable(onClick = onClick)
-            .then(if (expanded) Modifier.padding(horizontal = 16.dp) else Modifier),
-        horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CompositionLocalProvider(LocalContentColor provides contentColor) {
-            icon()
-            if (expanded) {
-                Spacer(Modifier.width(12.dp))
-                Text(label, style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    }
-}
+private const val DETAIL_DURATION = 320
 
 private inline fun <reified T : Any> NavGraphBuilder.detailComposable(
     crossinline content: @Composable (NavBackStackEntry) -> Unit,
@@ -105,6 +71,48 @@ private inline fun <reified T : Any> NavGraphBuilder.detailComposable(
     ) { backStackEntry -> content(backStackEntry) }
 }
 
+/** Ordered index of the top-level destinations, or null for detail screens. */
+private fun NavDestination?.topLevelIndex(): Int? = when {
+    this == null -> null
+    hasRoute<HomeRoute>() -> 0
+    hasRoute<LibraryRoute>() -> 1
+    hasRoute<SettingsRoute>() -> 2
+    else -> null
+}
+
+// Slide between top-level destinations (Home/Library/Settings) — later destinations enter from
+// the trailing edge. [vertical] (true on rail layouts) slides up/down to mirror the wide library
+// tab switch; otherwise it slides left/right. Returns null when either side is a detail screen,
+// letting the NavHost fall back to a fade so detail screens keep their slide-over-and-fade parallax.
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.topLevelEnter(vertical: Boolean): EnterTransition? {
+    val from = initialState.destination.topLevelIndex() ?: return null
+    val to = targetState.destination.topLevelIndex() ?: return null
+    if (from == to) return null
+    val dir = if (to > from) 1 else -1
+    val fade = fadeIn(tween(DETAIL_DURATION))
+    return if (vertical) slideInVertically(tween(DETAIL_DURATION)) { d -> dir * d } + fade
+    else slideInHorizontally(tween(DETAIL_DURATION)) { d -> dir * d } + fade
+}
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.topLevelExit(vertical: Boolean): ExitTransition? {
+    val from = initialState.destination.topLevelIndex() ?: return null
+    val to = targetState.destination.topLevelIndex() ?: return null
+    if (from == to) return null
+    val dir = if (to > from) 1 else -1
+    val fade = fadeOut(tween(DETAIL_DURATION))
+    return if (vertical) slideOutVertically(tween(DETAIL_DURATION)) { d -> -dir * d } + fade
+    else slideOutHorizontally(tween(DETAIL_DURATION)) { d -> -dir * d } + fade
+}
+
+/** Switch top-level destinations (Home/Library/Settings) keeping a shallow, single-top back stack. */
+private fun NavController.navigateTopLevel(route: Any) {
+    navigate(route) {
+        popUpTo(graph.startDestinationId) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
@@ -112,6 +120,11 @@ fun MainScreen() {
     val isTV = isTelevisionDevice()
     val contentFocusRequester = remember { FocusRequester() }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val destination = navBackStackEntry?.destination
+
+    val onHome = destination?.hasRoute<HomeRoute>() == true
+    val onSettings = destination?.hasRoute<SettingsRoute>() == true
+
     // Wait for the entering destination's lifecycle to reach RESUMED (animation done) before
     // requesting focus, so the exiting composable is already gone and focus lands cleanly.
     LaunchedEffect(navBackStackEntry) {
@@ -127,66 +140,84 @@ fun MainScreen() {
     }
 
     val onTabClick: (LibraryTab) -> Unit = { tab ->
-        val isOnLibrary = navController.currentBackStackEntry
-            ?.destination?.hasRoute<LibraryRoute>() == true
         selectedTab = tab
-        if (!isOnLibrary) {
-            navController.navigate(LibraryRoute) {
-                popUpTo<LibraryRoute> { inclusive = true }
-                launchSingleTop = true
-            }
-        }
+        val onLibrary = navController.currentBackStackEntry?.destination?.hasRoute<LibraryRoute>() == true
+        if (!onLibrary) navController.navigateTopLevel(LibraryRoute)
     }
 
     AdaptiveNavigationLayout(
-        narrowGesturesEnabled = false,
-        wideDrawerContent = { mode ->
-            val expanded = mode == SidebarMode.Expanded
-            SourceSwitcher(collapsed = !expanded)
-            LibraryTab.entries.forEach { tab ->
-                SidebarNavItem(
-                    selected = selectedTab == tab,
-                    onClick = { onTabClick(tab) },
-                    icon = { Icon(tab.icon, contentDescription = tab.label) },
-                    label = tab.label,
-                    expanded = expanded,
-                )
-            }
-            if (mode == SidebarMode.Expanded) {
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                AppearanceSettings()
-            }
+        rail = { forceExpanded ->
+            AppNavRail(
+                forceExpanded = forceExpanded,
+                homeSelected = onHome,
+                // Highlight the active library tab while browsing the library or a detail screen.
+                selectedTab = if (onHome || onSettings) null else selectedTab,
+                settingsSelected = onSettings,
+                onHomeClick = { navController.navigateTopLevel(HomeRoute) },
+                onTabClick = onTabClick,
+                onSettingsClick = { navController.navigateTopLevel(SettingsRoute) },
+            )
         },
-        narrowDrawerContent = { onClose ->
+        bottomBar = {
+            AppBottomBar(
+                selected = when {
+                    onHome -> BottomBarDestination.Home
+                    onSettings -> null
+                    else -> BottomBarDestination.Library
+                },
+                onSelect = { dest ->
+                    when (dest) {
+                        BottomBarDestination.Home -> navController.navigateTopLevel(HomeRoute)
+                        BottomBarDestination.Library -> navController.navigateTopLevel(LibraryRoute)
+                        BottomBarDestination.More -> Unit // mock slot
+                    }
+                },
+            )
+        },
+        // Slim modal rail: source switcher at the top, settings pinned to the bottom.
+        modalContent = { onClose ->
             SourceSwitcher(onRequestClose = onClose)
             HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-            AppearanceSettings()
+            Spacer(Modifier.weight(1f))
+            NavigationDrawerItem(
+                label = { Text("Settings") },
+                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                selected = onSettings,
+                onClick = {
+                    onClose()
+                    navController.navigateTopLevel(SettingsRoute)
+                },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            )
         },
-    ) { isWide, onMenuClick ->
+    ) { hasRail, onMenuClick, bottomInset ->
         NavHost(
             navController = navController,
             startDestination = LibraryRoute,
             modifier = Modifier.fillMaxSize()
                 .then(if (isTV) Modifier.focusRequester(contentFocusRequester).focusGroup() else Modifier),
-            // Library slides behind detail screens (parallax); no enter animation on cold start.
-            enterTransition = { fadeIn(tween(DETAIL_DURATION)) },
-            exitTransition = {
-                fadeOut(tween(DETAIL_DURATION))
-            },
-            popEnterTransition = {
-                fadeIn(tween(DETAIL_DURATION))
-            },
-            popExitTransition = { fadeOut(tween(DETAIL_DURATION)) },
+            enterTransition = { topLevelEnter(vertical = hasRail) ?: fadeIn(tween(DETAIL_DURATION)) },
+            exitTransition = { topLevelExit(vertical = hasRail) ?: fadeOut(tween(DETAIL_DURATION)) },
+            popEnterTransition = { topLevelEnter(vertical = hasRail) ?: fadeIn(tween(DETAIL_DURATION)) },
+            popExitTransition = { topLevelExit(vertical = hasRail) ?: fadeOut(tween(DETAIL_DURATION)) },
         ) {
+            composable<HomeRoute> {
+                HomeView(onMenuClick = onMenuClick, bottomContentPadding = bottomInset)
+            }
             composable<LibraryRoute> {
                 LibraryView(
-                    externalTab = if (isWide) selectedTab else null,
+                    // Rail-driven tab on medium/wide; self-managed segmented switcher on slim.
+                    externalTab = if (hasRail) selectedTab else null,
                     onMenuClick = onMenuClick,
+                    bottomContentPadding = bottomInset,
                     onAlbumClick = { albumId -> navController.navigate(AlbumDetailRoute(albumId)) { launchSingleTop = true } },
                     onArtistClick = { artistId -> navController.navigate(ArtistDetailRoute(artistId)) { launchSingleTop = true } },
                     onGenreClick = { genreId -> navController.navigate(GenreDetailRoute(genreId)) { launchSingleTop = true } },
                     onPlaylistClick = { playlistId -> navController.navigate(PlaylistDetailRoute(playlistId)) { launchSingleTop = true } },
                 )
+            }
+            composable<SettingsRoute> {
+                SettingsView(onMenuClick = onMenuClick, bottomContentPadding = bottomInset)
             }
             detailComposable<AlbumDetailRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<AlbumDetailRoute>()

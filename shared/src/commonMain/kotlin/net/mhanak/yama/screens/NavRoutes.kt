@@ -3,7 +3,13 @@ package net.mhanak.yama.screens
 import kotlinx.serialization.Serializable
 
 @Serializable
+object HomeRoute
+
+@Serializable
 object LibraryRoute
+
+@Serializable
+object SettingsRoute
 
 @Serializable
 data class AlbumDetailRoute(val albumId: String)

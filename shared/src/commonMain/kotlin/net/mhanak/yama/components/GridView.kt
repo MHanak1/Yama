@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,7 +54,7 @@ fun GridView(
             contentPadding = contentPadding.plus(PaddingValues(8.dp)),
         ) {
             items(items = items) { item ->
-                GlassElevatedCard(onClick = item.onClick) {
+                ElevatedCard(onClick = item.onClick) {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier
