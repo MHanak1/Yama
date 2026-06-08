@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.StateFlow
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Artist
 import net.mhanak.yama.media.model.Genre
+import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
 
@@ -46,4 +47,7 @@ interface MusicSource {
 
     /** Primary artwork URL for the given track (used in the player UI and OS media controls), or null. */
     suspend fun getArtworkUrl(trackId: String): String?
+
+    /** Lyrics for the given track, or [Lyrics.None] if unavailable. */
+    suspend fun getLyrics(trackId: String): Lyrics
 }

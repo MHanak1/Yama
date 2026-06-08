@@ -15,6 +15,9 @@ import net.mhanak.yama.getDeviceName
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Artist
 import net.mhanak.yama.media.model.Genre
+import net.mhanak.yama.media.model.Lyrics
+import net.mhanak.yama.media.model.LyricsCue
+import net.mhanak.yama.media.model.LyricsLine
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.session.JellyfinSession
@@ -23,10 +26,12 @@ import net.mhanak.yama.util.AppPreferences
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.artistsApi
+import org.jellyfin.sdk.api.client.extensions.audioApi
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
 import org.jellyfin.sdk.api.client.extensions.authenticateWithQuickConnect
 import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
+import org.jellyfin.sdk.api.client.extensions.lyricsApi
 import org.jellyfin.sdk.api.client.extensions.musicGenresApi
 import org.jellyfin.sdk.api.client.extensions.playlistsApi
 import org.jellyfin.sdk.api.client.extensions.quickConnectApi
@@ -380,6 +385,33 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         val currentApi = api ?: return null
         // For audio items Jellyfin serves the embedded/album primary art at this path.
         return currentApi.imageApi.getItemImageUrl(JellyfinUUID.fromString(trackId), ImageType.PRIMARY)
+    }
+
+    override suspend fun getLyrics(trackId: String): Lyrics {
+        val currentApi = api ?: return Lyrics.None
+        return try {
+            val dto = currentApi.lyricsApi.getLyrics(JellyfinUUID.fromString(trackId)).content
+            if (dto.metadata.isSynced == false) {
+                val lines = dto.lyrics.map { it.text }
+                if (lines.isEmpty()) Lyrics.None else Lyrics.Unsynced(lines)
+            } else {
+                val lines = dto.lyrics.mapNotNull { line ->
+                    val startMs = (line.start ?: return@mapNotNull null) / 10_000
+                    val cues = line.cues?.map { cue ->
+                        LyricsCue(
+                            startMs = cue.start / 10_000,
+                            endMs = cue.end?.let { it / 10_000 },
+                            lineStartIndex = cue.position.coerceIn(0, line.text.length),
+                            lineEndIndex = cue.endPosition.coerceIn(0, line.text.length),
+                        )
+                    } ?: emptyList()
+                    LyricsLine(text = line.text, startMs = startMs, cues = cues)
+                }
+                if (lines.isEmpty()) Lyrics.None else Lyrics.Timed(lines)
+            }
+        } catch (_: Exception) {
+            Lyrics.None
+        }
     }
 
     private fun clearLibrary() {

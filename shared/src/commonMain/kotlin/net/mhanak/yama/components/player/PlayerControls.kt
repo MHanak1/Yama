@@ -27,6 +27,7 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.components.GlassFilledIconButton
@@ -74,6 +75,14 @@ fun formatPlaybackTime(ms: Long): String {
 /**
  * The transport row (prev / play-pause / next) plus an optional seek bar. Shared by every player
  * surface so the controls stay consistent.
+ *
+ * [belowFocusRequester]: when set, D-pad DOWN from every button in the transport row is explicitly
+ * directed to that requester. Use this to bridge to a secondary row below when the spatial
+ * algorithm can't cross composable boundaries (common on TV).
+ *
+ * [leadingContent] / [trailingContent]: composables injected at the left/right ends of the
+ * transport row (e.g. shuffle, repeat). They receive [belowFocusRequester] via the same downMod
+ * so D-pad DOWN from those buttons bridges to the secondary row too.
  */
 @Composable
 fun PlayerControls(
@@ -83,6 +92,9 @@ fun PlayerControls(
     showSeek: Boolean = true,
     // When set, attached to the play/pause button so a TV can move D-pad focus into the controls.
     playPauseFocusRequester: FocusRequester? = null,
+    belowFocusRequester: FocusRequester? = null,
+    leadingContent: (@Composable (downModifier: Modifier) -> Unit)? = null,
+    trailingContent: (@Composable (downModifier: Modifier) -> Unit)? = null,
 ) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         if (showSeek) {
@@ -108,26 +120,30 @@ fun PlayerControls(
                 Text(formatPlaybackTime(status.durationMs), style = MaterialTheme.typography.labelSmall)
             }
         }
+        val downMod = belowFocusRequester?.let { below -> Modifier.focusProperties { down = below } } ?: Modifier
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { player.previous() }) {
+            leadingContent?.invoke(downMod)
+            IconButton(onClick = { player.previous() }, modifier = downMod) {
                 Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
             }
             FilledIconButton(
                 onClick = { player.togglePlayPause() },
                 modifier = Modifier.size(56.dp)
-                    .then(if (playPauseFocusRequester != null) Modifier.focusRequester(playPauseFocusRequester) else Modifier),
+                    .then(if (playPauseFocusRequester != null) Modifier.focusRequester(playPauseFocusRequester) else Modifier)
+                    .then(downMod),
             ) {
                 Icon(
                     if (status.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (status.isPlaying) "Pause" else "Play",
                 )
             }
-            IconButton(onClick = { player.next() }) {
+            IconButton(onClick = { player.next() }, modifier = downMod) {
                 Icon(Icons.Filled.SkipNext, contentDescription = "Next")
             }
+            trailingContent?.invoke(downMod)
         }
     }
 }
