@@ -12,8 +12,16 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.plus
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import net.mhanak.yama.LocalAppContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
@@ -115,6 +123,8 @@ private fun NavController.navigateTopLevel(route: Any) {
 
 @Composable
 fun MainScreen() {
+    val appContainer = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
     val navController = rememberNavController()
     var selectedTab by remember { mutableStateOf(LibraryTab.Albums) }
     val isTV = isTelevisionDevice()
@@ -140,9 +150,20 @@ fun MainScreen() {
     }
 
     val onTabClick: (LibraryTab) -> Unit = { tab ->
-        selectedTab = tab
         val onLibrary = navController.currentBackStackEntry?.destination?.hasRoute<LibraryRoute>() == true
-        if (!onLibrary) navController.navigateTopLevel(LibraryRoute)
+        if (onLibrary && tab == selectedTab) {
+            scope.launch { runCatching { appContainer.activeMusicSource.refresh() } }
+        } else {
+            selectedTab = tab
+            if (!onLibrary) {
+                // Pop to LibraryRoute if it's already in the back stack (e.g., on a detail screen).
+                // Avoid navigateTopLevel here: its saveState+restoreState would immediately
+                // restore the detail screen that was just popped.
+                if (!navController.popBackStack(LibraryRoute, inclusive = false)) {
+                    navController.navigateTopLevel(LibraryRoute)
+                }
+            }
+        }
     }
 
     AdaptiveNavigationLayout(
@@ -168,7 +189,14 @@ fun MainScreen() {
                 onSelect = { dest ->
                     when (dest) {
                         BottomBarDestination.Home -> navController.navigateTopLevel(HomeRoute)
-                        BottomBarDestination.Library -> navController.navigateTopLevel(LibraryRoute)
+                        BottomBarDestination.Library -> {
+                            val onLibrary = navController.currentBackStackEntry?.destination?.hasRoute<LibraryRoute>() == true
+                            if (onLibrary) {
+                                scope.launch { runCatching { appContainer.activeMusicSource.refresh() } }
+                            } else if (!navController.popBackStack(LibraryRoute, inclusive = false)) {
+                                navController.navigateTopLevel(LibraryRoute)
+                            }
+                        }
                         BottomBarDestination.More -> Unit // mock slot
                     }
                 },
@@ -221,19 +249,19 @@ fun MainScreen() {
             }
             detailComposable<AlbumDetailRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<AlbumDetailRoute>()
-                AlbumDetailView(albumId = route.albumId, onBack = { navController.popBackStack() })
+                AlbumDetailView(albumId = route.albumId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
             detailComposable<ArtistDetailRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<ArtistDetailRoute>()
-                ArtistDetailView(artistId = route.artistId, onBack = { navController.popBackStack() })
+                ArtistDetailView(artistId = route.artistId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
             detailComposable<GenreDetailRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<GenreDetailRoute>()
-                GenreDetailView(genreId = route.genreId, onBack = { navController.popBackStack() })
+                GenreDetailView(genreId = route.genreId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
             detailComposable<PlaylistDetailRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<PlaylistDetailRoute>()
-                PlaylistDetailView(playlistId = route.playlistId, onBack = { navController.popBackStack() })
+                PlaylistDetailView(playlistId = route.playlistId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
         }
     }

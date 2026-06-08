@@ -5,20 +5,24 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.plus
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyGridScope
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ElevatedCard
@@ -37,88 +41,101 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 
 @Composable
-fun GridView(
+fun ListView(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
-    content: LazyGridScope.() -> Unit
+    content: LazyListScope.() -> Unit
 ) {
-    BoxWithConstraints(modifier.focusGroup().focusRestorer()) {
-        LazyVerticalGrid(
-            // silly way of making the grid size fit both mobile and desktop
-            columns = GridCells.Adaptive(minSize = Dp(100.toFloat() + (maxWidth.value / 12F))),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = contentPadding.plus(PaddingValues(8.dp)),
-            content = content,
-        )
-    }
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = contentPadding.plus(PaddingValues(8.dp)),
+        content = content,
+        modifier = modifier
+            .focusGroup()
+            .focusRestorer()
+    )
 }
 
 @Composable
-fun GridCard(onClick: () -> Unit = {}, image: (@Composable BoxScope.() -> Unit)? = null, title: String? = null, subtitle: String? = null) {
+fun ListCard(
+    onClick: () -> Unit = {},
+    image: (@Composable BoxScope.() -> Unit)? = null,
+    title: String? = null,
+    subtitle: String? = null,
+    endContent: @Composable (RowScope.() -> Unit)? = null,
+) {
     ElevatedCard(onClick = onClick) {
-        Column(
+        Row (
             modifier = Modifier
                 .padding(12.dp)
-                .fillMaxSize()
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Box (
                 modifier = Modifier
-                    .fillMaxSize()
-                    .aspectRatio(ratio = 1.0F)
+                    .sizeIn(minWidth = 32.dp, maxWidth = 64.dp)
+                    .aspectRatio(1f)
                     .clip(RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 image?.invoke(this)
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                title ?: "",
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (subtitle!= null) {
+            Spacer(Modifier.width(8.dp))
+            Column {
                 Text(
-                    subtitle,
+                    title ?: "",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    subtitle ?: "",
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+
+            Spacer(Modifier.weight(1f))
+            endContent?.invoke(this)
         }
     }
 }
 
 @Composable
-fun AsyncImageGridCard(
+fun AsyncImageListCard(
     onClick: () -> Unit = {},
     imageUrl: String? = null,
     imageFallback: Painter? = null,
     title: String? = null,
     subtitle: String? = null,
 ) {
-    GridCard(
+    ListCard(
         onClick = onClick,
         image = {
-            if (imageFallback != null && imageUrl != null) {
-                Image(
-                    modifier = Modifier
-                        .fillMaxSize(0.5f),
-                    painter = imageFallback,
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.outline), //todo: find more suitable color
-                )
-            }
-            AsyncImage(
+            Box(
                 modifier = Modifier
                     .fillMaxSize(),
-                model = imageUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-            )
+            ) {
+                if (imageFallback != null && imageUrl != null) {
+                    Image(
+                        modifier = Modifier
+                            .fillMaxSize(0.5f),
+                        painter = imageFallback,
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.outline), //todo: find more suitable color
+                    )
+                }
+                AsyncImage(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    model = imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                )
+            }
         },
         title = title,
         subtitle = subtitle,

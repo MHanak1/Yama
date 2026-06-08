@@ -13,6 +13,12 @@ enum class SourceType {
     Local,
 }
 
+enum class TrackSortOrder {
+    Alphabetical,
+    ReleaseDate,
+    PlayCount,
+}
+
 interface MusicSource {
     val type: SourceType
     var isAuthenticated: Boolean
@@ -22,10 +28,13 @@ interface MusicSource {
     val playlists: StateFlow<List<Playlist>>
     val genres: StateFlow<List<Genre>>
     val isRefreshing: StateFlow<Boolean>
+    val refreshError: StateFlow<Throwable?>
 
     suspend fun refresh()
     suspend fun getTracksForAlbum(albumId: String): List<Track>
-    suspend fun getTracksForArtist(artistId: String): List<Track>
-    suspend fun getTracksForGenre(genreId: String): List<Track>
+    suspend fun getTracksForArtist(artistId: String, limit: Int = 100, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
+    suspend fun getTracksForGenre(genreId: String, limit: Int = 100, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
     suspend fun getTracksForPlaylist(playlistId: String): List<Track>
+    suspend fun getAlbumsForArtist(artistId: String): List<Album>
+    suspend fun getAlbumsForGenre(genreId: String): List<Album>
 }

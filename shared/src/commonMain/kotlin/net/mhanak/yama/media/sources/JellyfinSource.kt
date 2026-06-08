@@ -76,6 +76,9 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
     private val _isRefreshing = MutableStateFlow(false)
     override val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    private val _refreshError = MutableStateFlow<Throwable?>(null)
+    override val refreshError: StateFlow<Throwable?> = _refreshError.asStateFlow()
+
     private var pendingQuickConnectClient: ApiClient? = null
     private var pendingQuickConnectSecret: String? = null
     private var pendingQuickConnectDeviceId: String? = null
@@ -217,7 +220,10 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         )
         currentSessionId = session.id
         isAuthenticated = true
-        scope.launch { runCatching { refresh() } }
+        scope.launch {
+            clearLibrary()
+            runCatching { refresh() }
+        }
     }
 
     suspend fun logoutSession(sessionId: String) {
@@ -242,6 +248,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         val currentApi = api ?: return
         val userId = sessions.find { it.id == currentSessionId }?.userId
             ?.let { JellyfinUUID.fromString(it) }
+        _refreshError.value = null
         _isRefreshing.value = true
         try {
             coroutineScope {
@@ -250,6 +257,8 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                 launch { _playlists.value = currentApi.fetchPlaylists(userId) }
                 launch { _genres.value = currentApi.fetchGenres() }
             }
+        } catch (e: Exception) {
+            _refreshError.value = e
         } finally {
             _isRefreshing.value = false
         }
@@ -266,28 +275,74 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         ).content.items?.map { it.toTrack() } ?: emptyList()
     }
 
-    override suspend fun getTracksForArtist(artistId: String): List<Track> {
+    override suspend fun getTracksForArtist(artistId: String, limit: Int, sortBy: TrackSortOrder): List<Track> {
         val currentApi = api ?: return emptyList()
         return currentApi.itemsApi.getItems(
             artistIds = listOf(JellyfinUUID.fromString(artistId)),
             includeItemTypes = listOf(BaseItemKind.AUDIO),
             recursive = true,
-            sortBy = listOf(ItemSortBy.ALBUM, ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER),
-            sortOrder = listOf(SortOrder.ASCENDING),
-            limit = 1_000,
+            sortBy = sortBy.toJellyfinSortBy(),
+            sortOrder = listOf(sortBy.toSortOrder()),
+            limit = limit,
         ).content.items?.map { it.toTrack() } ?: emptyList()
     }
 
-    override suspend fun getTracksForGenre(genreId: String): List<Track> {
+    override suspend fun getTracksForGenre(genreId: String, limit: Int, sortBy: TrackSortOrder): List<Track> {
         val currentApi = api ?: return emptyList()
         return currentApi.itemsApi.getItems(
             genreIds = listOf(JellyfinUUID.fromString(genreId)),
             includeItemTypes = listOf(BaseItemKind.AUDIO),
             recursive = true,
-            sortBy = listOf(ItemSortBy.ALBUM, ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER),
-            sortOrder = listOf(SortOrder.ASCENDING),
-            limit = 1_000,
+            sortBy = sortBy.toJellyfinSortBy(),
+            sortOrder = listOf(sortBy.toSortOrder()),
+            limit = limit,
         ).content.items?.map { it.toTrack() } ?: emptyList()
+    }
+
+    override suspend fun getAlbumsForArtist(artistId: String): List<Album> {
+        val currentApi = api ?: return emptyList()
+        return currentApi.itemsApi.getItems(
+            artistIds = listOf(JellyfinUUID.fromString(artistId)),
+            includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+            recursive = true,
+            sortBy = listOf(ItemSortBy.PRODUCTION_YEAR),
+            sortOrder = listOf(SortOrder.DESCENDING),
+            fields = listOf(ItemFields.CHILD_COUNT),
+            limit = 1_000,
+        ).content.items?.map { item ->
+            Album(
+                id = item.id.toString(),
+                name = item.name ?: "",
+                albumArtist = item.albumArtist,
+                year = item.productionYear,
+                songCount = item.childCount,
+                imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
+                imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY))
+            )
+        } ?: emptyList()
+    }
+
+    override suspend fun getAlbumsForGenre(genreId: String): List<Album> {
+        val currentApi = api ?: return emptyList()
+        return currentApi.itemsApi.getItems(
+            genreIds = listOf(JellyfinUUID.fromString(genreId)),
+            includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+            recursive = true,
+            sortBy = listOf(ItemSortBy.NAME),
+            sortOrder = listOf(SortOrder.ASCENDING),
+            fields = listOf(ItemFields.CHILD_COUNT),
+            limit = 1_000,
+        ).content.items?.map { item ->
+            Album(
+                id = item.id.toString(),
+                name = item.name ?: "",
+                albumArtist = item.albumArtist,
+                year = item.productionYear,
+                songCount = item.childCount,
+                imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
+                imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY))
+            )
+        } ?: emptyList()
     }
 
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> {
@@ -303,6 +358,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         _artists.value = emptyList()
         _playlists.value = emptyList()
         _genres.value = emptyList()
+        _refreshError.value = null
     }
 
     private fun restoreSession(session: JellyfinSession) {
@@ -389,12 +445,24 @@ private fun org.jellyfin.sdk.model.api.BaseItemDto.toTrack() = Track(
     name = name ?: "",
     albumId = albumId?.toString(),
     album = album,
-    artist = artists?.firstOrNull() ?: albumArtist,
+    artists = artists,
     durationTicks = runTimeTicks,
     trackNumber = indexNumber,
     discNumber = parentIndexNumber,
     //imageUrl = imageApi.getItemImageUrl(item.id, ImageType.PRIMARY)
 )
+
+private fun TrackSortOrder.toJellyfinSortBy(): List<ItemSortBy> = when (this) {
+    TrackSortOrder.Alphabetical -> listOf(ItemSortBy.NAME)
+    TrackSortOrder.ReleaseDate  -> listOf(ItemSortBy.PRODUCTION_YEAR, ItemSortBy.NAME)
+    TrackSortOrder.PlayCount    -> listOf(ItemSortBy.PLAY_COUNT, ItemSortBy.NAME)
+}
+
+private fun TrackSortOrder.toSortOrder(): SortOrder = when (this) {
+    TrackSortOrder.Alphabetical -> SortOrder.ASCENDING
+    TrackSortOrder.ReleaseDate  -> SortOrder.DESCENDING
+    TrackSortOrder.PlayCount    -> SortOrder.DESCENDING
+}
 
 // Expands a user-entered address into an ordered list of URLs to probe.
 // Rules (applied in order of priority):

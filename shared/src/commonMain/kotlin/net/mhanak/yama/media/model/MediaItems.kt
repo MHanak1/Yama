@@ -22,7 +22,7 @@ data class Track(
     val name: String,
     val albumId: String?,
     val album: String?,
-    val artist: String?,
+    val artists: List<String>?,
     val durationTicks: Long?,
     val trackNumber: Int?,
     val discNumber: Int?,

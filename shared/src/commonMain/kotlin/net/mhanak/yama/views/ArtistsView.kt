@@ -1,12 +1,20 @@
 package net.mhanak.yama.views
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.components.GridItem
+import net.mhanak.yama.components.AsyncImageGridCard
+import net.mhanak.yama.components.ErrorCard
 import net.mhanak.yama.components.GridView
 import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
@@ -19,18 +27,33 @@ fun ArtistsView(
     contentPadding: PaddingValues = PaddingValues(),
 ) {
     val appContainer = LocalAppContainer.current
-    val artists by appContainer.activeMusicSource.artists.collectAsState()
+    val source = appContainer.activeMusicSource
+    val artists by source.artists.collectAsState()
+    val isRefreshing by source.isRefreshing.collectAsState()
+    val refreshError by source.refreshError.collectAsState()
 
-    GridView(
-        items = artists.map { artist ->
-            GridItem(
-                title = artist.name,
-                imageUrl = artist.imageUrl,
-                onClick = { onArtistClick(artist.id) },
-            )
-        },
-        modifier = modifier,
-        contentPadding = contentPadding,
-        imageFallback = painterResource(Res.drawable.artist),
-    )
+    when {
+        artists.isEmpty() && isRefreshing -> Box(
+            modifier.fillMaxSize().padding(contentPadding),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator()
+        }
+        artists.isEmpty() && refreshError != null -> Box(
+            modifier.fillMaxSize().padding(contentPadding).padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            ErrorCard(message = refreshError!!.message ?: "Failed to load artists")
+        }
+        else -> GridView(modifier = modifier, contentPadding = contentPadding) {
+            items(artists) { artist ->
+                AsyncImageGridCard(
+                    title = artist.name,
+                    imageUrl = artist.imageUrl,
+                    imageFallback = painterResource(Res.drawable.artist),
+                    onClick = { onArtistClick(artist.id) },
+                )
+            }
+        }
+    }
 }

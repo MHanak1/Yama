@@ -38,8 +38,11 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import net.mhanak.yama.components.PullToRefreshContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.glassEffect
 import net.mhanak.yama.components.glassSource
 
@@ -73,9 +77,11 @@ fun LibraryView(
     // Extra space added below the scrollable content so list ends clear the overlaid bottom bar.
     bottomContentPadding: Dp = 0.dp,
 ) {
+    val appContainer = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
     val internalTab = LibraryTab.entries[pagerState.currentPage]
+    val isRefreshing by appContainer.activeMusicSource.isRefreshing.collectAsState()
 
     fun navigateTo(tab: LibraryTab) {
         scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
@@ -140,50 +146,57 @@ fun LibraryView(
         },
     ) { innerPadding ->
         val contentPadding = innerPadding.plus(PaddingValues(bottom = bottomContentPadding))
-        if (externalTab == null) {
-            // Narrow: swipeable pager
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier
-                    .glassSource(zIndex = 1f)
-                    .fillMaxSize(),
-            ) { page ->
-                LibraryTabContent(
-                    tab = LibraryTab.entries[page],
-                    contentPadding = contentPadding,
-                    onAlbumClick = onAlbumClick,
-                    onArtistClick = onArtistClick,
-                    onGenreClick = onGenreClick,
-                    onPlaylistClick = onPlaylistClick,
-                )
-            }
-        } else {
-            // Wide: rail-driven content, with a vertical slide mirroring the narrow pager's
-            // horizontal one — later tabs slide up from below, earlier tabs down from above.
-            AnimatedContent(
-                targetState = externalTab,
-                modifier = Modifier
-                    .glassSource(zIndex = 1f)
-                    .fillMaxSize()
-                    // Clip so the vertically sliding tab content can't bleed up into the top bar.
-                    .clipToBounds(),
-                transitionSpec = {
-                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                    (slideInVertically(tween(TAB_ANIM_DURATION)) { h -> dir * h } + fadeIn(tween(TAB_ANIM_DURATION)))
-                        .togetherWith(
-                            slideOutVertically(tween(TAB_ANIM_DURATION)) { h -> -dir * h } + fadeOut(tween(TAB_ANIM_DURATION)),
-                        )
-                },
-                label = "libraryTab",
-            ) { tab ->
-                LibraryTabContent(
-                    tab = tab,
-                    contentPadding = contentPadding,
-                    onAlbumClick = onAlbumClick,
-                    onArtistClick = onArtistClick,
-                    onGenreClick = onGenreClick,
-                    onPlaylistClick = onPlaylistClick,
-                )
+        PullToRefreshContainer(
+            isRefreshing = isRefreshing,
+            onRefresh = { scope.launch { appContainer.activeMusicSource.refresh() } },
+            topPadding = innerPadding.calculateTopPadding(),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (externalTab == null) {
+                // Narrow: swipeable pager
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .glassSource(zIndex = 1f)
+                        .fillMaxSize(),
+                ) { page ->
+                    LibraryTabContent(
+                        tab = LibraryTab.entries[page],
+                        contentPadding = contentPadding,
+                        onAlbumClick = onAlbumClick,
+                        onArtistClick = onArtistClick,
+                        onGenreClick = onGenreClick,
+                        onPlaylistClick = onPlaylistClick,
+                    )
+                }
+            } else {
+                // Wide: rail-driven content, with a vertical slide mirroring the narrow pager's
+                // horizontal one — later tabs slide up from below, earlier tabs down from above.
+                AnimatedContent(
+                    targetState = externalTab,
+                    modifier = Modifier
+                        .glassSource(zIndex = 1f)
+                        .fillMaxSize()
+                        // Clip so the vertically sliding tab content can't bleed up into the top bar.
+                        .clipToBounds(),
+                    transitionSpec = {
+                        val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                        (slideInVertically(tween(TAB_ANIM_DURATION)) { h -> dir * h } + fadeIn(tween(TAB_ANIM_DURATION)))
+                            .togetherWith(
+                                slideOutVertically(tween(TAB_ANIM_DURATION)) { h -> -dir * h } + fadeOut(tween(TAB_ANIM_DURATION)),
+                            )
+                    },
+                    label = "libraryTab",
+                ) { tab ->
+                    LibraryTabContent(
+                        tab = tab,
+                        contentPadding = contentPadding,
+                        onAlbumClick = onAlbumClick,
+                        onArtistClick = onArtistClick,
+                        onGenreClick = onGenreClick,
+                        onPlaylistClick = onPlaylistClick,
+                    )
+                }
             }
         }
     }
