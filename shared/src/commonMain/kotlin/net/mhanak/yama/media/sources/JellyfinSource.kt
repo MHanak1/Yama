@@ -272,7 +272,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
             sortBy = listOf(ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER, ItemSortBy.NAME),
             sortOrder = listOf(SortOrder.ASCENDING),
             limit = 1_000,
-        ).content.items?.map { it.toTrack() } ?: emptyList()
+        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
     }
 
     override suspend fun getTracksForArtist(artistId: String, limit: Int, sortBy: TrackSortOrder): List<Track> {
@@ -284,7 +284,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
             sortBy = sortBy.toJellyfinSortBy(),
             sortOrder = listOf(sortBy.toSortOrder()),
             limit = limit,
-        ).content.items?.map { it.toTrack() } ?: emptyList()
+        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
     }
 
     override suspend fun getTracksForGenre(genreId: String, limit: Int, sortBy: TrackSortOrder): List<Track> {
@@ -296,7 +296,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
             sortBy = sortBy.toJellyfinSortBy(),
             sortOrder = listOf(sortBy.toSortOrder()),
             limit = limit,
-        ).content.items?.map { it.toTrack() } ?: emptyList()
+        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
     }
 
     override suspend fun getAlbumsForArtist(artistId: String): List<Album> {
@@ -350,7 +350,36 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         return currentApi.playlistsApi.getPlaylistItems(
             playlistId = JellyfinUUID.fromString(playlistId),
             limit = 1_000,
-        ).content.items?.map { it.toTrack() } ?: emptyList()
+        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+    }
+
+    override suspend fun getStreamUrl(trackId: String): String {
+        val currentApi = api ?: error("Not connected to a server")
+        val session = sessions.find { it.id == currentSessionId }
+        val baseUrl = (currentApi.baseUrl ?: session?.serverUrl)?.trimEnd('/')
+            ?: error("No base URL")
+        // The SDK's getUniversalAudioStreamUrl builds the URL with includeCredentials = false, so it
+        // omits api_key. A raw stream URL handed to ExoPlayer/libvlc carries no auth header, so we
+        // must put the token in the query ourselves. The universal endpoint then direct-plays
+        // (302 redirect) when the source container matches, or transcodes otherwise.
+        val token = currentApi.accessToken ?: session?.accessToken ?: error("No access token")
+        val deviceId = session?.sessionDeviceId ?: getDeviceId()
+        val userId = session?.userId
+        val containers = "opus,webm,mp3,aac,m4a,flac,webma,wav,ogg"
+        return buildString {
+            append(baseUrl).append("/Audio/").append(trackId).append("/universal")
+            append("?DeviceId=").append(deviceId)
+            if (userId != null) append("&UserId=").append(userId)
+            append("&Container=").append(containers)
+            append("&EnableRedirection=true")
+            append("&api_key=").append(token)
+        }
+    }
+
+    override suspend fun getArtworkUrl(trackId: String): String? {
+        val currentApi = api ?: return null
+        // For audio items Jellyfin serves the embedded/album primary art at this path.
+        return currentApi.imageApi.getItemImageUrl(JellyfinUUID.fromString(trackId), ImageType.PRIMARY)
     }
 
     private fun clearLibrary() {
@@ -440,28 +469,35 @@ private suspend fun ApiClient.fetchGenres(): List<Genre> =
         )
     } ?: emptyList()
 
-private fun org.jellyfin.sdk.model.api.BaseItemDto.toTrack() = Track(
-    id = id.toString(),
-    name = name ?: "",
-    albumId = albumId?.toString(),
-    album = album,
-    artists = artists,
-    durationTicks = runTimeTicks,
-    trackNumber = indexNumber,
-    discNumber = parentIndexNumber,
-    //imageUrl = imageApi.getItemImageUrl(item.id, ImageType.PRIMARY)
+private fun ApiClient.toTrack(item: org.jellyfin.sdk.model.api.BaseItemDto) = Track(
+    id = item.id.toString(),
+    name = item.name ?: "",
+    albumId = item.albumId?.toString(),
+    album = item.album,
+    artists = item.artists,
+    durationTicks = item.runTimeTicks,
+    trackNumber = item.indexNumber,
+    discNumber = item.parentIndexNumber,
+    // Audio items inherit album art; fall back to the item's own image when there is no album.
+    imageUrl = imageApi.getItemImageUrl(item.albumId ?: item.id, ImageType.PRIMARY),
 )
 
 private fun TrackSortOrder.toJellyfinSortBy(): List<ItemSortBy> = when (this) {
-    TrackSortOrder.Alphabetical -> listOf(ItemSortBy.NAME)
-    TrackSortOrder.ReleaseDate  -> listOf(ItemSortBy.PRODUCTION_YEAR, ItemSortBy.NAME)
-    TrackSortOrder.PlayCount    -> listOf(ItemSortBy.PLAY_COUNT, ItemSortBy.NAME)
+    TrackSortOrder.Alphabetical     -> listOf(ItemSortBy.NAME)
+    TrackSortOrder.ReleaseDate      -> listOf(ItemSortBy.PRODUCTION_YEAR, ItemSortBy.NAME)
+    TrackSortOrder.PlayCount        -> listOf(ItemSortBy.PLAY_COUNT, ItemSortBy.NAME)
+    TrackSortOrder.RecentlyAdded    -> listOf(ItemSortBy.DATE_LAST_CONTENT_ADDED)
+    TrackSortOrder.RecentlyPlayed   -> listOf(ItemSortBy.DATE_PLAYED)
+    TrackSortOrder.Random           -> listOf(ItemSortBy.RANDOM)
 }
 
 private fun TrackSortOrder.toSortOrder(): SortOrder = when (this) {
-    TrackSortOrder.Alphabetical -> SortOrder.ASCENDING
-    TrackSortOrder.ReleaseDate  -> SortOrder.DESCENDING
-    TrackSortOrder.PlayCount    -> SortOrder.DESCENDING
+    TrackSortOrder.Alphabetical     -> SortOrder.ASCENDING
+    TrackSortOrder.ReleaseDate      -> SortOrder.DESCENDING
+    TrackSortOrder.PlayCount        -> SortOrder.DESCENDING
+    TrackSortOrder.RecentlyAdded    -> SortOrder.DESCENDING
+    TrackSortOrder.RecentlyPlayed   -> SortOrder.DESCENDING
+    TrackSortOrder.Random           -> SortOrder.ASCENDING
 }
 
 // Expands a user-entered address into an ordered list of URLs to probe.

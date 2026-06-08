@@ -16,6 +16,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DrawerDefaults
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TopAppBar
@@ -175,6 +179,52 @@ fun GlassButton(
             enabled = enabled,
             shape = shape,
             colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun GlassIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val containerColor = Color.Transparent
+    val shape = ButtonDefaults.shape
+    // Unspecified prevents M3's minimumInteractiveComponentSize from inflating the layout node to
+    // 48dp, which would make the glass taller than the visible button border.
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+        IconButton(
+            onClick = onClick,
+            modifier = modifier.glassEffect(containerColor, shape),
+            enabled = enabled,
+            shape = shape,
+            colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Transparent),
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun GlassFilledIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val containerColor = MaterialTheme.colorScheme.primary
+    val shape = ButtonDefaults.shape
+    // Unspecified prevents M3's minimumInteractiveComponentSize from inflating the layout node to
+    // 48dp, which would make the glass taller than the visible button border.
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+        FilledIconButton(
+            onClick = onClick,
+            modifier = modifier.glassEffect(containerColor, shape),
+            enabled = enabled,
+            shape = shape,
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Transparent),
             content = content,
         )
     }

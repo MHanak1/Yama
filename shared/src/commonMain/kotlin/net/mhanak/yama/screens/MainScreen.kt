@@ -6,11 +6,13 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -30,13 +32,20 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -57,7 +66,10 @@ import net.mhanak.yama.components.AdaptiveNavigationLayout
 import net.mhanak.yama.components.AppBottomBar
 import net.mhanak.yama.components.AppNavRail
 import net.mhanak.yama.components.BottomBarDestination
+import net.mhanak.yama.components.PlatformBackHandler
 import net.mhanak.yama.components.SourceSwitcher
+import net.mhanak.yama.components.player.FullPlayer
+import net.mhanak.yama.components.player.NowPlayingBar
 import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.views.AlbumDetailView
 import net.mhanak.yama.views.ArtistDetailView
@@ -135,6 +147,19 @@ fun MainScreen() {
     val onHome = destination?.hasRoute<HomeRoute>() == true
     val onSettings = destination?.hasRoute<SettingsRoute>() == true
 
+    // The active player is Compose-observable so a future switch to a remote player rebinds the UI.
+    val player = appContainer.playback.active
+    val playerStatus by player.status.collectAsState()
+    val playerExpansion = remember { Animatable(0f) }
+
+    // Tapping the Android media notification asks (via the controller) to open the full player.
+    LaunchedEffect(appContainer.playback.openPlayerRequest) {
+        if (appContainer.playback.openPlayerRequest) {
+            playerExpansion.animateTo(1f)
+            appContainer.playback.openPlayerRequest = false
+        }
+    }
+
     // Wait for the entering destination's lifecycle to reach RESUMED (animation done) before
     // requesting focus, so the exiting composable is already gone and focus lands cleanly.
     LaunchedEffect(navBackStackEntry) {
@@ -166,7 +191,10 @@ fun MainScreen() {
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     AdaptiveNavigationLayout(
+        playerActive = playerStatus.current != null,
+        miniPlayer = { wide -> NowPlayingBar(playerStatus, player, playerExpansion = playerExpansion, wide = wide) },
         rail = { forceExpanded ->
             AppNavRail(
                 forceExpanded = forceExpanded,
@@ -177,6 +205,8 @@ fun MainScreen() {
                 onHomeClick = { navController.navigateTopLevel(HomeRoute) },
                 onTabClick = onTabClick,
                 onSettingsClick = { navController.navigateTopLevel(SettingsRoute) },
+                nowPlayingVisible = playerStatus.current != null,
+                onNowPlayingClick = { scope.launch { playerExpansion.animateTo(1f) } },
             )
         },
         bottomBar = {
@@ -263,6 +293,35 @@ fun MainScreen() {
                 val route = backStackEntry.toRoute<PlaylistDetailRoute>()
                 PlaylistDetailView(playlistId = route.playlistId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
+        }
+    }
+
+        // Full-screen player lives outside the NavHost so it persists across navigation and covers
+        // the rail/bottom bar. Driven by playerExpansion (0=collapsed, 1=open) so the mini-bar
+        // swipe-up gesture animates it in sync rather than snapping open after the gesture.
+        if (playerExpansion.value > 0f) {
+            // Scrim darkens the content behind the expanding player.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = (playerExpansion.value * 0.5f).coerceIn(0f, 0.5f)))
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                    ) {
+                        scope.launch {
+                            playerExpansion.animateTo(0f, tween(450, easing = FastOutSlowInEasing))
+                        }
+                    }
+            )
+            // Registered here (inside the overlay) so it consumes system back before the NavHost's
+            // own back handling — back collapses the player rather than popping the screen behind it.
+            PlatformBackHandler(enabled = true) { scope.launch { playerExpansion.animateTo(0f) } }
+            FullPlayer(
+                playerStatus, player,
+                playerExpansion = playerExpansion,
+                onCollapse = { scope.launch { playerExpansion.animateTo(0f) } },
+            )
         }
     }
 }

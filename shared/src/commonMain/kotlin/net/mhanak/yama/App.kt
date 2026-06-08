@@ -20,7 +20,7 @@ import net.mhanak.yama.util.ThemeMode
 @Composable
 @Preview
 fun App() {
-    val appContainer = remember { AppContainer() }
+    val appContainer = remember { AppContainer.shared }
     val hazeState = rememberHazeState()
     val darkTheme = when (appContainer.themeMode) {
         ThemeMode.Light -> false

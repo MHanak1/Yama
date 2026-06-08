@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import net.mhanak.yama.components.player.MiniPlayerHeight
+import net.mhanak.yama.components.player.MiniPlayerWideHeight
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalNavigationDrawer
@@ -45,6 +47,12 @@ fun AdaptiveNavigationLayout(
     bottomBar: @Composable () -> Unit,
     modalContent: @Composable ColumnScope.(onClose: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
+    // The now-playing bar. [playerActive] is false when nothing is playing, so no space is reserved
+    // for it. On every layout it overlays the bottom of the content area (so its glass blurs the
+    // content scrolling underneath); on slim it sits directly above the [bottomBar]. The `wide` flag
+    // tells it to use its larger, interactive-seek form (medium/wide, non-TV).
+    playerActive: Boolean = false,
+    miniPlayer: @Composable (wide: Boolean) -> Unit = {},
     content: @Composable (hasRail: Boolean, onMenuClick: (() -> Unit)?, bottomInset: Dp) -> Unit,
 ) {
     val isTV = isTelevisionDevice()
@@ -59,11 +67,22 @@ fun AdaptiveNavigationLayout(
         // other — see Glass.kt for the full zIndex layering explanation.
         Box(Modifier.fillMaxSize().glassSource(zIndex = 0f))
 
+        // Medium/wide use the larger interactive bar; TV keeps the compact one (the rail's "Now
+        // playing" entry is the real control surface there).
+        val wideBar = !isTV
+        val barHeight = if (wideBar) MiniPlayerWideHeight else MiniPlayerHeight
+
         if (hasRail) {
             Row(Modifier.fillMaxSize()) {
                 rail(forceExpanded)
+                // Content fills the area; the player bar overlays its bottom so the bar's glass blurs
+                // the content scrolling under it. Content gets a matching bottom inset so list ends
+                // clear the bar.
                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                    content(true, null, 0.dp)
+                    content(true, null, if (playerActive) barHeight else 0.dp)
+                    if (playerActive) {
+                        Box(Modifier.align(Alignment.BottomCenter)) { miniPlayer(wideBar) }
+                    }
                 }
             }
         } else {
@@ -80,9 +99,13 @@ fun AdaptiveNavigationLayout(
             ) {
                 Box(Modifier.fillMaxSize()) {
                     // Content fills the whole area and draws behind the bar so the bar's glass has
-                    // something to blur; it gets a bottom inset so list ends clear the bar.
-                    content(false, { scope.launch { drawerState.open() } }, BottomBarHeight)
-                    Box(Modifier.align(Alignment.BottomCenter)) {
+                    // something to blur; it gets a bottom inset so list ends clear the bar (plus the
+                    // mini-player when one is showing).
+                    val bottomInset = BottomBarHeight + (if (playerActive) MiniPlayerHeight else 0.dp)
+                    content(false, { scope.launch { drawerState.open() } }, bottomInset)
+                    Column(Modifier.align(Alignment.BottomCenter)) {
+                        // Slim always uses the compact, non-interactive bar.
+                        if (playerActive) miniPlayer(false)
                         bottomBar()
                     }
                 }

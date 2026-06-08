@@ -35,6 +35,9 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation("org.slf4j:slf4j-simple:2.0.13")
             implementation(libs.androidx.security.crypto)
+            implementation(libs.androidx.activity.compose)
+            implementation("androidx.media3:media3-exoplayer:1.5.1")
+            implementation("androidx.media3:media3-session:1.5.1")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -60,6 +63,9 @@ kotlin {
             implementation("ch.qos.logback:logback-classic:1.5.6")
             implementation(libs.jna)
             implementation(libs.jna.platform)
+            // libvlc wrapper for desktop audio playback. Requires libvlc present at runtime
+            // (a package dependency on Linux, bundled on Windows).
+            implementation("uk.co.caprica:vlcj:4.8.3")
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

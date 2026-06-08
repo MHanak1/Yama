@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -23,6 +23,7 @@ import coil3.compose.AsyncImage
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.ListCard
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Track
 
 @Composable
@@ -38,6 +39,7 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
 
     ListView(
         modifier = modifier
+            .glassSource(zIndex = 1f)
             .statusBarsPadding(),
         contentPadding = contentPadding,
     ) {
@@ -59,8 +61,9 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
             }
         }
 
-        items(tracks) { track ->
+        itemsIndexed(tracks) { index, track ->
             ListCard(
+                onClick = { appContainer.playback.active.playNow(tracks, index) },
                 title = track.name,
                 subtitle = track.artists?.joinToString(", "),
             )

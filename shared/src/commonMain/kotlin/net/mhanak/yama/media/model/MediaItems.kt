@@ -26,6 +26,7 @@ data class Track(
     val durationTicks: Long?,
     val trackNumber: Int?,
     val discNumber: Int?,
+    val imageUrl: String? = null,
 )
 
 data class Playlist(

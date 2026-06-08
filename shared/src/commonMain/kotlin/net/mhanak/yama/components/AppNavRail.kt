@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -65,6 +66,10 @@ fun AppNavRail(
     onTabClick: (LibraryTab) -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
+    // The "Now playing" entry is shown only while something is playing. On TV this is the entry point
+    // to the full-screen player (the rail doesn't dock a panel there).
+    nowPlayingVisible: Boolean = false,
+    onNowPlayingClick: () -> Unit = {},
 ) {
     val isTV = isTelevisionDevice()
     // TV: rail starts collapsed and expands while focused. Non-TV: width-driven only.
@@ -108,6 +113,16 @@ fun AppNavRail(
         }
 
         Spacer(Modifier.weight(1f))
+
+        if (nowPlayingVisible) {
+            RailItem(
+                selected = false,
+                onClick = onNowPlayingClick,
+                icon = Icons.Default.PlayCircle,
+                label = "Now playing",
+                expanded = expanded,
+            )
+        }
 
         RailItem(
             selected = settingsSelected,

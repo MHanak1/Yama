@@ -4,6 +4,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import net.mhanak.yama.media.playback.PlaybackController
 import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.session.JellyfinSessionRepository
@@ -22,6 +23,8 @@ class AppContainer {
     var activeMusicSource: MusicSource by mutableStateOf(jellyfinSource)
     var showLoginScreen: Boolean by mutableStateOf(false)
 
+    val playback = PlaybackController { activeMusicSource }
+
     private val _blurEnabled = mutableStateOf(AppPreferences.blurEnabled)
     var blurEnabled: Boolean
         get() = _blurEnabled.value
@@ -36,4 +39,13 @@ class AppContainer {
     var themeMode: ThemeMode
         get() = _themeMode.value
         set(value) { _themeMode.value = value; AppPreferences.themeMode = value }
+
+    companion object {
+        // Process-wide singleton. On Android the Activity (and thus the Compose tree) can be
+        // recreated when the app is backgrounded and reopened, while the playback foreground service
+        // keeps the process alive — recreating AppContainer there would drop the playback queue and
+        // library state. Sharing one instance across recreations keeps that state intact. Desktop has
+        // a single process/window, so this is simply created once.
+        val shared: AppContainer by lazy { AppContainer() }
+    }
 }

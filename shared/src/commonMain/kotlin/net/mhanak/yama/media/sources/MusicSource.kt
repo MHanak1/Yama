@@ -17,6 +17,9 @@ enum class TrackSortOrder {
     Alphabetical,
     ReleaseDate,
     PlayCount,
+    RecentlyAdded,
+    RecentlyPlayed,
+    Random,
 }
 
 interface MusicSource {
@@ -37,4 +40,10 @@ interface MusicSource {
     suspend fun getTracksForPlaylist(playlistId: String): List<Track>
     suspend fun getAlbumsForArtist(artistId: String): List<Album>
     suspend fun getAlbumsForGenre(genreId: String): List<Album>
+
+    /** A directly playable audio URL for the given track. */
+    suspend fun getStreamUrl(trackId: String): String
+
+    /** Primary artwork URL for the given track (used in the player UI and OS media controls), or null. */
+    suspend fun getArtworkUrl(trackId: String): String?
 }

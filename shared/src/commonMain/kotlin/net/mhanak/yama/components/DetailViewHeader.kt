@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import net.mhanak.yama.media.model.Album
@@ -47,6 +48,7 @@ fun DetailViewHeader(
                 .fillMaxWidth(0.3f)
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop,
         )
         Column (
             modifier = Modifier

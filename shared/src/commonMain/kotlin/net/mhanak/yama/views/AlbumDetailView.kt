@@ -1,9 +1,11 @@
 package net.mhanak.yama.views
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -17,11 +19,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.components.BlurredBackgroundImage
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.GradientDirection
 import net.mhanak.yama.components.ListCard
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Track
 
 @Composable
@@ -42,8 +52,16 @@ fun AlbumDetailView(
         tracks = appContainer.activeMusicSource.getTracksForAlbum(albumId)
     }
 
+    BlurredBackgroundImage(
+        imageUrl = album?.imageUrl,
+        modifier = Modifier
+            .alpha(0.4f)
+            .glassSource()
+    )
+
     ListView(
         modifier = modifier
+            .glassSource(zIndex = 1f)
             .statusBarsPadding(),
         contentPadding = contentPadding,
     ) {
@@ -67,8 +85,9 @@ fun AlbumDetailView(
             }
         }
 
-        items(tracks) { track ->
+        itemsIndexed(tracks) { index, track ->
             ListCard(
+                onClick = { appContainer.playback.active.playNow(tracks, index) },
                 title = track.name,
                 subtitle = track.artists?.joinToString(", "),
                 image = { track.trackNumber?.toString()?.let { Text(text = it) } }

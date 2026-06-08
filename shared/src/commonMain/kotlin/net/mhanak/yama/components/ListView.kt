@@ -64,7 +64,7 @@ fun ListCard(
     subtitle: String? = null,
     endContent: @Composable (RowScope.() -> Unit)? = null,
 ) {
-    ElevatedCard(onClick = onClick) {
+    GlassElevatedCard(onClick = onClick) {
         Row (
             modifier = Modifier
                 .padding(12.dp)
@@ -117,7 +117,8 @@ fun AsyncImageListCard(
         image = {
             Box(
                 modifier = Modifier
-                    .fillMaxSize(),
+                    .size(64.dp),
+                contentAlignment = Alignment.Center
             ) {
                 if (imageFallback != null && imageUrl != null) {
                     Image(
