@@ -33,6 +33,7 @@ import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.lyricsApi
 import org.jellyfin.sdk.api.client.extensions.musicGenresApi
+import org.jellyfin.sdk.api.client.extensions.playStateApi
 import org.jellyfin.sdk.api.client.extensions.playlistsApi
 import org.jellyfin.sdk.api.client.extensions.quickConnectApi
 import org.jellyfin.sdk.api.client.extensions.sessionApi
@@ -44,6 +45,13 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.PlaybackOrder
+import org.jellyfin.sdk.model.api.PlaybackProgressInfo
+import org.jellyfin.sdk.model.api.PlaybackStartInfo
+import org.jellyfin.sdk.model.api.PlaybackStopInfo
+import org.jellyfin.sdk.model.api.PlayMethod
+import org.jellyfin.sdk.model.api.QueueItem
+import org.jellyfin.sdk.model.api.RepeatMode
 import org.jellyfin.sdk.model.api.SortOrder
 import java.security.MessageDigest
 import java.util.UUID
@@ -65,6 +73,13 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         private set
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    val socket = JellyfinSocket(this)
+    override val libraryChanges get() = socket.libraryChanges
+    override val remoteCommands get() = socket.remoteCommands
+
+    /** Toggle whether other clients can "Play On" this device (re-advertises capabilities). */
+    fun setRemoteControlEnabled(enabled: Boolean) = socket.setRemoteControlEnabled(enabled)
 
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     override val albums: StateFlow<List<Album>> = _albums.asStateFlow()
@@ -147,6 +162,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         sessions = sessionRepository.loadAll()
         currentSessionId = sessionId
         isAuthenticated = true
+        socket.bind(newApi)
         scope.launch { runCatching { refresh() } }
     }
 
@@ -198,11 +214,13 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         sessions = sessionRepository.loadAll()
         currentSessionId = sessionId
         isAuthenticated = true
+        socket.bind(client)
         scope.launch { runCatching { refresh() } }
     }
 
     suspend fun logout() {
         runCatching { api?.sessionApi?.reportSessionEnded() }
+        socket.unbind()
         sessionRepository.loadAll().forEach { sessionRepository.delete(it.id) }
         api = null
         currentSessionId = null
@@ -225,6 +243,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         )
         currentSessionId = session.id
         isAuthenticated = true
+        api?.let { socket.bind(it) }
         scope.launch {
             clearLibrary()
             runCatching { refresh() }
@@ -235,6 +254,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         val isActive = sessionId == currentSessionId
         if (isActive) {
             runCatching { api?.sessionApi?.reportSessionEnded() }
+            socket.unbind()
             api = null
             currentSessionId = null
         }
@@ -358,6 +378,70 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
     }
 
+    override suspend fun getTracksByIds(ids: List<String>): List<Track> {
+        val currentApi = api ?: return emptyList()
+        if (ids.isEmpty()) return emptyList()
+        val items = currentApi.itemsApi.getItems(
+            ids = ids.map { JellyfinUUID.fromString(it) },
+            includeItemTypes = listOf(BaseItemKind.AUDIO),
+            limit = ids.size,
+        ).content.items ?: return emptyList()
+        // getItems doesn't preserve the requested order, so re-order by the id list.
+        val byId = items.associateBy { it.id.toString() }
+        return ids.mapNotNull { id -> byId[id]?.let { currentApi.toTrack(it) } }
+    }
+
+    override suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>) {
+        val currentApi = api ?: return
+        runCatching {
+            currentApi.playStateApi.reportPlaybackStart(
+                PlaybackStartInfo(
+                    itemId = JellyfinUUID.fromString(track.id),
+                    positionTicks = positionMs * 10_000,
+                    canSeek = true,
+                    isPaused = false,
+                    isMuted = false,
+                    playMethod = PlayMethod.DIRECT_PLAY,
+                    repeatMode = RepeatMode.REPEAT_NONE,
+                    playbackOrder = PlaybackOrder.DEFAULT,
+                    nowPlayingQueue = queue.toQueueItems(),
+                )
+            )
+        }
+    }
+
+    override suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>) {
+        val currentApi = api ?: return
+        runCatching {
+            currentApi.playStateApi.reportPlaybackProgress(
+                PlaybackProgressInfo(
+                    itemId = JellyfinUUID.fromString(track.id),
+                    positionTicks = positionMs * 10_000,
+                    canSeek = true,
+                    isPaused = isPaused,
+                    isMuted = false,
+                    playMethod = PlayMethod.DIRECT_PLAY,
+                    repeatMode = RepeatMode.REPEAT_NONE,
+                    playbackOrder = PlaybackOrder.DEFAULT,
+                    nowPlayingQueue = queue.toQueueItems(),
+                )
+            )
+        }
+    }
+
+    override suspend fun reportPlaybackStopped(track: Track, positionMs: Long) {
+        val currentApi = api ?: return
+        runCatching {
+            currentApi.playStateApi.reportPlaybackStopped(
+                PlaybackStopInfo(
+                    itemId = JellyfinUUID.fromString(track.id),
+                    positionTicks = positionMs * 10_000,
+                    failed = false,
+                )
+            )
+        }
+    }
+
     override suspend fun getStreamUrl(trackId: String): String {
         val currentApi = api ?: error("Not connected to a server")
         val session = sessions.find { it.id == currentSessionId }
@@ -430,6 +514,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         )
         currentSessionId = session.id
         isAuthenticated = true
+        api?.let { socket.bind(it) }
         scope.launch { runCatching { refresh() } }
     }
 }
@@ -513,6 +598,9 @@ private fun ApiClient.toTrack(item: org.jellyfin.sdk.model.api.BaseItemDto) = Tr
     // Audio items inherit album art; fall back to the item's own image when there is no album.
     imageUrl = imageApi.getItemImageUrl(item.albumId ?: item.id, ImageType.PRIMARY),
 )
+
+private fun List<Track>.toQueueItems(): List<QueueItem> =
+    map { QueueItem(id = JellyfinUUID.fromString(it.id)) }
 
 private fun TrackSortOrder.toJellyfinSortBy(): List<ItemSortBy> = when (this) {
     TrackSortOrder.Alphabetical     -> listOf(ItemSortBy.NAME)

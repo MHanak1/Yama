@@ -29,4 +29,9 @@ object AppPreferences {
     var themeMode: ThemeMode
         get() = ThemeMode.entries.getOrElse(settings.getInt("theme_mode", ThemeMode.System.ordinal)) { ThemeMode.System }
         set(value) { settings.putInt("theme_mode", value.ordinal) }
+
+    // Whether other clients may remote-control ("Play On") this device. Off by default.
+    var allowRemoteControl: Boolean
+        get() = settings.getBoolean("allow_remote_control", true)
+        set(value) { settings.putBoolean("allow_remote_control", value) }
 }

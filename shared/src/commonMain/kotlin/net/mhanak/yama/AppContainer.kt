@@ -4,7 +4,12 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import net.mhanak.yama.media.playback.PlaybackController
+import net.mhanak.yama.media.playback.PlaybackReporter
 import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.session.JellyfinSessionRepository
@@ -24,6 +29,27 @@ class AppContainer {
     var showLoginScreen: Boolean by mutableStateOf(false)
 
     val playback = PlaybackController { activeMusicSource }
+
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    private val _allowRemoteControl = mutableStateOf(AppPreferences.allowRemoteControl)
+    var allowRemoteControl: Boolean
+        get() = _allowRemoteControl.value
+        set(value) {
+            _allowRemoteControl.value = value
+            AppPreferences.allowRemoteControl = value
+            jellyfinSource.setRemoteControlEnabled(value)
+        }
+
+    init {
+        // The socket seeds its controlled-mode state from AppPreferences itself; this only routes
+        // remote "Play On" commands from the source's push channel onto the local player. Collected
+        // on Main because the transport calls reach the engine directly (Android's Media3
+        // MediaController must be called from the main thread).
+        scope.launch(Dispatchers.Main) { jellyfinSource.remoteCommands.collect(playback::handleRemoteCommand) }
+        // Mirror local playback back to the backend (now-playing, play counts, resume).
+        PlaybackReporter(playback.local.status, { activeMusicSource }).start()
+    }
 
     private val _blurEnabled = mutableStateOf(AppPreferences.blurEnabled)
     var blurEnabled: Boolean

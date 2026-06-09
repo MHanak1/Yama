@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.components.AppearanceSettings
+import net.mhanak.yama.components.PlaybackSettings
 import net.mhanak.yama.components.glassEffect
 import net.mhanak.yama.components.glassSource
 
@@ -80,6 +81,12 @@ fun SettingsView(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             AppearanceSettings()
+            Text(
+                "Playback",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            PlaybackSettings()
             // Trailing space so the last control can scroll clear of the overlaid bottom bar.
             Spacer(Modifier.height(bottomContentPadding))
         }
