@@ -8,8 +8,8 @@ import net.mhanak.yama.media.model.Track
  * `PlaybackController.handleRemoteCommand`.
  *
  * Deliberately free of any playback-layer types so sources don't depend on `media.playback`; the
- * controller does the translation. Repeat/shuffle/volume arrive as Jellyfin general commands and are
- * not handled yet.
+ * controller does the translation. Transport rides the Jellyfin playstate channel; volume rides the
+ * general-command channel. Repeat/shuffle general commands are not handled yet.
  */
 sealed interface RemoteCommand {
     /** Replace the queue with [tracks] and start at [startIndex]. */
@@ -26,4 +26,9 @@ sealed interface RemoteCommand {
     data object Next : RemoteCommand
     data object Previous : RemoteCommand
     data class Seek(val positionMs: Long) : RemoteCommand
+
+    /** Set absolute volume, 0f..1f. */
+    data class SetVolume(val level: Float) : RemoteCommand
+    data object VolumeUp : RemoteCommand
+    data object VolumeDown : RemoteCommand
 }

@@ -35,7 +35,7 @@ class LocalPlayer(
     private var queueJob: Job? = null
 
     override val status: StateFlow<PlayerStatus> =
-        combine(tracks, engine.status) { trackList, engineStatus ->
+        combine(tracks, engine.status, engine.volume) { trackList, engineStatus, vol ->
             PlayerStatus(
                 current = trackList.getOrNull(engineStatus.queueIndex),
                 queue = trackList,
@@ -46,6 +46,7 @@ class LocalPlayer(
                 durationMs = engineStatus.durationMs,
                 repeat = engineStatus.repeat,
                 shuffle = engineStatus.shuffle,
+                volume = vol,
             )
         }.stateIn(scope, SharingStarted.Eagerly, PlayerStatus())
 
@@ -120,6 +121,15 @@ class LocalPlayer(
 
     override fun setRepeat(mode: RepeatMode) = engine.setRepeat(mode)
     override fun setShuffle(enabled: Boolean) = engine.setShuffle(enabled)
+
+    // StateFlow is covariant, so the engine's non-null volume satisfies the nullable Player contract.
+    override val volume: StateFlow<Float?> = engine.volume
+    override val volumeControllable: StateFlow<Boolean> = MutableStateFlow(true)
+    override fun setVolume(level: Float) = engine.setVolume(level)
+
+    /** Whether [setVolume] drives the device (media stream) volume or an in-app gain. Local-only, so
+     *  it lives here rather than on [Player]; remote devices manage their own volume scale. */
+    fun setVolumeMode(useDeviceVolume: Boolean) = engine.setVolumeMode(useDeviceVolume)
 
     override fun release() = engine.release()
 }

@@ -1,6 +1,5 @@
 package net.mhanak.yama.components
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,8 +16,10 @@ import androidx.compose.foundation.layout.plus
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ElevatedCard
@@ -28,28 +29,42 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 
 @Composable
 fun GridView(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    state: LazyGridState = rememberLazyGridState(),
+    prefetchUrls: List<String?>? = null,
     content: LazyGridScope.() -> Unit
 ) {
     BoxWithConstraints(modifier.focusGroup().focusRestorer()) {
         LazyVerticalGrid(
+            state = state,
             // silly way of making the grid size fit both mobile and desktop
             columns = GridCells.Adaptive(minSize = Dp(100.toFloat() + (maxWidth.value / 12F))),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = contentPadding.plus(PaddingValues(8.dp)),
             content = content,
+        )
+    }
+    if (prefetchUrls != null) {
+        // The image box is the cell width minus the card's 12.dp padding on each side
+        // (see GridCard); decode prefetched art at that size so it matches what the card requests.
+        val imageInset = with(LocalDensity.current) { 24.dp.roundToPx() }
+        ImagePrefetch(
+            urls = prefetchUrls,
+            lastVisibleIndex = { state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 },
+            targetSizePx = {
+                val cellWidth = state.layoutInfo.visibleItemsInfo.firstOrNull()?.size?.width ?: 0
+                if (cellWidth > 0) cellWidth - imageInset else 0
+            },
         )
     }
 }
@@ -96,6 +111,7 @@ fun GridCard(onClick: () -> Unit = {}, image: (@Composable BoxScope.() -> Unit)?
 fun AsyncImageGridCard(
     onClick: () -> Unit = {},
     imageUrl: String? = null,
+    imageHash: String? = null,
     imageFallback: Painter? = null,
     title: String? = null,
     subtitle: String? = null,
@@ -103,22 +119,7 @@ fun AsyncImageGridCard(
     GridCard(
         onClick = onClick,
         image = {
-            if (imageFallback != null && imageUrl != null) {
-                Image(
-                    modifier = Modifier
-                        .fillMaxSize(0.5f),
-                    painter = imageFallback,
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.outline), //todo: find more suitable color
-                )
-            }
-            AsyncImage(
-                modifier = Modifier
-                    .fillMaxSize(),
-                model = imageUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-            )
+            CardImage(imageUrl = imageUrl, imageHash = imageHash, imageFallback = imageFallback)
         },
         title = title,
         subtitle = subtitle,

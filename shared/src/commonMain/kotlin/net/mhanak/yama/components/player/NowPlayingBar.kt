@@ -44,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
@@ -65,8 +66,10 @@ val MiniPlayerWideHeight = 120.dp
  * On the wider two layouts ([wide] = true) the artwork and text are larger and the progress bar is
  * an interactive seek slider; on slim/TV it is a thin, non-interactive progress line.
  *
- * Swipe left/right → next/previous. Swipe up → expand ([playerExpansion] animates to 1).
- * Swipe down → stop playback.
+ * Gestures: swipe left/right → next/previous, swipe down → stop playback, swipe up → expand. The
+ * swipe-up raises the full-player sheet 1:1 with the finger (driving [playerExpansion] directly, the
+ * mirror of dragging the full player back down) and commits open/closed on release. Tapping the track
+ * info also expands.
  */
 @Composable
 fun NowPlayingBar(
@@ -75,12 +78,16 @@ fun NowPlayingBar(
     playerExpansion: Animatable<Float, AnimationVector1D>,
     modifier: Modifier = Modifier,
     wide: Boolean = false,
+    peekHeight: Dp = 0.dp,
 ) {
     val track = status.current ?: return
     val baseHeight = if (wide) MiniPlayerWideHeight else MiniPlayerHeight
     val density = LocalDensity.current
     val baseHeightPx = with(density) { baseHeight.toPx() }
     val screenHeightPx = LocalWindowInfo.current.containerSize.height.toFloat()
+    // The full-player sheet rests with its top at this bar's top, so it only travels (screen - peek)
+    // px; dividing the up-drag by that keeps the sheet 1:1 under the finger.
+    val travelPx = (screenHeightPx - with(density) { peekHeight.toPx() }).coerceAtLeast(1f)
     val swipeThresholdPx = with(density) { 40.dp.toPx() }
     val scope = rememberCoroutineScope()
 
@@ -100,11 +107,9 @@ fun NowPlayingBar(
                 translationX = offsetX.value
                 val horizFade = (1f - abs(offsetX.value) / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f)
                 val heightFade = ((baseHeightPx + heightDeltaPx.value) / baseHeightPx).coerceIn(0f, 1f)
-                // fade to 0 when the user has dragged far enough to hit the 40dp threshold
-                val expandFade = (1f - playerExpansion.value / (swipeThresholdPx / screenHeightPx * 2.5f)).coerceIn(0f, 1f)
-                alpha = minOf(horizFade, heightFade, expandFade)
+                alpha = minOf(horizFade, heightFade)
             }
-            .pointerInput(player, playerExpansion) {
+            .pointerInput(player) {
                 val swipeThreshold = swipeThresholdPx
                 val axisLockThreshold = 10.dp.toPx()
                 var horizontal: Boolean? = null
@@ -115,7 +120,6 @@ fun NowPlayingBar(
                         horizontal = null; accX = 0f; accY = 0f
                         scope.launch { offsetX.snapTo(0f) }
                         scope.launch { heightDeltaPx.snapTo(0f) }
-                        scope.launch { playerExpansion.snapTo(0f) }
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
@@ -125,10 +129,15 @@ fun NowPlayingBar(
                         when (horizontal) {
                             true -> scope.launch { offsetX.snapTo(offsetX.value + dragAmount.x * 0.85f) }
                             false -> {
-                                val rawUpDrag = -accY  // positive = swiped up
-                                scope.launch { heightDeltaPx.snapTo(rawUpDrag * 0.85f) }
-                                if (rawUpDrag > 0)
-                                    scope.launch { playerExpansion.snapTo((rawUpDrag / screenHeightPx * 2.5f).coerceIn(0f, 1f)) }
+                                if (accY <= 0f) {
+                                    // Dragging up → raise the full-player sheet 1:1 with the finger.
+                                    scope.launch { heightDeltaPx.snapTo(0f) }
+                                    scope.launch { playerExpansion.snapTo((-accY / travelPx).coerceIn(0f, 1f)) }
+                                } else {
+                                    // Dragging down → shrink the bar toward stop.
+                                    scope.launch { playerExpansion.snapTo(0f) }
+                                    scope.launch { heightDeltaPx.snapTo(-accY * 0.85f) }
+                                }
                             }
                             null -> Unit
                         }
@@ -146,18 +155,15 @@ fun NowPlayingBar(
                                 } else scope.launch { offsetX.animateTo(0f, snapBack) }
                             }
                             false -> {
-                                val delta = heightDeltaPx.value
-                                if (delta > 0) {
-                                    // Asymmetric: 20% expansion threshold to snap open (from collapsed).
-                                    val snapOpen = playerExpansion.value > 0.2f
-                                    scope.launch { heightDeltaPx.animateTo(if (snapOpen) baseHeightPx else 0f, if (snapOpen) expandSpec else snapBack); heightDeltaPx.snapTo(0f) }
-                                    scope.launch { playerExpansion.animateTo(if (snapOpen) 1f else 0f, if (snapOpen) expandSpec else snapBack) }
-                                } else if (abs(delta) >= swipeThreshold) {
-                                    scope.launch { playerExpansion.snapTo(0f) }
-                                    scope.launch { heightDeltaPx.animateTo(-baseHeightPx, collapseSpec); heightDeltaPx.snapTo(0f); player.stop() }
+                                if (playerExpansion.value > 0f) {
+                                    // Swipe up: commit open past 10% of the way, else fall back collapsed.
+                                    val open = playerExpansion.value > 0.1f
+                                    scope.launch { playerExpansion.animateTo(if (open) 1f else 0f, if (open) expandSpec else snapBack) }
+                                } else if (-heightDeltaPx.value >= swipeThreshold) {
+                                    // Swipe down past the threshold stops playback.
+                                    scope.launch { heightDeltaPx.animateTo(-baseHeightPx, collapseSpec); heightDeltaPx.snapTo(0f); player.stop(); player.clearQueue()}
                                 } else {
                                     scope.launch { heightDeltaPx.animateTo(0f, snapBack) }
-                                    scope.launch { playerExpansion.animateTo(0f, snapBack) }
                                 }
                             }
                             null -> Unit
@@ -166,7 +172,7 @@ fun NowPlayingBar(
                     onDragCancel = {
                         scope.launch { offsetX.animateTo(0f, snapBack) }
                         scope.launch { heightDeltaPx.animateTo(0f, snapBack) }
-                        scope.launch { playerExpansion.animateTo(0f, snapBack) }
+                        if (playerExpansion.value < 1f) scope.launch { playerExpansion.animateTo(0f, snapBack) }
                     },
                 )
             },
@@ -212,56 +218,14 @@ fun NowPlayingBar(
                 Icon(Icons.Filled.SkipNext, contentDescription = "Next")
             }
         }
-        if (wide) {
-            InteractiveSeekBar(status, player, Modifier.fillMaxWidth())
-        } else {
-            val duration = status.durationMs.coerceAtLeast(1)
-            val position = rememberSmoothPosition(status)
-            Box(Modifier.fillMaxWidth().height(2.dp)) {
-                LinearProgressIndicator(
-                    progress = { (position.toFloat() / duration).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
-                )
-            }
+
+        val duration = status.durationMs.coerceAtLeast(1)
+        val position = rememberSmoothPosition(status)
+        Box(Modifier.fillMaxWidth().height(2.dp)) {
+            LinearProgressIndicator(
+                progress = { (position.toFloat() / duration).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+            )
         }
     }
-}
-
-/**
- * A draggable seek slider. Holds the dragged value locally so the thumb doesn't snap back.
- * seekFraction persists after drag ends to cover the gap while paused (engine won't emit a
- * new positionMs until playback resumes, so we keep the seek target visible until it does).
- */
-@Composable
-private fun InteractiveSeekBar(status: PlayerStatus, player: Player, modifier: Modifier = Modifier) {
-    var dragFraction by remember { mutableStateOf<Float?>(null) }
-    var seekFraction by remember { mutableStateOf<Float?>(null) }
-    val duration = status.durationMs.coerceAtLeast(1)
-    val position = rememberSmoothPosition(status)
-
-    // Engine confirmed a new position — clear the seek override
-    LaunchedEffect(status.positionMs) { seekFraction = null }
-
-    val fraction = dragFraction ?: seekFraction ?: (position.toFloat() / duration).coerceIn(0f, 1f)
-    Slider(
-        value = fraction,
-        onValueChange = {
-            dragFraction = it
-            seekFraction = null
-        },
-        onValueChangeFinished = {
-            dragFraction?.let {
-                player.seekTo((it * duration).toLong())
-                seekFraction = it
-            }
-            dragFraction = null
-        },
-        track = { sliderState ->
-            SliderDefaults.Track(sliderState, modifier = Modifier.height(8.dp))
-        },
-        thumb = {
-            SliderDefaults.Thumb(interactionSource = remember { MutableInteractionSource() }, modifier = Modifier.height(16.dp))
-        },
-        modifier = modifier.padding(horizontal = 12.dp),
-    )
 }

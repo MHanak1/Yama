@@ -10,6 +10,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,14 +25,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.BlurredBackgroundImage
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.DynamicColorTheme
 import net.mhanak.yama.components.GradientDirection
-import net.mhanak.yama.components.ListCard
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Track
 
@@ -52,46 +56,58 @@ fun AlbumDetailView(
         tracks = appContainer.activeMusicSource.getTracksForAlbum(albumId)
     }
 
-    BlurredBackgroundImage(
+    DynamicColorTheme(
         imageUrl = album?.imageUrl,
-        modifier = Modifier
-            .alpha(0.4f)
-            .glassSource()
-    )
-
-    ListView(
-        modifier = modifier
-            .glassSource(zIndex = 1f)
-            .statusBarsPadding(),
-        contentPadding = contentPadding,
+        cacheKey = album?.id,
+        enabled = appContainer.albumTintMode.tintsDetails,
     ) {
-        item {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+        Surface(
+            modifier = modifier.fillMaxSize()
+                .glassSource(),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            BlurredBackgroundImage(
+                imageUrl = album?.imageUrl,
+                modifier = Modifier
+                    .alpha(0.4f)
+            )
         }
 
-        if (album != null) {
+        ListView(
+            modifier = modifier
+                .glassSource(zIndex = 1f)
+                .statusBarsPadding(),
+            contentPadding = contentPadding,
+        ) {
             item {
-                val artist = artists.find { it.name == album.albumArtist }
-                DetailViewHeader(
-                    onNavigate = onNavigate,
-                    imageUrl = album.imageUrl,
-                    name = album.name,
-                    artist = artist,
-                    //genres = TODO(),
-                    year = album.year,
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+
+            if (album != null) {
+                item {
+                    val artist = artists.find { it.name == album.albumArtist }
+                    DetailViewHeader(
+                        onNavigate = onNavigate,
+                        imageUrl = album.imageUrl,
+                        name = album.name,
+                        artist = artist,
+                        //genres = TODO(),
+                        year = album.year,
+                    )
+                }
+            }
+
+            itemsIndexed(tracks) { index, track ->
+                TrackListCard(
+                    track = track,
+                    tracks = tracks,
+                    index = index,
+                    player = appContainer.playback.active,
+                    image = { track.trackNumber?.toString()?.let { Text(text = it) } },
                 )
             }
-        }
-
-        itemsIndexed(tracks) { index, track ->
-            ListCard(
-                onClick = { appContainer.playback.active.playNow(tracks, index) },
-                title = track.name,
-                subtitle = track.artists?.joinToString(", "),
-                image = { track.trackNumber?.toString()?.let { Text(text = it) } }
-            )
         }
     }
 }

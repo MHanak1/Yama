@@ -69,10 +69,12 @@ interface MusicSource {
 
     /**
      * Playback reporting hooks. Let the backend track now-playing / play counts / resume positions
-     * (and let remote controllers see what this device is doing). Default no-ops; only sources that
-     * support reporting (Jellyfin) override them. Reported only for *local* playback.
+     * (and let remote controllers see what this device is doing, including its [volume] so a
+     * controller can show and drive a volume slider). Default no-ops; only sources that support
+     * reporting (Jellyfin) override them. [volume] is 0f..1f, or null when unknown. Reported only for
+     * *local* playback.
      */
-    suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>) {}
-    suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>) {}
+    suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>, volume: Float?) {}
+    suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>, volume: Float?) {}
     suspend fun reportPlaybackStopped(track: Track, positionMs: Long) {}
 }

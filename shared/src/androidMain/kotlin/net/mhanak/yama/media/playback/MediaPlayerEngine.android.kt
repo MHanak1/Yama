@@ -22,6 +22,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import net.mhanak.yama.MyApplication
 import net.mhanak.yama.PlaybackService
+import kotlin.math.roundToInt
 
 /**
  * Android engine: drives a Media3 [MediaController] bound to [PlaybackService]. The controller
@@ -31,10 +32,17 @@ actual class MediaPlayerEngine actual constructor() {
     private val _status = MutableStateFlow(EngineStatus())
     actual val status: StateFlow<EngineStatus> = _status.asStateFlow()
 
+    private val _volume = MutableStateFlow(1f)
+    actual val volume: StateFlow<Float> = _volume.asStateFlow()
+
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var controller: MediaController? = null
     private val pending = mutableListOf<(MediaController) -> Unit>()
     private var pollJob: Job? = null
+
+    // When true, volume acts on the device (media stream) level; otherwise on the in-app gain. Falls
+    // back to in-app gain whenever device-volume control isn't actually available on the controller.
+    private var useDeviceVolume = true
 
     init {
         val context = MyApplication.appContext
@@ -44,11 +52,15 @@ actual class MediaPlayerEngine actual constructor() {
             val c = future.get()
             controller = c
             c.addListener(object : Media3Player.Listener {
-                override fun onEvents(player: Media3Player, events: Media3Player.Events) = pushStatus()
+                override fun onEvents(player: Media3Player, events: Media3Player.Events) {
+                    pushStatus()
+                    pushVolume(c)
+                }
             })
             pending.forEach { it(c) }
             pending.clear()
             pushStatus()
+            pushVolume(c)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -114,6 +126,44 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun setShuffle(enabled: Boolean) = withController { c -> c.shuffleModeEnabled = enabled }
+
+    actual fun setVolume(level: Float) {
+        val clamped = level.coerceIn(0f, 1f)
+        withController { c ->
+            if (c.usingDevice()) {
+                val info = c.deviceInfo
+                val target = info.minVolume + ((info.maxVolume - info.minVolume) * clamped).roundToInt()
+                c.setDeviceVolume(target, 0)
+            } else {
+                c.volume = clamped
+            }
+            pushVolume(c)
+        }
+    }
+
+    actual fun setVolumeMode(useDeviceVolume: Boolean) {
+        this.useDeviceVolume = useDeviceVolume
+        withController { pushVolume(it) }
+    }
+
+    // Device (media-stream) volume is only usable when the session player has it enabled (see
+    // PlaybackService.setDeviceVolumeControlEnabled) and reports a real range; otherwise fall back.
+    private fun MediaController.usingDevice(): Boolean =
+        useDeviceVolume &&
+            isCommandAvailable(Media3Player.COMMAND_GET_DEVICE_VOLUME) &&
+            isCommandAvailable(Media3Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS) &&
+            deviceInfo.maxVolume > deviceInfo.minVolume
+
+    // Mirror whichever volume we're driving into [_volume] as a normalized 0f..1f value.
+    private fun pushVolume(c: MediaController) {
+        _volume.value = if (c.usingDevice()) {
+            val info = c.deviceInfo
+            val range = (info.maxVolume - info.minVolume).coerceAtLeast(1)
+            ((c.deviceVolume - info.minVolume).toFloat() / range).coerceIn(0f, 1f)
+        } else {
+            c.volume.coerceIn(0f, 1f)
+        }
+    }
 
     actual fun release() {
         pollJob?.cancel()

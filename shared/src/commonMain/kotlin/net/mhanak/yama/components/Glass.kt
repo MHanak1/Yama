@@ -2,7 +2,9 @@
 
 package net.mhanak.yama.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
@@ -117,19 +119,26 @@ fun GlassModalDrawerSheet(
     )
 }
 
+/**
+ * Uses [combinedClickable] rather than the `Card(onClick = …)` overload so [onLongClick] callers can
+ * attach a context menu; pass only [onClick] for a plain card.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GlassElevatedCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    onLongClick: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     val shape = CardDefaults.shape
     Card(
-        onClick = onClick,
-        modifier = modifier.glassEffect(containerColor, shape),
-        enabled = enabled,
+        modifier = modifier
+            .glassEffect(containerColor, shape)
+            .clip(shape)
+            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         elevation = CardDefaults.cardElevation(
             defaultElevation = 0.dp,

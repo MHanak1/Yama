@@ -25,9 +25,11 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.AsyncImageListCard
+import net.mhanak.yama.components.CardImage
 import net.mhanak.yama.components.DetailViewHeader
-import net.mhanak.yama.components.ListCard
+import net.mhanak.yama.components.DynamicColorTheme
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Track
@@ -47,54 +49,63 @@ fun ArtistDetailView(artistId: String, onBack: () -> Unit, onNavigate: (Any) -> 
         albums = appContainer.activeMusicSource.getAlbumsForArtist(artistId)
     }
 
-    ListView(
-        modifier = modifier
-            .glassSource(zIndex = 1f)
-            .statusBarsPadding(),
-        contentPadding = contentPadding,
+    DynamicColorTheme(
+        imageUrl = artist?.imageUrl,
+        cacheKey = artist?.id,
+        enabled = appContainer.albumTintMode.tintsDetails,
     ) {
-        item {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        }
-
-        if (artist != null) {
+        ListView(
+            modifier = modifier
+                .glassSource(zIndex = 1f)
+                .statusBarsPadding(),
+            contentPadding = contentPadding,
+        ) {
             item {
-                DetailViewHeader(
-                    onNavigate = onNavigate,
-                    imageUrl = artist.imageUrl,
-                    name = artist.name,
-                    //genres = TODO(),
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+
+            if (artist != null) {
+                item {
+                    DetailViewHeader(
+                        onNavigate = onNavigate,
+                        imageUrl = artist.imageUrl,
+                        name = artist.name,
+                        //genres = TODO(),
+                    )
+                }
+            }
+
+            item{
+                Text("Top Tracks", style = MaterialTheme.typography.headlineMedium)
+            }
+
+            itemsIndexed(tracks) { index, track ->
+                val album = albums.find { it.id == track.albumId }
+                TrackListCard(
+                    track = track,
+                    tracks = tracks,
+                    index = index,
+                    player = appContainer.playback.active,
+                    subtitle = track.album,
+                    image = { CardImage(imageUrl = album?.imageUrl, imageHash = album?.imageHash) },
                 )
             }
-        }
 
-        item{
-            Text("Top Tracks", style = MaterialTheme.typography.headlineMedium)
-        }
+            item{
+                Text("Albums", style = MaterialTheme.typography.headlineMedium)
+            }
 
-        itemsIndexed(tracks) { index, track ->
-            val album = albums.find { it.id == track.albumId }
-            AsyncImageListCard(
-                onClick = { appContainer.playback.active.playNow(tracks, index) },
-                title = track.name,
-                subtitle = track.album,
-                imageUrl = album?.imageUrl,
-            )
-        }
-
-        item{
-            Text("Albums", style = MaterialTheme.typography.headlineMedium)
-        }
-
-        items(albums) { album ->
-            AsyncImageListCard(
-                title = album.name,
-                subtitle = album.year.toString(),
-                imageUrl =  album.imageUrl,
-                onClick = { onNavigate(AlbumDetailRoute(album.id)) },
-            )
+            items(albums) { album ->
+                AsyncImageListCard(
+                    title = album.name,
+                    subtitle = album.year.toString(),
+                    imageUrl =  album.imageUrl,
+                    imageHash = album.imageHash,
+                    onClick = { onNavigate(AlbumDetailRoute(album.id)) },
+                )
+            }
         }
     }
 }

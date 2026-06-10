@@ -49,6 +49,8 @@ fun LyricsView(
     lyrics: Lyrics?,
     positionMs: Long,
     modifier: Modifier = Modifier,
+    // Multiplies the lyric text sizes so they grow with the rest of the player on large windows.
+    scale: Float = 1f,
 ) {
     if (lyrics == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -60,7 +62,7 @@ fun LyricsView(
         Lyrics.None -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 "No lyrics available",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.scaled(scale),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -72,14 +74,14 @@ fun LyricsView(
             itemsIndexed(lyrics.lines) { _, line ->
                 Text(
                     text = line,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge.scaled(scale),
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
-        is Lyrics.Timed -> TimedLyricsView(lyrics, positionMs, modifier)
+        is Lyrics.Timed -> TimedLyricsView(lyrics, positionMs, scale, modifier)
     }
 }
 
@@ -87,6 +89,7 @@ fun LyricsView(
 private fun TimedLyricsView(
     lyrics: Lyrics.Timed,
     positionMs: Long,
+    scale: Float,
     modifier: Modifier = Modifier,
 ) {
     val wordSynced = remember(lyrics) { lyrics.lines.any { it.cues.isNotEmpty() } }
@@ -130,12 +133,12 @@ private fun TimedLyricsView(
                     else -> 0.3f
                 }
                 if (wordSynced && isActive && line.cues.isNotEmpty()) {
-                    WordSyncedLine(line = line, positionMs = positionMs, alpha = alpha)
+                    WordSyncedLine(line = line, positionMs = positionMs, alpha = alpha, scale = scale)
                 } else {
                     Text(
                         text = line.text,
-                        style = if (isActive) MaterialTheme.typography.headlineSmall
-                                else MaterialTheme.typography.titleMedium,
+                        style = if (isActive) MaterialTheme.typography.headlineSmall.scaled(scale)
+                                else MaterialTheme.typography.titleMedium.scaled(scale),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.fillMaxWidth().alpha(alpha).padding(vertical = 8.dp),
@@ -197,6 +200,7 @@ private fun WordSyncedLine(
     line: LyricsLine,
     positionMs: Long,
     alpha: Float,
+    scale: Float,
 ) {
     val activeCueIndex = line.cues.indexOfLast { it.startMs <= positionMs }
     val primary = MaterialTheme.colorScheme.primary
@@ -230,7 +234,7 @@ private fun WordSyncedLine(
 
     Text(
         text = annotated,
-        style = MaterialTheme.typography.headlineSmall,
+        style = MaterialTheme.typography.headlineSmall.scaled(scale),
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().alpha(alpha).padding(vertical = 8.dp),
     )

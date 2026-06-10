@@ -21,6 +21,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
@@ -43,7 +45,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
@@ -52,8 +58,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.components.SearchBar
 import net.mhanak.yama.components.glassEffect
 import net.mhanak.yama.components.glassSource
+import net.mhanak.yama.components.player.PlaybackTargetSheet
+import net.mhanak.yama.media.playback.RemotePlaybackProvider
 
 private const val TAB_ANIM_DURATION = 300
 
@@ -81,7 +90,15 @@ fun LibraryView(
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
     val internalTab = LibraryTab.entries[pagerState.currentPage]
+    val activeTab = externalTab ?: internalTab
     val isRefreshing by appContainer.activeMusicSource.isRefreshing.collectAsState()
+
+    // Search filters the currently visible tab; threaded down into the tab content.
+    var query by remember { mutableStateOf("") }
+
+    // Cast / "Play on" target picker, mirroring the button in FullPlayer.
+    val canCast = appContainer.activeMusicSource is RemotePlaybackProvider
+    var showTargets by remember { mutableStateOf(false) }
 
     fun navigateTo(tab: LibraryTab) {
         scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
@@ -98,12 +115,34 @@ fun LibraryView(
                 ) {
                     Column(modifier = Modifier.statusBarsPadding()) {
                         TopAppBar(
-                            title = { Text(externalTab?.label ?: "Yama") },
-                            modifier = Modifier.height(48.dp),
+                            // The search field lives in the title slot, so it fills the space
+                            // between the menu button (if any) and the cast action.
+                            title = {
+                                SearchBar(
+                                    query = query,
+                                    onQueryChange = { query = it },
+                                    placeholder = "Search ${activeTab.label.lowercase()}",
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            },
+                            modifier = Modifier.height(64.dp),
                             navigationIcon = {
                                 if (onMenuClick != null) {
                                     IconButton(onClick = onMenuClick) {
                                         Icon(Icons.Default.Menu, contentDescription = "Menu")
+                                    }
+                                }
+                            },
+                            actions = {
+                                if (canCast) {
+                                    val isCasting = appContainer.playback.activeTarget != null
+                                    IconButton(onClick = { showTargets = true }) {
+                                        Icon(
+                                            if (isCasting) Icons.Filled.CastConnected else Icons.Filled.Cast,
+                                            contentDescription = "Play on another device",
+                                            tint = if (isCasting) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurface,
+                                        )
                                     }
                                 }
                             },
@@ -162,6 +201,7 @@ fun LibraryView(
                 ) { page ->
                     LibraryTabContent(
                         tab = LibraryTab.entries[page],
+                        query = query,
                         contentPadding = contentPadding,
                         onAlbumClick = onAlbumClick,
                         onArtistClick = onArtistClick,
@@ -190,6 +230,7 @@ fun LibraryView(
                 ) { tab ->
                     LibraryTabContent(
                         tab = tab,
+                        query = query,
                         contentPadding = contentPadding,
                         onAlbumClick = onAlbumClick,
                         onArtistClick = onArtistClick,
@@ -200,11 +241,16 @@ fun LibraryView(
             }
         }
     }
+
+    if (showTargets) {
+        PlaybackTargetSheet(onDismiss = { showTargets = false })
+    }
 }
 
 @Composable
 private fun LibraryTabContent(
     tab: LibraryTab,
+    query: String,
     contentPadding: PaddingValues,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
@@ -213,9 +259,28 @@ private fun LibraryTabContent(
 ) {
     val modifier = Modifier.fillMaxSize()
     when (tab) {
-        LibraryTab.Albums -> AlbumsView(onAlbumClick = onAlbumClick, modifier = modifier, contentPadding = contentPadding)
-        LibraryTab.Artists -> ArtistsView(onArtistClick = onArtistClick, modifier = modifier, contentPadding = contentPadding)
-        LibraryTab.Genres -> GenresView(onGenreClick = onGenreClick, modifier = modifier, contentPadding = contentPadding)
-        LibraryTab.Playlists -> PlaylistsView(onPlaylistClick = onPlaylistClick, modifier = modifier, contentPadding = contentPadding)
+        LibraryTab.Albums -> AlbumsView(onAlbumClick = onAlbumClick, modifier = modifier, contentPadding = contentPadding, query = query)
+        LibraryTab.Artists -> ArtistsView(onArtistClick = onArtistClick, modifier = modifier, contentPadding = contentPadding, query = query)
+        LibraryTab.Genres -> GenresView(onGenreClick = onGenreClick, modifier = modifier, contentPadding = contentPadding, query = query)
+        LibraryTab.Playlists -> PlaylistsView(onPlaylistClick = onPlaylistClick, modifier = modifier, contentPadding = contentPadding, query = query)
+    }
+}
+
+/** Shown by the tab views when a search [query] matches nothing in the loaded library. */
+@Composable
+internal fun NoSearchResults(
+    query: String,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier.fillMaxSize().padding(contentPadding).padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "No results for \"$query\"",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

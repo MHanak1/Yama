@@ -21,8 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.components.ListCard
+import net.mhanak.yama.components.DynamicColorTheme
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Track
 
@@ -37,36 +38,43 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
         tracks = appContainer.activeMusicSource.getTracksForPlaylist(playlistId)
     }
 
-    ListView(
-        modifier = modifier
-            .glassSource(zIndex = 1f)
-            .statusBarsPadding(),
-        contentPadding = contentPadding,
+    DynamicColorTheme(
+        imageUrl = playlist?.imageUrl,
+        cacheKey = playlist?.id,
+        enabled = appContainer.albumTintMode.tintsDetails,
     ) {
-        item {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        }
-
-        if (playlist != null) {
+        ListView(
+            modifier = modifier
+                .glassSource(zIndex = 1f)
+                .statusBarsPadding(),
+            contentPadding = contentPadding,
+        ) {
             item {
-                AsyncImage(
-                    model = playlist.imageUrl,
-                    contentDescription = playlist.name,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+
+            if (playlist != null) {
+                item {
+                    AsyncImage(
+                        model = playlist.imageUrl,
+                        contentDescription = playlist.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f),
+                    )
+                }
+            }
+
+            itemsIndexed(tracks) { index, track ->
+                TrackListCard(
+                    track = track,
+                    tracks = tracks,
+                    index = index,
+                    player = appContainer.playback.active,
                 )
             }
-        }
-
-        itemsIndexed(tracks) { index, track ->
-            ListCard(
-                onClick = { appContainer.playback.active.playNow(tracks, index) },
-                title = track.name,
-                subtitle = track.artists?.joinToString(", "),
-            )
         }
     }
 }

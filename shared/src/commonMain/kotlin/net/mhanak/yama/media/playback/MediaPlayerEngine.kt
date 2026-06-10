@@ -20,6 +20,17 @@ import kotlinx.coroutines.flow.StateFlow
 expect class MediaPlayerEngine() {
     val status: StateFlow<EngineStatus>
 
+    /** Output volume in 0f..1f. */
+    val volume: StateFlow<Float>
+    fun setVolume(level: Float)
+
+    /**
+     * Choose what [setVolume]/[volume] act on: the device (media stream) volume when true, or an
+     * in-app gain when false. Platforms that can't control device volume ignore this and always use
+     * in-app gain.
+     */
+    fun setVolumeMode(useDeviceVolume: Boolean)
+
     fun setQueue(items: List<PlayableMedia>, startIndex: Int)
     fun addToQueue(items: List<PlayableMedia>)
     fun addNext(items: List<PlayableMedia>)

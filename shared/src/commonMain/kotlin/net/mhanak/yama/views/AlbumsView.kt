@@ -9,6 +9,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -25,12 +26,21 @@ fun AlbumsView(
     onAlbumClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    query: String = "",
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
     val albums by source.albums.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+
+    val filtered = remember(albums, query) {
+        if (query.isBlank()) albums
+        else albums.filter {
+            it.name.contains(query, ignoreCase = true) ||
+                it.albumArtist?.contains(query, ignoreCase = true) == true
+        }
+    }
 
     when {
         albums.isEmpty() && isRefreshing -> Box(
@@ -45,12 +55,19 @@ fun AlbumsView(
         ) {
             ErrorCard(message = refreshError!!.message ?: "Failed to load albums")
         }
-        else -> GridView(modifier = modifier, contentPadding = contentPadding) {
-            items(albums) { album ->
+        filtered.isEmpty() && query.isNotBlank() ->
+            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier)
+        else -> GridView(
+            modifier = modifier,
+            contentPadding = contentPadding,
+            prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
+        ) {
+            items(filtered) { album ->
                 AsyncImageGridCard(
                     title = album.name,
                     subtitle = album.albumArtist,
                     imageUrl = album.imageUrl,
+                    imageHash = album.imageHash,
                     imageFallback = painterResource(Res.drawable.album),
                     onClick = { onAlbumClick(album.id) },
                 )

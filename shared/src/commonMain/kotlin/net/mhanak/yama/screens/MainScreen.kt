@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination
@@ -66,10 +67,17 @@ import net.mhanak.yama.components.AdaptiveNavigationLayout
 import net.mhanak.yama.components.AppBottomBar
 import net.mhanak.yama.components.AppNavRail
 import net.mhanak.yama.components.BottomBarDestination
+import net.mhanak.yama.components.KeepScreenOn
 import net.mhanak.yama.components.PlatformBackHandler
+import net.mhanak.yama.components.PlatformUserInteractionEffect
+import net.mhanak.yama.components.PlayerIdleTimeoutMs
 import net.mhanak.yama.components.SourceSwitcher
+import net.mhanak.yama.components.isIdle
+import net.mhanak.yama.components.rememberIdleMonitor
+import net.mhanak.yama.components.resetIdleOn
 import net.mhanak.yama.components.player.FullPlayer
 import net.mhanak.yama.components.player.NowPlayingBar
+import net.mhanak.yama.components.player.VolumeIndicator
 import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.views.AlbumDetailView
 import net.mhanak.yama.views.ArtistDetailView
@@ -150,15 +158,46 @@ fun MainScreen() {
     // The active player is Compose-observable so a future switch to a remote player rebinds the UI.
     val player = appContainer.playback.active
     val playerStatus by player.status.collectAsState()
+    val activeVolume by player.volume.collectAsState()
     val playerExpansion = remember { Animatable(0f) }
+    // Distance from the screen bottom to the mini-player bar's top (bar height on rail, bar + bottom
+    // bar on slim). Captured from the layout's content bottom inset so the full player can rest with
+    // its top at that line — see NowPlayingBar/FullPlayer peekHeight. Updated inside the content lambda.
+    var playerPeek by remember { mutableStateOf(0.dp) }
 
-    // Tapping the Android media notification asks (via the controller) to open the full player.
+    // On returning to the foreground, ask the active player to resync. A remote ("Play On") player's
+    // live state can go stale while backgrounded (the device keeps playing but our socket push lapses);
+    // this re-pulls it so the bar/full player don't show the track that was playing when we left. The
+    // local player's refresh is a no-op (its engine state is always current).
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        appContainer.playback.active.refresh()
+    }
+
+    // Tapping the Android media notification (or a remote "Play On" handoff to this device) asks —
+    // via the controller — to open the full player.
     LaunchedEffect(appContainer.playback.openPlayerRequest) {
         if (appContainer.playback.openPlayerRequest) {
             playerExpansion.animateTo(1f)
             appContainer.playback.openPlayerRequest = false
         }
     }
+
+    // On TV only: after a minute with no interaction while something is playing, surface the full
+    // player as a now-playing/screensaver-style display. On phone/desktop this auto-expand is more
+    // intrusive than useful, so it's gated to TV — the full player still hides its own controls when
+    // idle on every platform. Only armed while collapsed; any pointer/key event resets the timer.
+    val idleMonitor = rememberIdleMonitor()
+    // Catch interaction the resetIdleOn modifier can't see (Android TV D-pad while content has focus).
+    PlatformUserInteractionEffect { idleMonitor.reset() }
+    val collapsed = playerExpansion.value == 0f
+    val idle = idleMonitor.isIdle(PlayerIdleTimeoutMs, enabled = collapsed && playerStatus.isPlaying && isTV)
+    LaunchedEffect(idle) {
+        if (idle) playerExpansion.animateTo(1f)
+    }
+
+    // Hold the screen awake while the full player is open and something is playing, unless the user
+    // opted out. No-op on platforms without a screen-wake API (desktop).
+    KeepScreenOn(enabled = appContainer.keepScreenOn && playerStatus.isPlaying && playerExpansion.value > 0f)
 
     // Wait for the entering destination's lifecycle to reach RESUMED (animation done) before
     // requesting focus, so the exiting composable is already gone and focus lands cleanly.
@@ -191,10 +230,10 @@ fun MainScreen() {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().resetIdleOn(idleMonitor)) {
     AdaptiveNavigationLayout(
         playerActive = playerStatus.current != null,
-        miniPlayer = { wide -> NowPlayingBar(playerStatus, player, playerExpansion = playerExpansion, wide = wide) },
+        miniPlayer = { wide -> NowPlayingBar(playerStatus, player, playerExpansion = playerExpansion, wide = wide, peekHeight = playerPeek) },
         rail = { forceExpanded ->
             AppNavRail(
                 forceExpanded = forceExpanded,
@@ -249,6 +288,8 @@ fun MainScreen() {
             )
         },
     ) { hasRail, onMenuClick, bottomInset ->
+        // Mirror the bar-top line out to the full player (which lives outside this lambda).
+        if (playerPeek != bottomInset) playerPeek = bottomInset
         NavHost(
             navController = navController,
             startDestination = LibraryRoute,
@@ -321,7 +362,12 @@ fun MainScreen() {
                 playerStatus, player,
                 playerExpansion = playerExpansion,
                 onCollapse = { scope.launch { playerExpansion.animateTo(0f) } },
+                peekHeight = playerPeek,
             )
         }
+
+        // Transient volume bar (right edge) shown on any volume change — the on-screen feedback for
+        // hardware volume keys while casting, where the system volume dialog is suppressed.
+        VolumeIndicator(volume = activeVolume)
     }
 }

@@ -24,6 +24,10 @@ class PlaybackService : MediaSessionService() {
             // Request audio focus and pause on focus loss / when headphones are unplugged.
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)
+            // Let the engine drive the device (media stream) volume, not just the in-app gain, so the
+            // user (and remote controllers) can move the actual output level. Without this the
+            // device-volume commands are unavailable and the engine falls back to in-app gain.
+            .setDeviceVolumeControlEnabled(true)
             .build()
         mediaSession = MediaSession.Builder(this, player)
             // Tapping the media notification launches the app and asks it to open the full player.

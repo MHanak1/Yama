@@ -8,8 +8,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import net.mhanak.yama.getDeviceName
 import net.mhanak.yama.media.model.Album
@@ -20,13 +23,16 @@ import net.mhanak.yama.media.model.LyricsCue
 import net.mhanak.yama.media.model.LyricsLine
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
+import net.mhanak.yama.media.playback.JellyfinRemotePlayer
+import net.mhanak.yama.media.playback.Player
+import net.mhanak.yama.media.playback.RemotePlaybackProvider
+import net.mhanak.yama.media.playback.RemoteTarget
 import net.mhanak.yama.session.JellyfinSession
 import net.mhanak.yama.session.JellyfinSessionRepository
 import net.mhanak.yama.util.AppPreferences
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.artistsApi
-import org.jellyfin.sdk.api.client.extensions.audioApi
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
 import org.jellyfin.sdk.api.client.extensions.authenticateWithQuickConnect
 import org.jellyfin.sdk.api.client.extensions.imageApi
@@ -45,6 +51,7 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.PlaybackOrder
 import org.jellyfin.sdk.model.api.PlaybackProgressInfo
 import org.jellyfin.sdk.model.api.PlaybackStartInfo
@@ -58,7 +65,7 @@ import java.util.UUID
 import kotlin.collections.get
 import org.jellyfin.sdk.model.UUID as JellyfinUUID
 
-class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : MusicSource {
+class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : MusicSource, RemotePlaybackProvider {
     override val type: SourceType = SourceType.Jellyfin
     val jellyfin = createJellyfinInstance(
         clientInfo = ClientInfo(name = "Yama - Yet another music app", version = "0.0.1"),
@@ -80,6 +87,32 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
 
     /** Toggle whether other clients can "Play On" this device (re-advertises capabilities). */
     fun setRemoteControlEnabled(enabled: Boolean) = socket.setRemoteControlEnabled(enabled)
+
+    // Cast targets: other sessions that accept audio remote control, excluding this device. Derived
+    // from the socket's live session push; collapses to empty when there are no collectors / no socket.
+    override val remoteTargets: StateFlow<List<RemoteTarget>> =
+        socket.sessions
+            .map { list ->
+                val ourDeviceId = currentSessionDeviceId()
+                list.filter {
+                    it.id != null &&
+                        it.supportsRemoteControl &&
+                        MediaType.AUDIO in it.playableMediaTypes &&
+                        it.deviceId != ourDeviceId
+                }.map { RemoteTarget(id = it.id!!, name = it.deviceName ?: it.client ?: "Unknown", client = it.client) }
+            }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    override fun createPlayer(target: RemoteTarget): Player {
+        val currentApi = requireNotNull(api) { "Not connected to a server" }
+        val userId = sessions.find { it.id == currentSessionId }?.userId?.let { JellyfinUUID.fromString(it) }
+        return JellyfinRemotePlayer(currentApi, socket.sessions, target, userId, resync = socket::resyncSessions)
+    }
+
+    override fun refreshTargets() { scope.launch { socket.resyncSessions() } }
+
+    private fun currentSessionDeviceId(): String? =
+        sessions.find { it.id == currentSessionId }?.sessionDeviceId
 
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     override val albums: StateFlow<List<Album>> = _albums.asStateFlow()
@@ -391,7 +424,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         return ids.mapNotNull { id -> byId[id]?.let { currentApi.toTrack(it) } }
     }
 
-    override suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>) {
+    override suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>, volume: Float?) {
         val currentApi = api ?: return
         runCatching {
             currentApi.playStateApi.reportPlaybackStart(
@@ -400,7 +433,8 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                     positionTicks = positionMs * 10_000,
                     canSeek = true,
                     isPaused = false,
-                    isMuted = false,
+                    isMuted = volume == 0f,
+                    volumeLevel = volume?.let { (it * 100).toInt() },
                     playMethod = PlayMethod.DIRECT_PLAY,
                     repeatMode = RepeatMode.REPEAT_NONE,
                     playbackOrder = PlaybackOrder.DEFAULT,
@@ -410,7 +444,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         }
     }
 
-    override suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>) {
+    override suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>, volume: Float?) {
         val currentApi = api ?: return
         runCatching {
             currentApi.playStateApi.reportPlaybackProgress(
@@ -419,7 +453,8 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                     positionTicks = positionMs * 10_000,
                     canSeek = true,
                     isPaused = isPaused,
-                    isMuted = false,
+                    isMuted = volume == 0f,
+                    volumeLevel = volume?.let { (it * 100).toInt() },
                     playMethod = PlayMethod.DIRECT_PLAY,
                     repeatMode = RepeatMode.REPEAT_NONE,
                     playbackOrder = PlaybackOrder.DEFAULT,
@@ -586,7 +621,7 @@ private suspend fun ApiClient.fetchGenres(): List<Genre> =
         )
     } ?: emptyList()
 
-private fun ApiClient.toTrack(item: org.jellyfin.sdk.model.api.BaseItemDto) = Track(
+internal fun ApiClient.toTrack(item: org.jellyfin.sdk.model.api.BaseItemDto) = Track(
     id = item.id.toString(),
     name = item.name ?: "",
     albumId = item.albumId?.toString(),

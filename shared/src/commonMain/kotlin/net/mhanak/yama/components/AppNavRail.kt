@@ -83,11 +83,12 @@ fun AppNavRail(
         modifier = modifier
             .fillMaxHeight()
             .width(railWidth)
-            .glassEffect(MaterialTheme.colorScheme.surfaceContainerLow)
+            //.glassEffect(MaterialTheme.colorScheme.surfaceContainerLow)
             // Isolate the rail as its own D-pad focus group so content focus never steps into it.
             .focusGroup()
             .then(if (isTV) Modifier.onFocusChanged { focused = it.hasFocus } else Modifier)
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         SourceSwitcher(collapsed = !expanded)
         HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))

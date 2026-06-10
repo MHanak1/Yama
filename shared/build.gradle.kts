@@ -38,6 +38,7 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation("androidx.media3:media3-exoplayer:1.5.1")
             implementation("androidx.media3:media3-session:1.5.1")
+            implementation("com.vanniktech:blurhash:0.3.0")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -58,6 +59,9 @@ kotlin {
             implementation("dev.chrisbanes.haze:haze:1.7.2")
             implementation("dev.chrisbanes.haze:haze-materials:1.7.2")
             implementation(libs.navigation.compose)
+
+            implementation(libs.kmpalette.core)
+            implementation(libs.materialKolor)
         }
         jvmMain.dependencies {
             implementation("ch.qos.logback:logback-classic:1.5.6")
@@ -66,6 +70,7 @@ kotlin {
             // libvlc wrapper for desktop audio playback. Requires libvlc present at runtime
             // (a package dependency on Linux, bundled on Windows).
             implementation("uk.co.caprica:vlcj:4.8.3")
+            implementation("com.vanniktech:blurhash:0.3.0")
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

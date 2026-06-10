@@ -17,22 +17,46 @@ import net.mhanak.yama.LocalAppContainer
 fun PlaybackSettings(modifier: Modifier = Modifier) {
     val appContainer = LocalAppContainer.current
     Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Allow remote control", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "Let other clients play to this device (\"Play On\")",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = appContainer.allowRemoteControl,
-                onCheckedChange = { appContainer.allowRemoteControl = it },
+        SettingToggle(
+            title = "Allow remote control",
+            subtitle = "Let other clients play to this device (\"Play On\")",
+            checked = appContainer.allowRemoteControl,
+            onCheckedChange = { appContainer.allowRemoteControl = it },
+        )
+        SettingToggle(
+            title = "Use device volume",
+            subtitle = "Volume controls the system media volume; otherwise an in-app level",
+            checked = appContainer.useDeviceVolume,
+            onCheckedChange = { appContainer.useDeviceVolume = it },
+        )
+        SettingToggle(
+            title = "Keep screen on while playing",
+            subtitle = "Stop the screen from dimming while the full player is open",
+            checked = appContainer.keepScreenOn,
+            onCheckedChange = { appContainer.keepScreenOn = it },
+        )
+    }
+}
+
+@Composable
+private fun SettingToggle(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

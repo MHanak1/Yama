@@ -49,4 +49,6 @@ data class PlayerStatus(
     val durationMs: Long = 0,
     val repeat: RepeatMode = RepeatMode.Off,
     val shuffle: Boolean = false,
+    /** Output volume in 0f..1f, or null when the active player exposes no volume control. */
+    val volume: Float? = null,
 )

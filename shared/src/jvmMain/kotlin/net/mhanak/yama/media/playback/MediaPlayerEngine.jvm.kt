@@ -23,6 +23,9 @@ actual class MediaPlayerEngine actual constructor() {
     private val _status = MutableStateFlow(EngineStatus())
     actual val status: StateFlow<EngineStatus> = _status.asStateFlow()
 
+    private val _volume = MutableStateFlow(1f)
+    actual val volume: StateFlow<Float> = _volume.asStateFlow()
+
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val queue = mutableListOf<PlayableMedia>()
@@ -72,6 +75,8 @@ actual class MediaPlayerEngine actual constructor() {
         if (i !in queue.indices) return
         index = i
         p.media().play(queue[i].uri)
+        // libvlc resets volume to default on a fresh media; reassert the chosen level.
+        p.audio().setVolume((_volume.value * 100).toInt())
         pushState(PlaybackState.Buffering, true)
     }
 
@@ -138,11 +143,22 @@ actual class MediaPlayerEngine actual constructor() {
 
     actual fun play() {
         val p = player ?: return
-        if (index == -1 && queue.isNotEmpty()) playIndex(0) else p.controls().setPause(false)
+        if (index == -1 && queue.isNotEmpty()) {
+            playIndex(0)
+        } else {
+            p.controls().setPause(false)
+            // Reflect intent immediately rather than waiting for libvlc's playing() event (see pause()).
+            pushState(PlaybackState.Playing, true)
+        }
     }
 
     actual fun pause() {
-        player?.controls()?.setPause(true)
+        val p = player ?: return
+        p.controls().setPause(true)
+        // libvlc delivers its paused() event with a noticeable lag, so the play/pause button and
+        // progress bar would otherwise keep showing "playing" until it arrives. Push the paused state
+        // now; the eventual paused() callback just confirms it.
+        pushState(PlaybackState.Paused, false)
     }
 
     actual fun seekTo(positionMs: Long) {
@@ -167,6 +183,15 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun seekToIndex(index: Int) = playIndex(index)
+
+    actual fun setVolume(level: Float) {
+        val clamped = level.coerceIn(0f, 1f)
+        _volume.value = clamped
+        player?.audio()?.setVolume((clamped * 100).toInt())
+    }
+
+    // libvlc only exposes an in-app gain; there's no OS device-volume control here, so this is a no-op.
+    actual fun setVolumeMode(useDeviceVolume: Boolean) {}
 
     actual fun setRepeat(mode: RepeatMode) {
         repeat = mode

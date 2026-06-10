@@ -29,6 +29,7 @@ class PlaybackReporter(
             var currentTrack: Track? = null
             var lastPositionMs = 0L
             var lastPaused: Boolean? = null
+            var lastVolume: Float? = null
             var lastProgress = TimeSource.Monotonic.markNow()
 
             localStatus.collect { status ->
@@ -38,20 +39,29 @@ class PlaybackReporter(
                     currentTrack?.let { source().reportPlaybackStopped(it, lastPositionMs) }
                     currentTrack = null
                     lastPaused = null
+                    lastVolume = null
                     return@collect
                 }
                 track!!
                 lastPositionMs = status.positionMs
                 val paused = !status.isPlaying
+                // Report a volume change promptly (not just on the 5s tick) so a controller driving this
+                // device sees the new level quickly.
+                val volumeChanged = lastVolume != null && status.volume != null &&
+                    kotlin.math.abs(status.volume!! - lastVolume!!) >= VOLUME_REPORT_DELTA
 
                 if (track.id != currentTrack?.id) {
-                    source().reportPlaybackStarted(track, status.positionMs, status.queue)
+                    source().reportPlaybackStarted(track, status.positionMs, status.queue, status.volume)
                     currentTrack = track
                     lastPaused = paused
+                    lastVolume = status.volume
                     lastProgress = TimeSource.Monotonic.markNow()
-                } else if (paused != lastPaused || lastProgress.elapsedNow().inWholeMilliseconds >= PROGRESS_INTERVAL_MS) {
-                    source().reportPlaybackProgress(track, status.positionMs, paused, status.queue)
+                } else if (paused != lastPaused || volumeChanged ||
+                    lastProgress.elapsedNow().inWholeMilliseconds >= PROGRESS_INTERVAL_MS
+                ) {
+                    source().reportPlaybackProgress(track, status.positionMs, paused, status.queue, status.volume)
                     lastPaused = paused
+                    lastVolume = status.volume
                     lastProgress = TimeSource.Monotonic.markNow()
                 }
             }
@@ -61,5 +71,7 @@ class PlaybackReporter(
     private companion object {
         val ACTIVE_STATES = setOf(PlaybackState.Playing, PlaybackState.Paused, PlaybackState.Buffering)
         const val PROGRESS_INTERVAL_MS = 5_000L
+        // Minimum volume change (fraction) that triggers an out-of-band progress report.
+        const val VOLUME_REPORT_DELTA = 0.01f
     }
 }

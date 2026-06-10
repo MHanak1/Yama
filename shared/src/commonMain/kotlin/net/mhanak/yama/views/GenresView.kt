@@ -9,6 +9,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -25,12 +26,18 @@ fun GenresView(
     onGenreClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    query: String = "",
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
     val genres by source.genres.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+
+    val filtered = remember(genres, query) {
+        if (query.isBlank()) genres
+        else genres.filter { it.name.contains(query, ignoreCase = true) }
+    }
 
     when {
         genres.isEmpty() && isRefreshing -> Box(
@@ -45,11 +52,18 @@ fun GenresView(
         ) {
             ErrorCard(message = refreshError!!.message ?: "Failed to load genres")
         }
-        else -> GridView(modifier = modifier, contentPadding = contentPadding) {
-            items(genres) { genre ->
+        filtered.isEmpty() && query.isNotBlank() ->
+            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier)
+        else -> GridView(
+            modifier = modifier,
+            contentPadding = contentPadding,
+            prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
+        ) {
+            items(filtered) { genre ->
                 AsyncImageGridCard(
                     title = genre.name,
                     imageUrl = genre.imageUrl,
+                    imageHash = genre.imageHash,
                     onClick = { onGenreClick(genre.id) },
                     imageFallback = painterResource(Res.drawable.folder),
                 )

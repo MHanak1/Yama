@@ -9,6 +9,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -25,12 +26,18 @@ fun ArtistsView(
     onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    query: String = "",
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
     val artists by source.artists.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+
+    val filtered = remember(artists, query) {
+        if (query.isBlank()) artists
+        else artists.filter { it.name.contains(query, ignoreCase = true) }
+    }
 
     when {
         artists.isEmpty() && isRefreshing -> Box(
@@ -45,11 +52,18 @@ fun ArtistsView(
         ) {
             ErrorCard(message = refreshError!!.message ?: "Failed to load artists")
         }
-        else -> GridView(modifier = modifier, contentPadding = contentPadding) {
-            items(artists) { artist ->
+        filtered.isEmpty() && query.isNotBlank() ->
+            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier)
+        else -> GridView(
+            modifier = modifier,
+            contentPadding = contentPadding,
+            prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
+        ) {
+            items(filtered) { artist ->
                 AsyncImageGridCard(
                     title = artist.name,
                     imageUrl = artist.imageUrl,
+                    imageHash = artist.imageHash,
                     imageFallback = painterResource(Res.drawable.artist),
                     onClick = { onArtistClick(artist.id) },
                 )
