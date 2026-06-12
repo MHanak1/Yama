@@ -3,6 +3,8 @@ package net.mhanak.yama.util
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.dynamiccolor.ColorSpec2025
 import com.materialkolor.rememberDynamicColorScheme
 import net.mhanak.yama.LocalAppContainer
 
@@ -25,7 +27,8 @@ fun AppTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
         rememberDynamicColorScheme(
             seedColor = appContainer.seedColor,
             isDark = darkTheme,
-            style = PaletteStyle.TonalSpot,
+            style = PaletteStyle.Fidelity,
+            specVersion = ColorSpec.SpecVersion.SPEC_2021,
         )
     }
     MaterialTheme(colorScheme = colorScheme, content = content)

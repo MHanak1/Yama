@@ -25,24 +25,23 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Speaker
+import androidx.compose.material.icons.outlined.Speaker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import net.mhanak.yama.components.PullToRefreshContainer
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.SearchBar
+import net.mhanak.yama.components.SegmentedButtonRow
 import net.mhanak.yama.components.glassEffect
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.components.player.PlaybackTargetSheet
@@ -69,8 +69,10 @@ private const val TAB_ANIM_DURATION = 300
 enum class LibraryTab(val label: String, val icon: ImageVector) {
     Albums("Albums", Icons.Default.Album),
     Artists("Artists", Icons.Default.Person),
+    AlbumArtists("Album Artists", Icons.Default.People),
     Genres("Genres", Icons.Default.Category),
     Playlists("Playlists", Icons.Default.QueueMusic),
+    Tracks("Tracks", Icons.Default.MusicNote),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,6 +82,7 @@ fun LibraryView(
     onMenuClick: (() -> Unit)?,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
+    onAlbumArtistClick: (String) -> Unit,
     onGenreClick: (String) -> Unit,
     onPlaylistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -138,7 +141,7 @@ fun LibraryView(
                                     val isCasting = appContainer.playback.activeTarget != null
                                     IconButton(onClick = { showTargets = true }) {
                                         Icon(
-                                            if (isCasting) Icons.Filled.CastConnected else Icons.Filled.Cast,
+                                            if (isCasting) Icons.Filled.Speaker else Icons.Outlined.Speaker,
                                             contentDescription = "Play on another device",
                                             tint = if (isCasting) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurface,
@@ -152,34 +155,14 @@ fun LibraryView(
                     }
                 }
                 if (externalTab == null) {
-                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                        SingleChoiceSegmentedButtonRow(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                        ) {
-                            LibraryTab.entries.forEachIndexed { index, tab ->
-                                val selected = internalTab == tab
-                                val shape = SegmentedButtonDefaults.itemShape(index, LibraryTab.entries.size)
-                                SegmentedButton(
-                                    selected = selected,
-                                    onClick = { navigateTo(tab) },
-                                    shape = shape,
-                                    modifier = Modifier.glassEffect(
-                                        if (selected) MaterialTheme.colorScheme.secondaryContainer
-                                        else MaterialTheme.colorScheme.surface,
-                                        shape,
-                                    ),
-                                    colors = SegmentedButtonDefaults.colors(
-                                        activeContainerColor = Color.Transparent,
-                                        inactiveContainerColor = Color.Transparent,
-                                    ),
-                                    icon = {},
-                                    label = { Text(tab.label) },
-                                )
-                            }
-                        }
-                    }
+                    SegmentedButtonRow(
+                        options = LibraryTab.entries,
+                        selectedOption = internalTab,
+                        onOptionSelected = { navigateTo(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) { tab -> Text(tab.label) }
                 }
             }
         },
@@ -205,6 +188,7 @@ fun LibraryView(
                         contentPadding = contentPadding,
                         onAlbumClick = onAlbumClick,
                         onArtistClick = onArtistClick,
+                        onAlbumArtistClick = onAlbumArtistClick,
                         onGenreClick = onGenreClick,
                         onPlaylistClick = onPlaylistClick,
                     )
@@ -234,6 +218,7 @@ fun LibraryView(
                         contentPadding = contentPadding,
                         onAlbumClick = onAlbumClick,
                         onArtistClick = onArtistClick,
+                        onAlbumArtistClick = onAlbumArtistClick,
                         onGenreClick = onGenreClick,
                         onPlaylistClick = onPlaylistClick,
                     )
@@ -254,6 +239,7 @@ private fun LibraryTabContent(
     contentPadding: PaddingValues,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
+    onAlbumArtistClick: (String) -> Unit,
     onGenreClick: (String) -> Unit,
     onPlaylistClick: (String) -> Unit,
 ) {
@@ -261,8 +247,10 @@ private fun LibraryTabContent(
     when (tab) {
         LibraryTab.Albums -> AlbumsView(onAlbumClick = onAlbumClick, modifier = modifier, contentPadding = contentPadding, query = query)
         LibraryTab.Artists -> ArtistsView(onArtistClick = onArtistClick, modifier = modifier, contentPadding = contentPadding, query = query)
+        LibraryTab.AlbumArtists -> AlbumArtistsView(onAlbumArtistClick = onAlbumArtistClick, modifier = modifier, contentPadding = contentPadding, query = query)
         LibraryTab.Genres -> GenresView(onGenreClick = onGenreClick, modifier = modifier, contentPadding = contentPadding, query = query)
         LibraryTab.Playlists -> PlaylistsView(onPlaylistClick = onPlaylistClick, modifier = modifier, contentPadding = contentPadding, query = query)
+        LibraryTab.Tracks -> TracksView(modifier = modifier, contentPadding = contentPadding)
     }
 }
 

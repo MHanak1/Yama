@@ -3,6 +3,8 @@ package net.mhanak.yama.media.playback
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.RemoteCommand
 
@@ -31,6 +33,10 @@ class PlaybackController(private val source: () -> MusicSource) {
     // the full-screen player. MainScreen observes this and consumes it (resets it to false).
     var openPlayerRequest: Boolean by mutableStateOf(false)
 
+    // Emits when a volume change was triggered by a remote command (not local UI interaction).
+    private val _remoteVolumeChange = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val remoteVolumeChange: SharedFlow<Unit> = _remoteVolumeChange
+
     /**
      * Direct playback to [target] (a "cast" device), or back to this device when null. Builds a
      * remote [Player] via the active source's [RemotePlaybackProvider] and swaps it in as [active];
@@ -58,9 +64,11 @@ class PlaybackController(private val source: () -> MusicSource) {
         when (command) {
             is RemoteCommand.Play -> {
                 selectTarget(null)
-                local.playNow(command.tracks, command.startIndex)
-                // A remote "Play On <this device>" handoff: surface the full player like a notification tap.
-                openPlayerRequest = true
+                // A controller's reorder/removal arrives as a fresh Play with the same now-playing track;
+                // applyRemotePlay rearranges the live queue in place when it can. Only a genuine new
+                // playback (which restarts) should surface the full player, like a notification tap.
+                val restarted = !local.applyRemotePlay(command.tracks, command.startIndex, command.startPositionMs)
+                if (restarted) openPlayerRequest = true
             }
             is RemoteCommand.PlayNext -> local.playNext(command.tracks)
             is RemoteCommand.AddToQueue -> local.addToQueue(command.tracks)
@@ -71,9 +79,17 @@ class PlaybackController(private val source: () -> MusicSource) {
             RemoteCommand.Next -> active.next()
             RemoteCommand.Previous -> active.previous()
             is RemoteCommand.Seek -> active.seekTo(command.positionMs)
-            is RemoteCommand.SetVolume -> active.setVolume(command.level)
-            RemoteCommand.VolumeUp -> active.volumeUp()
-            RemoteCommand.VolumeDown -> active.volumeDown()
+            is RemoteCommand.SetVolume -> { active.setVolume(command.level); _remoteVolumeChange.tryEmit(Unit) }
+            RemoteCommand.VolumeUp -> { active.volumeUp(); _remoteVolumeChange.tryEmit(Unit) }
+            RemoteCommand.VolumeDown -> { active.volumeDown(); _remoteVolumeChange.tryEmit(Unit) }
+            is RemoteCommand.SetRepeat -> active.setRepeat(
+                when (command.mode) {
+                    RemoteCommand.Repeat.Off -> RepeatMode.Off
+                    RemoteCommand.Repeat.All -> RepeatMode.All
+                    RemoteCommand.Repeat.One -> RepeatMode.One
+                },
+            )
+            is RemoteCommand.SetShuffle -> active.setShuffle(command.enabled)
         }
     }
 }

@@ -45,6 +45,7 @@ import org.jellyfin.sdk.api.client.extensions.quickConnectApi
 import org.jellyfin.sdk.api.client.extensions.sessionApi
 import org.jellyfin.sdk.api.client.extensions.systemApi
 import org.jellyfin.sdk.api.client.extensions.userApi
+import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.ClientInfo
 import org.jellyfin.sdk.model.DeviceInfo
 import org.jellyfin.sdk.model.api.BaseItemKind
@@ -103,6 +104,10 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
             }
             .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // The live socket's connection state — false while it's down or reconnecting, during which a
+    // controlled device's mirrored state is frozen.
+    override val connected: StateFlow<Boolean> get() = socket.connected
+
     override fun createPlayer(target: RemoteTarget): Player {
         val currentApi = requireNotNull(api) { "Not connected to a server" }
         val userId = sessions.find { it.id == currentSessionId }?.userId?.let { JellyfinUUID.fromString(it) }
@@ -114,11 +119,17 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
     private fun currentSessionDeviceId(): String? =
         sessions.find { it.id == currentSessionId }?.sessionDeviceId
 
+    private fun currentUserId(): JellyfinUUID? =
+        sessions.find { it.id == currentSessionId }?.userId?.let { JellyfinUUID.fromString(it) }
+
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     override val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
     private val _artists = MutableStateFlow<List<Artist>>(emptyList())
     override val artists: StateFlow<List<Artist>> = _artists.asStateFlow()
+
+    private val _albumArtists = MutableStateFlow<List<Artist>>(emptyList())
+    override val albumArtists: StateFlow<List<Artist>> = _albumArtists.asStateFlow()
 
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     override val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
@@ -312,6 +323,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
             coroutineScope {
                 launch { _albums.value = currentApi.fetchAlbums() }
                 launch { _artists.value = currentApi.fetchArtists() }
+                launch { _albumArtists.value = currentApi.fetchAlbumArtists() }
                 launch { _playlists.value = currentApi.fetchPlaylists(userId) }
                 launch { _genres.value = currentApi.fetchGenres() }
             }
@@ -424,7 +436,10 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         return ids.mapNotNull { id -> byId[id]?.let { currentApi.toTrack(it) } }
     }
 
-    override suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>, volume: Float?) {
+    override suspend fun reportPlaybackStarted(
+        track: Track, positionMs: Long, queue: List<Track>, volume: Float?,
+        repeat: RemoteCommand.Repeat, shuffle: Boolean,
+    ) {
         val currentApi = api ?: return
         runCatching {
             currentApi.playStateApi.reportPlaybackStart(
@@ -436,15 +451,18 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                     isMuted = volume == 0f,
                     volumeLevel = volume?.let { (it * 100).toInt() },
                     playMethod = PlayMethod.DIRECT_PLAY,
-                    repeatMode = RepeatMode.REPEAT_NONE,
-                    playbackOrder = PlaybackOrder.DEFAULT,
+                    repeatMode = repeat.toJellyfin(),
+                    playbackOrder = if (shuffle) PlaybackOrder.SHUFFLE else PlaybackOrder.DEFAULT,
                     nowPlayingQueue = queue.toQueueItems(),
                 )
             )
         }
     }
 
-    override suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>, volume: Float?) {
+    override suspend fun reportPlaybackProgress(
+        track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>, volume: Float?,
+        repeat: RemoteCommand.Repeat, shuffle: Boolean,
+    ) {
         val currentApi = api ?: return
         runCatching {
             currentApi.playStateApi.reportPlaybackProgress(
@@ -456,12 +474,18 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                     isMuted = volume == 0f,
                     volumeLevel = volume?.let { (it * 100).toInt() },
                     playMethod = PlayMethod.DIRECT_PLAY,
-                    repeatMode = RepeatMode.REPEAT_NONE,
-                    playbackOrder = PlaybackOrder.DEFAULT,
+                    repeatMode = repeat.toJellyfin(),
+                    playbackOrder = if (shuffle) PlaybackOrder.SHUFFLE else PlaybackOrder.DEFAULT,
                     nowPlayingQueue = queue.toQueueItems(),
                 )
             )
         }
+    }
+
+    private fun RemoteCommand.Repeat.toJellyfin(): RepeatMode = when (this) {
+        RemoteCommand.Repeat.Off -> RepeatMode.REPEAT_NONE
+        RemoteCommand.Repeat.All -> RepeatMode.REPEAT_ALL
+        RemoteCommand.Repeat.One -> RepeatMode.REPEAT_ONE
     }
 
     override suspend fun reportPlaybackStopped(track: Track, positionMs: Long) {
@@ -533,9 +557,36 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         }
     }
 
+    // Jellyfin lets the user favourite every kind of item (tracks, albums, artists, genres,
+    // playlists), so all kinds use the heart. (It also exposes a 0–10 user rating, but the heart is
+    // the primary affordance, so we surface only that for now.)
+    override fun ratingStyle(kind: RateableKind): RatingStyle = RatingStyle.Favorite
+
+    override suspend fun getRating(kind: RateableKind, id: String): Rating {
+        val currentApi = api ?: return Rating.Unrated
+        return runCatching {
+            val item = currentApi.userLibraryApi.getItem(
+                itemId = JellyfinUUID.fromString(id),
+                userId = currentUserId(),
+            ).content
+            Rating(favorite = item.userData?.isFavorite == true)
+        }.getOrDefault(Rating.Unrated)
+    }
+
+    override suspend fun setRating(kind: RateableKind, id: String, rating: Rating) {
+        val currentApi = api ?: return
+        val itemId = JellyfinUUID.fromString(id)
+        val userId = currentUserId()
+        runCatching {
+            if (rating.favorite) currentApi.userLibraryApi.markFavoriteItem(itemId, userId)
+            else currentApi.userLibraryApi.unmarkFavoriteItem(itemId, userId)
+        }
+    }
+
     private fun clearLibrary() {
         _albums.value = emptyList()
         _artists.value = emptyList()
+        _albumArtists.value = emptyList()
         _playlists.value = emptyList()
         _genres.value = emptyList()
         _refreshError.value = null
@@ -575,6 +626,20 @@ private suspend fun ApiClient.fetchAlbums(): List<Album> =
     } ?: emptyList()
 
 private suspend fun ApiClient.fetchArtists(): List<Artist> =
+    artistsApi.getArtists(
+        sortBy = listOf(ItemSortBy.NAME),
+        sortOrder = listOf(SortOrder.ASCENDING),
+        limit = 5_000,
+    ).content.items?.map { item ->
+        Artist(
+            id = item.id.toString(),
+            name = item.name ?: "",
+            imageUrl = imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
+            imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY))
+        )
+    } ?: emptyList()
+
+private suspend fun ApiClient.fetchAlbumArtists(): List<Artist> =
     artistsApi.getAlbumArtists(
         sortBy = listOf(ItemSortBy.NAME),
         sortOrder = listOf(SortOrder.ASCENDING),

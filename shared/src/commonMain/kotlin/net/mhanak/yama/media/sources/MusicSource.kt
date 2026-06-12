@@ -30,6 +30,9 @@ interface MusicSource {
 
     val albums: StateFlow<List<Album>>
     val artists: StateFlow<List<Artist>>
+    /** Artists credited as the primary artist on at least one album. Defaults to [artists] for
+     * sources that don't distinguish between contributing and album artists. */
+    val albumArtists: StateFlow<List<Artist>> get() = artists
     val playlists: StateFlow<List<Playlist>>
     val genres: StateFlow<List<Genre>>
     val isRefreshing: StateFlow<Boolean>
@@ -69,12 +72,32 @@ interface MusicSource {
 
     /**
      * Playback reporting hooks. Let the backend track now-playing / play counts / resume positions
-     * (and let remote controllers see what this device is doing, including its [volume] so a
-     * controller can show and drive a volume slider). Default no-ops; only sources that support
-     * reporting (Jellyfin) override them. [volume] is 0f..1f, or null when unknown. Reported only for
-     * *local* playback.
+     * (and let remote controllers see what this device is doing, including its [volume], [repeat] and
+     * [shuffle] state and queue order, so a controller's UI can mirror it). Default no-ops; only
+     * sources that support reporting (Jellyfin) override them. [volume] is 0f..1f, or null when
+     * unknown. Reported only for *local* playback.
      */
-    suspend fun reportPlaybackStarted(track: Track, positionMs: Long, queue: List<Track>, volume: Float?) {}
-    suspend fun reportPlaybackProgress(track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>, volume: Float?) {}
+    suspend fun reportPlaybackStarted(
+        track: Track, positionMs: Long, queue: List<Track>, volume: Float?,
+        repeat: RemoteCommand.Repeat = RemoteCommand.Repeat.Off, shuffle: Boolean = false,
+    ) {}
+    suspend fun reportPlaybackProgress(
+        track: Track, positionMs: Long, isPaused: Boolean, queue: List<Track>, volume: Float?,
+        repeat: RemoteCommand.Repeat = RemoteCommand.Repeat.Off, shuffle: Boolean = false,
+    ) {}
     suspend fun reportPlaybackStopped(track: Track, positionMs: Long) {}
+
+    /**
+     * Rating / favouriting. Liking items is universal, but the *style* (heart vs stars) and which
+     * [RateableKind]s are rateable differ per backend, so [ratingStyle] declares both for a given
+     * kind — returning [RatingStyle.None] tells the UI to hide the control. The default source
+     * supports no rating at all; override these together on sources that do.
+     */
+    fun ratingStyle(kind: RateableKind): RatingStyle = RatingStyle.None
+
+    /** Current rating of an item, or [Rating.Unrated] when unknown. Only called for rateable kinds. */
+    suspend fun getRating(kind: RateableKind, id: String): Rating = Rating.Unrated
+
+    /** Persist [rating] for an item. Only called for rateable kinds. */
+    suspend fun setRating(kind: RateableKind, id: String, rating: Rating) {}
 }

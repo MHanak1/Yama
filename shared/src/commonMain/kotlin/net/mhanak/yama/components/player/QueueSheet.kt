@@ -1,9 +1,13 @@
 package net.mhanak.yama.components.player
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,25 +16,26 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListLayoutInfo
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import net.mhanak.yama.components.glassEffect
+import net.mhanak.yama.components.glassSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,31 +47,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.delay
-import net.mhanak.yama.components.GlassModalBottomSheet
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlayerStatus
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 /**
- * Bottom sheet showing the live playback queue. Each row shows the track's album cover, title and
- * album/artist; tapping a row jumps playback to it. Tracks can be removed (trailing ✕) or rearranged
- * by dragging the leading handle.
+ * Bottom sheet showing the live playback queue as a flat reorderable list. The currently-playing
+ * track is visually distinguished (primary colour, bold, animated equaliser) but participates in
+ * reordering like any other row.
  *
- * Reordering is done locally on a working copy ([entries]) for snappy, finger-tracking feedback, then
- * committed to the [player] as a single [Player.move] on drop. The working copy re-syncs from
- * [status] whenever the queue changes from the outside (a track ending, an enqueue) — but only while
- * no drag is in flight, so a background update can't clobber an in-progress reorder.
+ * [entries] is a single working copy mirroring the whole queue (index == real queue index). Each
+ * entry carries a stable [QueueEntry.uid] so the LazyColumn can key/animate rows even when the
+ * same track appears twice. [entries] re-syncs from [status] whenever the queue changes externally,
+ * but never mid-drag, so a background update can't clobber an in-progress reorder.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,145 +77,106 @@ fun QueueSheet(
     player: Player,
     onDismiss: () -> Unit,
 ) {
-    // Working copy of the queue. Each entry carries a stable [uid] so the LazyColumn can key/animate
-    // rows even when the same track appears twice — track ids aren't unique within a queue.
     val entries = remember { mutableStateListOf<QueueEntry>() }
     var nextUid by remember { mutableStateOf(0L) }
-
-    // The uid of the row being dragged (null when idle), plus the bookkeeping the gesture needs.
-    var draggingUid by remember { mutableStateOf<Long?>(null) }
     var dragStartIndex by remember { mutableStateOf(-1) }
-    var dragInitialOffset by remember { mutableStateOf(0) }
-    var dragDistance by remember { mutableStateOf(0f) }
+    var didInitialScroll by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
 
-    // Re-sync the working copy from the player whenever the queue changes externally — but never mid
-    // drag (draggingUid != null), so an incoming update can't fight the reorder under the finger.
-    // Keyed on status.queue only (not draggingUid): a drag's commit (player.move) reaches status
-    // asynchronously, so retriggering on drag-end would briefly rebuild to the stale order and flicker.
-    // When status finally catches up it already matches entries, so the comparison no-ops.
-    LaunchedEffect(status.queue) {
-        if (draggingUid != null) return@LaunchedEffect
-        if (entries.map { it.track } == status.queue) return@LaunchedEffect
-        entries.clear()
-        status.queue.forEach { entries.add(QueueEntry(nextUid++, it)) }
+    val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
+        val fromIndex = entries.indexOfFirst { it.uid == from.key }
+        val toIndex = entries.indexOfFirst { it.uid == to.key }
+        if (fromIndex >= 0 && toIndex >= 0) {
+            entries.add(toIndex, entries.removeAt(fromIndex))
+        }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Text(
-            "Queue",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-        )
+    LaunchedEffect(status.queue, status.queueIndex) {
+        if (dragStartIndex >= 0) return@LaunchedEffect
+        val desired = status.queue.mapIndexed { index, track -> track to (index == status.queueIndex) }
+        if (entries.map { it.track to it.isCurrent } == desired) return@LaunchedEffect
+        entries.clear()
+        desired.forEach { (track, isCurrent) -> entries.add(QueueEntry(nextUid++, track, isCurrent)) }
+    }
 
-        if (entries.isEmpty()) {
-            Text(
-                "The queue is empty",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-            )
+    val currentIndex = entries.indexOfFirst { it.isCurrent }
+    LaunchedEffect(currentIndex) {
+        if (!didInitialScroll && currentIndex >= 0) {
+            listState.scrollToItem(currentIndex)
+            didInitialScroll = true
         }
+    }
 
-        LazyColumn(
-            state = listState,
-            // Cap the height so a long queue doesn't push the sheet to full screen; it scrolls within.
-            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+    val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    val sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+        containerColor = Color.Transparent,
+        dragHandle = null,
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .glassEffect(sheetContainerColor, sheetShape)
+                .glassSource(zIndex = 3f),
         ) {
-            itemsIndexed(entries, key = { _, entry -> entry.uid }) { index, entry ->
-                val isDragging = entry.uid == draggingUid
-                // The dragged row floats under the finger: translate it by (where the finger has taken
-                // it) minus (its current laid-out position), recomputed each frame from layoutInfo so it
-                // stays put as the list reorders/scrolls beneath it. Others animate to their new slots.
-                val rowModifier = if (isDragging) {
-                    Modifier.zIndex(1f).graphicsLayer {
-                        val current = listState.layoutInfo.itemOffsetByKey(entry.uid) ?: dragInitialOffset
-                        translationY = (dragInitialOffset + dragDistance) - current
-                    }
-                } else {
-                    Modifier.animateItem()
-                }
-
-                QueueRow(
-                    track = entry.track,
-                    isCurrent = index == status.queueIndex,
-                    isDragging = isDragging,
-                    onClick = { player.skipTo(index) },
-                    onRemove = {
-                        val at = entries.indexOfFirst { it.uid == entry.uid }
-                        if (at >= 0) {
-                            entries.removeAt(at)
-                            player.removeAt(at)
-                        }
-                    },
-                    dragHandleModifier = Modifier.pointerInput(entry.uid) {
-                        detectDragGestures(
-                            onDragStart = {
-                                val start = entries.indexOfFirst { it.uid == entry.uid }
-                                if (start >= 0) {
-                                    draggingUid = entry.uid
-                                    dragStartIndex = start
-                                    dragInitialOffset = listState.layoutInfo.itemOffsetByKey(entry.uid) ?: 0
-                                    dragDistance = 0f
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                }
-                            },
-                            onDrag = { change, amount ->
-                                change.consume()
-                                dragDistance += amount.y
-                                reorderToHover(entries, listState.layoutInfo, draggingUid, dragInitialOffset, dragDistance)
-                            },
-                            onDragEnd = {
-                                val finalIndex = entries.indexOfFirst { it.uid == draggingUid }
-                                if (dragStartIndex >= 0 && finalIndex >= 0 && finalIndex != dragStartIndex) {
-                                    player.move(dragStartIndex, finalIndex)
-                                }
-                                draggingUid = null
-                                dragStartIndex = -1
-                            },
-                            onDragCancel = {
-                                draggingUid = null
-                                dragStartIndex = -1
-                            },
-                        )
-                    },
-                    modifier = rowModifier,
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 32.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
                 )
             }
-        }
-
-        Spacer(Modifier.height(8.dp).navigationBarsPadding())
-    }
-
-    // Autoscroll while a drag is parked near the top/bottom edge, so a track can be moved past the
-    // visible window. Reads drag state via snapshot each frame; ends when the drag does.
-    LaunchedEffect(draggingUid) {
-        if (draggingUid == null) return@LaunchedEffect
-        while (draggingUid != null) {
-            val info = listState.layoutInfo
-            val top = (dragInitialOffset + dragDistance)
-            val rowSize = info.itemSizeByKey(draggingUid) ?: 0
-            val edge = rowSize.toFloat()
-            val delta = when {
-                top + rowSize > info.viewportEndOffset - edge -> (top + rowSize) - (info.viewportEndOffset - edge)
-                top < info.viewportStartOffset + edge -> top - (info.viewportStartOffset + edge)
-                else -> 0f
-            }.coerceIn(-edge, edge)
-            if (delta != 0f) {
-                listState.scrollBy(delta)
-                reorderToHover(entries, listState.layoutInfo, draggingUid, dragInitialOffset, dragDistance)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                items(entries, key = { it.uid }) { entry ->
+                    ReorderableItem(reorderableLazyListState, key = entry.uid) { isDragging ->
+                        QueueRow(
+                            track = entry.track,
+                            isCurrent = entry.isCurrent,
+                            isDragging = isDragging,
+                            onClick = { player.skipTo(entries.indexOfFirst { it.uid == entry.uid }) },
+                            onRemove = {
+                                val at = entries.indexOfFirst { it.uid == entry.uid }
+                                if (at >= 0) { entries.removeAt(at); player.removeAt(at) }
+                            },
+                            dragHandleModifier = Modifier.draggableHandle(
+                                onDragStarted = {
+                                    dragStartIndex = entries.indexOfFirst { it.uid == entry.uid }
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDragStopped = {
+                                    val finalIndex = entries.indexOfFirst { it.uid == entry.uid }
+                                    if (dragStartIndex >= 0 && finalIndex >= 0 && finalIndex != dragStartIndex) {
+                                        player.move(dragStartIndex, finalIndex)
+                                    }
+                                    dragStartIndex = -1
+                                },
+                            ),
+                        )
+                    }
+                }
             }
-            // Pace to roughly one step per frame.
-            delay(16)
+            Spacer(Modifier.height(8.dp).navigationBarsPadding())
         }
     }
 }
 
-/** A queue row: album art, title + album/artist, an equaliser glyph on the current track, ✕, handle. */
 @Composable
 private fun QueueRow(
     track: Track,
@@ -224,10 +187,7 @@ private fun QueueRow(
     dragHandleModifier: Modifier,
     modifier: Modifier = Modifier,
 ) {
-    // Rows are transparent so the sheet's glass shows through; the dragged row gets a solid lifted
-    // surface so it reads as picked up off the list.
-    val container =
-        if (isDragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent
+    val container = if (isDragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -247,7 +207,7 @@ private fun QueueRow(
             Text(
                 track.name,
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (isCurrent) FontWeight.SemiBold else null,
                 color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -264,64 +224,64 @@ private fun QueueRow(
             }
         }
 
-        if (isCurrent) {
-            Icon(
-                Icons.Filled.GraphicEq,
-                contentDescription = "Now playing",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-        }
-
-        Box(Modifier.size(40.dp).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = "Remove from queue",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            if (isCurrent) {
+                NowPlayingIndicator()
+            } else {
+                Box(Modifier.fillMaxWidth().height(40.dp).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Remove from queue",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
 
         Box(Modifier.size(40.dp).then(dragHandleModifier), contentAlignment = Alignment.Center) {
             Icon(
                 Icons.Filled.DragHandle,
                 contentDescription = "Reorder",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
 
-/** A queue entry paired with a process-stable id so duplicate tracks stay individually keyable. */
-private data class QueueEntry(val uid: Long, val track: Track)
-
-private fun LazyListLayoutInfo.itemOffsetByKey(key: Any?): Int? =
-    visibleItemsInfo.firstOrNull { it.key == key }?.offset
-
-private fun LazyListLayoutInfo.itemSizeByKey(key: Any?): Int? =
-    visibleItemsInfo.firstOrNull { it.key == key }?.size
-
-/**
- * If the dragged row's centre now sits over another row, swap it into that slot in [entries]. Called
- * on every drag delta and every autoscroll step; idempotent when nothing has changed.
- */
-private fun reorderToHover(
-    entries: MutableList<QueueEntry>,
-    info: LazyListLayoutInfo,
-    draggingUid: Long?,
-    initialOffset: Int,
-    distance: Float,
-) {
-    val key = draggingUid ?: return
-    val dragged = info.visibleItemsInfo.firstOrNull { it.key == key } ?: return
-    val centre = (initialOffset + distance + dragged.size / 2f).toInt()
-    val target = info.visibleItemsInfo.firstOrNull { item ->
-        item.key != key && centre in item.offset..(item.offset + item.size)
-    } ?: return
-    val from = entries.indexOfFirst { it.uid == key }
-    val to = target.index
-    if (from in entries.indices && to in entries.indices && from != to) {
-        entries.add(to, entries.removeAt(from))
+@Composable
+private fun NowPlayingIndicator(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "nowplaying")
+    val b1 by transition.animateFloat(
+        initialValue = 0.3f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse),
+        label = "b1",
+    )
+    val b2 by transition.animateFloat(
+        initialValue = 1f, targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(tween(350, easing = LinearEasing), RepeatMode.Reverse),
+        label = "b2",
+    )
+    val b3 by transition.animateFloat(
+        initialValue = 0.6f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(450, easing = LinearEasing), RepeatMode.Reverse),
+        label = "b3",
+    )
+    Row(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf(b1, b2, b3).forEach { frac ->
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(16.dp * frac)
+                    .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
     }
 }
+
+private data class QueueEntry(val uid: Long, val track: Track, val isCurrent: Boolean)

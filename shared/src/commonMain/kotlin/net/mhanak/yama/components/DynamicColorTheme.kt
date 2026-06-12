@@ -21,6 +21,7 @@ import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import com.kmpalette.rememberPainterDominantColorState
 import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
 import net.mhanak.yama.LocalAppContainer
 
@@ -81,7 +82,8 @@ fun DynamicColorTheme(
     cacheKey: String?,
     enabled: Boolean = true,
     animationSpec: AnimationSpec<Float> = tween(DynamicColorAnimationMs),
-    style: PaletteStyle = PaletteStyle.TonalSpot,
+    style: PaletteStyle = PaletteStyle.Fidelity,
+    specVersion: ColorSpec.SpecVersion = ColorSpec.SpecVersion.SPEC_2021,
     content: @Composable () -> Unit,
 ) {
     // Deliberately no early return on [enabled] or [imageUrl]: [content] always stays in this single
@@ -96,7 +98,12 @@ fun DynamicColorTheme(
     val isDark = ambient.surface.luminance() < 0.5f
     // rememberDynamicColorScheme can't be called conditionally, so always build from a non-null seed
     // (falling back to the ambient primary) and only *use* it once a real seed has resolved.
-    val seedScheme = rememberDynamicColorScheme(seedColor = seed ?: ambient.primary, isDark = isDark, style = style)
+    val seedScheme = rememberDynamicColorScheme(
+        seedColor = seed ?: ambient.primary,
+        isDark = isDark,
+        style = style,
+        specVersion = specVersion,
+    )
     val target = if (seed != null) seedScheme else ambient
 
     // Anchor the animation on whatever the scheme is at mount: if the seed is already cached (known on

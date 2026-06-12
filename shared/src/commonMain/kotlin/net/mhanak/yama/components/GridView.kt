@@ -20,12 +20,15 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,7 +46,16 @@ fun GridView(
     prefetchUrls: List<String?>? = null,
     content: LazyGridScope.() -> Unit
 ) {
-    BoxWithConstraints(modifier.focusGroup().focusRestorer()) {
+    // On TV, register this grid as the screen's primary focus target so the shell routes screen-entry
+    // focus straight into the focusRestorer here (restoring the previously focused item) instead of
+    // onto the top search bar. Attaching the requester off TV is harmless — it's only ever requested
+    // there. See TvFocus.kt.
+    val contentFocus = remember { FocusRequester() }
+    RegisterPrimaryContentFocus(contentFocus)
+    // focusRestorer/focusRequester must precede focusGroup: a focus target reads focus properties
+    // from itself and its ancestors (the modifiers before it), so the restorer only applies to the
+    // group when it sits ahead of focusGroup in the chain.
+    BoxWithConstraints(modifier.focusRequester(contentFocus).focusRestorer().focusGroup()) {
         LazyVerticalGrid(
             state = state,
             // silly way of making the grid size fit both mobile and desktop

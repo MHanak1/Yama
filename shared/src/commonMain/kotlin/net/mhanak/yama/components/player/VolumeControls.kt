@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import net.mhanak.yama.media.playback.Player
 
 /**
@@ -77,23 +78,16 @@ fun VolumeSlider(player: Player, modifier: Modifier = Modifier) {
 }
 
 /**
- * A transient vertical volume bar pinned to the right edge, shown briefly whenever [volume] changes
- * (and the active player exposes a volume). This is the on-screen feedback for hardware volume keys
- * while casting — where the system volume dialog is suppressed — and for any other volume change
- * (slider drag, or the remote device being adjusted elsewhere). Hidden after a short delay.
+ * A transient vertical volume bar pinned to the right edge, shown briefly when [remoteVolumeChange]
+ * emits — i.e. only for volume changes triggered by a remote command, not local UI interaction.
  *
  * Place inside the root [Box] of the screen; it aligns itself to the center-right.
  */
 @Composable
-fun BoxScope.VolumeIndicator(volume: Float?) {
+fun BoxScope.VolumeIndicator(volume: Float?, remoteVolumeChange: Flow<Unit>) {
     var visible by remember { mutableStateOf(false) }
-    // The previous reported level; used to detect a *change* so the bar doesn't flash on first appear
-    // (e.g. when casting starts and the level goes null -> value).
-    var previous by remember { mutableStateOf(volume) }
-    LaunchedEffect(volume) {
-        val old = previous
-        previous = volume
-        if (volume != null && old != null && volume != old) {
+    LaunchedEffect(remoteVolumeChange) {
+        remoteVolumeChange.collect {
             visible = true
             delay(1_500)
             visible = false

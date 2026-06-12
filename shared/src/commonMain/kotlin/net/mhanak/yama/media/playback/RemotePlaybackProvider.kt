@@ -26,6 +26,14 @@ interface RemotePlaybackProvider {
     /** Currently reachable cast targets (excludes this device). Empty when none / not connected. */
     val remoteTargets: StateFlow<List<RemoteTarget>>
 
+    /**
+     * Whether the live link the provider relies on to mirror a controlled device is currently up. While
+     * false, a remote ("Play On") session's now-playing / queue / seekbar can't update, so the UI can
+     * flag the state as stale instead of presenting it as live. Always true for sources with no such
+     * link (the default).
+     */
+    val connected: StateFlow<Boolean>
+
     /** Build a [Player] that controls [target]. The caller owns its lifecycle (calls [Player.release]). */
     fun createPlayer(target: RemoteTarget): Player
 

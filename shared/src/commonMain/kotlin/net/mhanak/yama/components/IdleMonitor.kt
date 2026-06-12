@@ -9,10 +9,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
@@ -45,9 +45,11 @@ const val PlayerIdleTimeoutMs = 60_000L
  * Reset [monitor] on genuine user interaction within this subtree.
  *
  * Pointer interaction is observed in the [PointerEventPass.Initial] pass (counted without consuming
- * the event). We only treat a press/release/scroll or an actual position change as interaction:
- * when the chrome fades in/out the layout shifts and Compose re-dispatches a synthetic pointer event
- * over the (stationary) cursor — counting those would keep restarting the clock so it never fires.
+ * the event). For Move events we track the last seen cursor position ourselves and only count a move
+ * as interaction when the position actually changed: layout-shift re-dispatches (chrome fading in/out
+ * causes Compose to re-dispatch the pointer over the stationary cursor) arrive at the same coordinates
+ * as the previous event and are therefore ignored. Press/Release/Scroll always count.
+ * Note: positionChanged() is unreliable for this purpose on Linux/JVM in the Initial pass.
  *
  * Key events (desktop keyboard, and TV D-pad while a focusable in this subtree holds focus) reset
  * via [onPreviewKeyEvent]. Once the zen view hides its controls there is no focusable left to route
@@ -55,12 +57,20 @@ const val PlayerIdleTimeoutMs = 60_000L
  */
 fun Modifier.resetIdleOn(monitor: IdleMonitor): Modifier = this
     .pointerInput(monitor) {
+        var lastMovePos: Offset? = null
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
                 val interacted = when (event.type) {
-                    PointerEventType.Press, PointerEventType.Release, PointerEventType.Scroll -> true
-                    else -> event.changes.any { it.positionChanged() }
+                    PointerEventType.Press, PointerEventType.Release, PointerEventType.Scroll -> {
+                        lastMovePos = null
+                        true
+                    }
+                    PointerEventType.Move -> {
+                        val pos = event.changes.firstOrNull()?.position
+                        (pos != null && pos != lastMovePos).also { moved -> if (moved) lastMovePos = pos }
+                    }
+                    else -> false
                 }
                 if (interacted) monitor.reset()
             }

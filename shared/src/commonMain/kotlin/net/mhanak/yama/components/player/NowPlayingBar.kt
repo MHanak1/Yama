@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -35,9 +36,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -48,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import net.mhanak.yama.components.LocalUiOpacity
 import net.mhanak.yama.components.glassEffect
 import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlayerStatus
@@ -79,6 +85,8 @@ fun NowPlayingBar(
     modifier: Modifier = Modifier,
     wide: Boolean = false,
     peekHeight: Dp = 0.dp,
+    // TV only: where D-pad focus goes when leaving the bar upward (the content area). Null off TV.
+    focusUp: FocusRequester? = null,
 ) {
     val track = status.current ?: return
     val baseHeight = if (wide) MiniPlayerWideHeight else MiniPlayerHeight
@@ -100,6 +108,17 @@ fun NowPlayingBar(
 
     Column(
         modifier
+            // Make the bar a focus group so D-pad up from any control exits into the content grid
+            // rather than getting stuck on the bar. Other directions keep their defaults (left → rail).
+            // focusProperties must precede focusGroup so onExit applies to the bar's own focus target.
+            .then(
+                if (focusUp != null) Modifier
+                    .focusProperties {
+                        onExit = { if (requestedFocusDirection == FocusDirection.Up) focusUp.requestFocus() }
+                    }
+                    .focusGroup()
+                else Modifier,
+            )
             .fillMaxWidth()
             .height((baseHeight + with(density) { heightDeltaPx.value.toDp() }).coerceAtLeast(0.dp))
             .glassEffect(MaterialTheme.colorScheme.surfaceContainer)
@@ -207,6 +226,9 @@ fun NowPlayingBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                // Zero-footprint unless we're casting and the live link has dropped, in which case the
+                // bar above shows the last-known remote state — flag that it's no longer updating.
+                RemoteConnectionIndicator()
             }
             IconButton(onClick = { player.togglePlayPause() }, modifier = Modifier.size(48.dp)) {
                 Icon(
@@ -221,11 +243,11 @@ fun NowPlayingBar(
 
         val duration = status.durationMs.coerceAtLeast(1)
         val position = rememberSmoothPosition(status)
-        Box(Modifier.fillMaxWidth().height(2.dp)) {
-            LinearProgressIndicator(
-                progress = { (position.toFloat() / duration).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-            )
-        }
+
+        LinearProgressIndicator(
+            progress = { (position.toFloat() / duration).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp).padding(horizontal = 4.dp),
+            trackColor = ProgressIndicatorDefaults.linearTrackColor.copy(alpha = LocalUiOpacity.current),
+        )
     }
 }

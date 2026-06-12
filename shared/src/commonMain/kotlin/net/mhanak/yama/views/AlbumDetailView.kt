@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.materialkolor.PaletteStyle
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.BlurredBackgroundImage
 import net.mhanak.yama.components.DetailViewHeader

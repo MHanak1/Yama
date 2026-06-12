@@ -103,6 +103,7 @@ fun GlassTopAppBar(
 }
 
 @Composable
+//THIS IS CURRENTLY BROKEN! DO NOT USE
 fun GlassModalDrawerSheet(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,

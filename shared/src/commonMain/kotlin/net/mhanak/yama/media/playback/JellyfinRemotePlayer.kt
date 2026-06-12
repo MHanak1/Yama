@@ -20,6 +20,7 @@ import org.jellyfin.sdk.api.client.extensions.sessionApi
 import org.jellyfin.sdk.model.UUID
 import org.jellyfin.sdk.model.api.GeneralCommand
 import org.jellyfin.sdk.model.api.GeneralCommandType
+import org.jellyfin.sdk.model.api.GroupShuffleMode
 import org.jellyfin.sdk.model.api.PlayCommand
 import org.jellyfin.sdk.model.api.PlaybackOrder
 import org.jellyfin.sdk.model.api.PlaystateCommand
@@ -67,16 +68,31 @@ class JellyfinRemotePlayer(
     private val optimisticVolume = MutableStateFlow<Float?>(null)
     private var optimisticVolumeClearJob: Job? = null
 
+    // Optimistic repeat/shuffle overrides, same rationale as [optimisticPlaying]: the toggle round-trips
+    // through the server and back as a session push before [reportedStatus] reflects it, so we show the
+    // intended value immediately and drop it once the device's report confirms it (or the timeout).
+    private val optimisticRepeat = MutableStateFlow<RepeatMode?>(null)
+    private var optimisticRepeatClearJob: Job? = null
+    private val optimisticShuffle = MutableStateFlow<Boolean?>(null)
+    private var optimisticShuffleClearJob: Job? = null
+
     override val status: StateFlow<PlayerStatus> =
-        combine(reportedStatus, optimisticPlaying) { reported, optimistic ->
-            if (optimistic == null || optimistic == reported.isPlaying) {
-                reported
-            } else {
-                reported.copy(
-                    isPlaying = optimistic,
-                    state = if (optimistic) PlaybackState.Playing else PlaybackState.Paused,
+        combine(
+            reportedStatus,
+            optimisticPlaying,
+            optimisticRepeat,
+            optimisticShuffle,
+        ) { reported, playing, repeat, shuffle ->
+            var result = reported
+            if (playing != null && playing != reported.isPlaying) {
+                result = result.copy(
+                    isPlaying = playing,
+                    state = if (playing) PlaybackState.Playing else PlaybackState.Paused,
                 )
             }
+            if (repeat != null) result = result.copy(repeat = repeat)
+            if (shuffle != null) result = result.copy(shuffle = shuffle)
+            result
         }.stateIn(scope, SharingStarted.Eagerly, PlayerStatus())
 
     init {
@@ -93,6 +109,14 @@ class JellyfinRemotePlayer(
                     optimisticVolumeClearJob?.cancel()
                     optimisticVolume.value = null
                 }
+                if (optimisticRepeat.value == reported.repeat) {
+                    optimisticRepeatClearJob?.cancel()
+                    optimisticRepeat.value = null
+                }
+                if (optimisticShuffle.value == reported.shuffle) {
+                    optimisticShuffleClearJob?.cancel()
+                    optimisticShuffle.value = null
+                }
             }
         }
     }
@@ -107,7 +131,18 @@ class JellyfinRemotePlayer(
     }
 
     private fun SessionInfoDto.toPlayerStatus(): PlayerStatus {
-        val queue = nowPlayingQueueFullItems?.map { api.toTrack(it) } ?: emptyList()
+        // NowPlayingQueue is the device's authoritative *ordered* queue; NowPlayingQueueFullItems carries
+        // the item details. The server only rebuilds the full-items list when the set of items changes,
+        // so it goes stale on a pure reorder — resolve the details in NowPlayingQueue order so a reorder
+        // on the controlled device (or one we just pushed) is reflected here.
+        val fullItems = nowPlayingQueueFullItems
+        val rawOrder = nowPlayingQueue
+        val queue = if (!rawOrder.isNullOrEmpty() && !fullItems.isNullOrEmpty()) {
+            val byId = fullItems.associateBy { it.id }
+            rawOrder.mapNotNull { entry -> byId[entry.id]?.let { api.toTrack(it) } }
+        } else {
+            fullItems?.map { api.toTrack(it) } ?: emptyList()
+        }
         val current = nowPlayingItem?.let { api.toTrack(it) }
         val paused = playState?.isPaused ?: false
         return PlayerStatus(
@@ -134,7 +169,7 @@ class JellyfinRemotePlayer(
         )
     }
 
-    private fun play(command: PlayCommand, tracks: List<Track>, startIndex: Int = 0) {
+    private fun play(command: PlayCommand, tracks: List<Track>, startIndex: Int = 0, startPositionTicks: Long? = null) {
         if (tracks.isEmpty()) return
         scope.launch {
             runCatching {
@@ -143,6 +178,7 @@ class JellyfinRemotePlayer(
                     playCommand = command,
                     itemIds = tracks.map { UUID.fromString(it.id) },
                     startIndex = startIndex,
+                    startPositionTicks = startPositionTicks,
                 )
             }
         }
@@ -208,6 +244,7 @@ class JellyfinRemotePlayer(
     }
 
     override fun setRepeat(mode: RepeatMode) {
+        setOptimisticRepeat(mode)
         val value = when (mode) {
             RepeatMode.Off -> org.jellyfin.sdk.model.api.RepeatMode.REPEAT_NONE
             RepeatMode.All -> org.jellyfin.sdk.model.api.RepeatMode.REPEAT_ALL
@@ -217,15 +254,72 @@ class JellyfinRemotePlayer(
     }
 
     override fun setShuffle(enabled: Boolean) {
-        val order = if (enabled) PlaybackOrder.SHUFFLE else PlaybackOrder.DEFAULT
-        generalCommand(GeneralCommandType.SET_SHUFFLE_QUEUE, mapOf("ShuffleMode" to order.serialName))
+        setOptimisticShuffle(enabled)
+        // The SetShuffleQueue command's "ShuffleMode" argument is a GroupShuffleMode serial name
+        // ("Shuffle"/"Sorted"), not the PlaybackOrder one ("Shuffle"/"Default") that nowPlaying reports.
+        val mode = if (enabled) GroupShuffleMode.SHUFFLE else GroupShuffleMode.SORTED
+        generalCommand(GeneralCommandType.SET_SHUFFLE_QUEUE, mapOf("ShuffleMode" to mode.serialName))
     }
 
-    // Remote queue editing isn't exposed by the session API; no-op for now (matches Player contract,
-    // which lets backends that can't do an op simply ignore it).
-    override fun removeAt(index: Int) {}
-    override fun move(from: Int, to: Int) {}
-    override fun clearQueue() {}
+    private fun setOptimisticRepeat(mode: RepeatMode) {
+        optimisticRepeat.value = mode
+        optimisticRepeatClearJob?.cancel()
+        optimisticRepeatClearJob = scope.launch {
+            delay(OPTIMISTIC_TIMEOUT_MS)
+            optimisticRepeat.value = null
+        }
+    }
+
+    private fun setOptimisticShuffle(enabled: Boolean) {
+        optimisticShuffle.value = enabled
+        optimisticShuffleClearJob?.cancel()
+        optimisticShuffleClearJob = scope.launch {
+            delay(OPTIMISTIC_TIMEOUT_MS)
+            optimisticShuffle.value = null
+        }
+    }
+
+    // The session API has no in-place queue reorder/remove, so — like [skipTo] — we replay the edited
+    // queue with PLAY_NOW starting on whatever index the current track lands at. When the current track
+    // survives the edit we resume it at its reported position (so it only jumps back by the report lag,
+    // a few seconds, instead of restarting); when the edit removes the current track, playback advances
+    // to its replacement from the start.
+    override fun removeAt(index: Int) {
+        val queue = status.value.queue.toMutableList()
+        if (index !in queue.indices) return
+        val current = status.value.queueIndex
+        queue.removeAt(index)
+        if (queue.isEmpty()) return clearQueue()
+        if (index == current) {
+            // Removing the playing track: advance to whatever now sits at that index, from the start.
+            play(PlayCommand.PLAY_NOW, queue, current.coerceIn(0, queue.lastIndex))
+        } else {
+            // The current track shifts down by one if a track before it was removed; resume it in place.
+            val newCurrent = if (index < current) current - 1 else current
+            play(PlayCommand.PLAY_NOW, queue, newCurrent.coerceIn(0, queue.lastIndex), resumeTicks())
+        }
+    }
+
+    override fun move(from: Int, to: Int) {
+        val queue = status.value.queue.toMutableList()
+        if (from !in queue.indices || to !in queue.indices) return
+        val current = status.value.queueIndex
+        queue.add(to, queue.removeAt(from))
+        // Track where the currently-playing track ends up so playback continues on it, in place.
+        val newCurrent = when {
+            current == from -> to
+            from < current && to >= current -> current - 1
+            from > current && to <= current -> current + 1
+            else -> current
+        }
+        play(PlayCommand.PLAY_NOW, queue, newCurrent.coerceIn(0, queue.lastIndex), resumeTicks())
+    }
+
+    // The current playback position as Jellyfin ticks (100-ns units), for resuming the current track
+    // after a replay-based queue edit.
+    private fun resumeTicks(): Long = status.value.positionMs * 10_000
+
+    override fun clearQueue() = playstate(PlaystateCommand.STOP)
 
     override val volume: StateFlow<Float?> =
         combine(reportedStatus, optimisticVolume) { reported, optimistic ->

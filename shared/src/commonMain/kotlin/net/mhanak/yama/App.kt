@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.ComposeUiFlags
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
@@ -20,9 +22,14 @@ import net.mhanak.yama.screens.MainScreen
 import net.mhanak.yama.util.AppTheme
 import net.mhanak.yama.util.ThemeMode
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 @Preview
 fun App() {
+    // Compose's focus save/restore is off by default in CMP 1.11. Turn it on (idempotent, set once)
+    // so `focusRestorer` actually remembers the focused item across navigation — without it the
+    // framework never saves the focused child, so returning to a screen can't restore D-pad focus.
+    remember { ComposeUiFlags.isFocusRestorationEnabled = true }
     val appContainer = remember { AppContainer.shared }
     val hazeState = rememberHazeState()
     val darkTheme = when (appContainer.themeMode) {

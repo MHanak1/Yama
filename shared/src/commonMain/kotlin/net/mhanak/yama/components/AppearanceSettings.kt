@@ -11,9 +11,6 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -37,17 +34,13 @@ fun AppearanceSettings(modifier: Modifier = Modifier) {
     Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text("Theme", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp))
         val themeModes = listOf(ThemeMode.Light, ThemeMode.System, ThemeMode.Dark)
-        val themeLabels = listOf("Light", "Auto", "Dark")
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            themeModes.forEachIndexed { index, mode ->
-                SegmentedButton(
-                    selected = appContainer.themeMode == mode,
-                    onClick = { appContainer.themeMode = mode },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = themeModes.size),
-                    label = { Text(themeLabels[index]) },
-                )
-            }
-        }
+        val themeLabels = mapOf(ThemeMode.Light to "Light", ThemeMode.System to "Auto", ThemeMode.Dark to "Dark")
+        SegmentedButtonRow(
+            options = themeModes,
+            selectedOption = appContainer.themeMode,
+            onOptionSelected = { appContainer.themeMode = it },
+            modifier = Modifier.fillMaxWidth(),
+        ) { mode -> Text(themeLabels[mode] ?: mode.name) }
 
         // System dynamic palette ("Material You"). Hidden where the platform can't provide one
         // (desktop, Android < 12), in which case the app always uses the generated seed scheme.

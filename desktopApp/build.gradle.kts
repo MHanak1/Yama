@@ -23,6 +23,9 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "net.mhanak.yamao"
             packageVersion = "1.0.0"
+
+            linux { iconFile.set(project.file("src/main/resources/icon.png")) }
+            windows { iconFile.set(project.file("src/main/resources/icon.ico")) }
         }
     }
 }

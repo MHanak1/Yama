@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,7 +69,9 @@ import net.mhanak.yama.components.AppBottomBar
 import net.mhanak.yama.components.AppNavRail
 import net.mhanak.yama.components.BottomBarDestination
 import net.mhanak.yama.components.KeepScreenOn
+import net.mhanak.yama.components.LocalPrimaryContentFocus
 import net.mhanak.yama.components.PlatformBackHandler
+import net.mhanak.yama.components.PrimaryContentFocus
 import net.mhanak.yama.components.PlatformUserInteractionEffect
 import net.mhanak.yama.components.PlayerIdleTimeoutMs
 import net.mhanak.yama.components.SourceSwitcher
@@ -149,6 +152,10 @@ fun MainScreen() {
     var selectedTab by remember { mutableStateOf(LibraryTab.Albums) }
     val isTV = isTelevisionDevice()
     val contentFocusRequester = remember { FocusRequester() }
+    // The active screen's primary grid registers here so the focus effect below can request focus on
+    // it directly (landing on content + restoring the previously focused item) rather than on the
+    // NavHost group, which would land on the first focusable — the top search bar. See TvFocus.kt.
+    val primaryContentFocus = remember { PrimaryContentFocus() }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val destination = navBackStackEntry?.destination
 
@@ -210,7 +217,12 @@ fun MainScreen() {
             trySend(lifecycle.currentState)
             awaitClose { lifecycle.removeObserver(observer) }
         }.first { it >= Lifecycle.State.RESUMED }
-        runCatching { contentFocusRequester.requestFocus() }
+        // Request focus on the active screen's content grid directly (not the NavHost group): a
+        // programmatic requestFocus() on a group skips its onEnter redirect and lands on the first
+        // focusable — the search bar. Requesting the grid lands in the content, and the grid's
+        // focusRestorer (reached via the child→parent custom-enter path) returns to the previously
+        // focused item. Falls back to the NavHost group on screens with no grid (Home/Settings).
+        runCatching { (primaryContentFocus.requester ?: contentFocusRequester).requestFocus() }
     }
 
     val onTabClick: (LibraryTab) -> Unit = { tab ->
@@ -231,9 +243,14 @@ fun MainScreen() {
     }
 
     Box(Modifier.fillMaxSize().resetIdleOn(idleMonitor)) {
+    // Provided to the content (NavHost) subtree only — overlays drawn below (full player, sheets)
+    // sit outside it, so their lists never register as the screen's entry-focus target.
+    CompositionLocalProvider(LocalPrimaryContentFocus provides primaryContentFocus) {
     AdaptiveNavigationLayout(
         playerActive = playerStatus.current != null,
-        miniPlayer = { wide -> NowPlayingBar(playerStatus, player, playerExpansion = playerExpansion, wide = wide, peekHeight = playerPeek) },
+        // On TV, pressing up from the now-playing bar returns focus to the content grid (or the
+        // content area as a fallback), not into limbo above the bar.
+        miniPlayer = { wide -> NowPlayingBar(playerStatus, player, playerExpansion = playerExpansion, wide = wide, peekHeight = playerPeek, focusUp = if (isTV) (primaryContentFocus.requester ?: contentFocusRequester) else null) },
         rail = { forceExpanded ->
             AppNavRail(
                 forceExpanded = forceExpanded,
@@ -294,6 +311,9 @@ fun MainScreen() {
             navController = navController,
             startDestination = LibraryRoute,
             modifier = Modifier.fillMaxSize()
+                // Group the content so it's a single D-pad focus region distinct from the rail. The
+                // contentFocusRequester is the fallback target for screens without a content grid;
+                // entry focus normally goes straight to the grid (see the LaunchedEffect above).
                 .then(if (isTV) Modifier.focusRequester(contentFocusRequester).focusGroup() else Modifier),
             enterTransition = { topLevelEnter(vertical = hasRail) ?: fadeIn(tween(DETAIL_DURATION)) },
             exitTransition = { topLevelExit(vertical = hasRail) ?: fadeOut(tween(DETAIL_DURATION)) },
@@ -311,6 +331,7 @@ fun MainScreen() {
                     bottomContentPadding = bottomInset,
                     onAlbumClick = { albumId -> navController.navigate(AlbumDetailRoute(albumId)) { launchSingleTop = true } },
                     onArtistClick = { artistId -> navController.navigate(ArtistDetailRoute(artistId)) { launchSingleTop = true } },
+                    onAlbumArtistClick = { artistId -> navController.navigate(ArtistDetailRoute(artistId)) { launchSingleTop = true } },
                     onGenreClick = { genreId -> navController.navigate(GenreDetailRoute(genreId)) { launchSingleTop = true } },
                     onPlaylistClick = { playlistId -> navController.navigate(PlaylistDetailRoute(playlistId)) { launchSingleTop = true } },
                 )
@@ -335,6 +356,7 @@ fun MainScreen() {
                 PlaylistDetailView(playlistId = route.playlistId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
         }
+    }
     }
 
         // Full-screen player lives outside the NavHost so it persists across navigation and covers
@@ -366,8 +388,7 @@ fun MainScreen() {
             )
         }
 
-        // Transient volume bar (right edge) shown on any volume change — the on-screen feedback for
-        // hardware volume keys while casting, where the system volume dialog is suppressed.
-        VolumeIndicator(volume = activeVolume)
+        // Transient volume bar (right edge) shown only on remote volume changes.
+        VolumeIndicator(volume = activeVolume, remoteVolumeChange = appContainer.playback.remoteVolumeChange)
     }
 }

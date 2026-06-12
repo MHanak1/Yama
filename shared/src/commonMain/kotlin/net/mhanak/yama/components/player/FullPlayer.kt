@@ -31,21 +31,12 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.CastConnected
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Lyrics
-import androidx.compose.material.icons.filled.Queue
-import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.RepeatOne
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,8 +52,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -73,12 +62,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.materialkolor.PaletteStyle
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.components.BlurredBackgroundImage
+import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.components.DynamicColorTheme
 import net.mhanak.yama.components.ImmersiveMode
+import net.mhanak.yama.components.LocalUiOpacity
 import net.mhanak.yama.components.PlatformUserInteractionEffect
 import net.mhanak.yama.components.PlayerIdleTimeoutMs
 import net.mhanak.yama.components.isIdle
@@ -88,8 +80,6 @@ import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlayerStatus
-import net.mhanak.yama.media.playback.RemotePlaybackProvider
-import net.mhanak.yama.media.playback.RepeatMode
 
 /**
  * Full-screen player: artwork, track info, the shared [PlayerControls], plus shuffle/repeat toggles.
@@ -119,7 +109,6 @@ fun FullPlayer(
     val track = status.current
     val scope = rememberCoroutineScope()
     val playPauseFocus = remember { FocusRequester() }
-    val bottomCenterFocus = remember { FocusRequester() }
     val containerSize = LocalWindowInfo.current.containerSize
     val screenHeightPx = containerSize.height.toFloat()
     // Continuously scale every non-artwork element up on large windows so the controls/info/lyrics
@@ -129,6 +118,8 @@ fun FullPlayer(
     val peekHeightPx = with(density) { peekHeight.toPx() }
     // Travel distance of the sheet: from its resting top (at the bar line) up to the screen top.
     val travelPx = (screenHeightPx - peekHeightPx).coerceAtLeast(1f)
+    // Minimum upward swipe (in px) that opens the queue when the player is fully expanded.
+    val swipeUpThresholdPx = with(density) { 80.dp.toPx() }
     val playerScale = if (isTelevisionDevice()) 1f else with(density) {
         playerScaleFor(minOf(containerSize.width.toDp(), containerSize.height.toDp()))
     }
@@ -137,11 +128,9 @@ fun FullPlayer(
     val snapBack = spring<Float>(stiffness = Spring.StiffnessMediumLow)
 
     val appContainer = LocalAppContainer.current
-    val canCast = appContainer.activeMusicSource is RemotePlaybackProvider
     val isCasting = appContainer.playback.activeTarget != null
-    var showTargets by remember { mutableStateOf(false) }
-    var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
+    var showQueue by remember { mutableStateOf(false) }
     var lyrics: Lyrics? by remember { mutableStateOf(null) }
     val smoothPosition = rememberSmoothPosition(status)
 
@@ -175,7 +164,7 @@ fun FullPlayer(
         enabled = appContainer.albumTintMode.tintsPlayer,
     ) {
     Surface(
-        modifier = modifier.fillMaxSize().resetIdleOn(idleMonitor).graphicsLayer {
+        modifier = modifier.fillMaxSize().glassSource(zIndex = 2f).resetIdleOn(idleMonitor).graphicsLayer {
             val f = playerExpansion.value
             // The sheet rests with its top at the bar line (peekHeight up from the bottom) and slides
             // up to fully cover the screen as f goes 0 → 1. It also fades in over just the first
@@ -195,8 +184,16 @@ fun FullPlayer(
                 .fillMaxSize()
                 .systemBarsPadding()
                 .pointerInput(playerExpansion) {
+                    // totalDy accumulates raw vertical delta for the current gesture (positive = down).
+                    // Declared inside the block so it's reset between pointerInput restarts.
+                    var totalDy = 0f
                     detectVerticalDragGestures(
+                        onDragStart = { totalDy = 0f },
                         onDragEnd = {
+                            // Upward swipe (totalDy < 0) past the threshold while fully expanded → queue.
+                            if (totalDy < -swipeUpThresholdPx && playerExpansion.value > 0.99f) {
+                                showQueue = true
+                            }
                             val f = playerExpansion.value
                             scope.launch {
                                 playerExpansion.animateTo(
@@ -207,6 +204,7 @@ fun FullPlayer(
                         },
                         onDragCancel = { scope.launch { playerExpansion.animateTo(1f, snapBack) } },
                     ) { _, dy ->
+                        totalDy += dy
                         // 1:1 with the finger: a drag of dy px moves the sheet dy px. The sheet only
                         // travels (screen - peek) px, so df = -dy / travelPx.
                         val newF = (playerExpansion.value - dy / travelPx).coerceIn(0f, 1f)
@@ -239,21 +237,13 @@ fun FullPlayer(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            // When the live link drops, the device name above is the last-known target;
+                            // flag that its reported state is no longer updating.
+                            RemoteConnectionIndicator(scale = playerScale)
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    if (canCast) {
-                        IconButton(onClick = { showTargets = true }) {
-                            Icon(
-                                if (isCasting) Icons.Filled.CastConnected else Icons.Filled.Cast,
-                                contentDescription = "Play on another device",
-                                tint = if (isCasting) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    } else {
-                        Spacer(Modifier.size(48.dp))
-                    }
+                    Spacer(Modifier.size(48.dp))
                 }
             }
 
@@ -284,19 +274,15 @@ fun FullPlayer(
             ) {
                 val duration = status.durationMs.coerceAtLeast(1)
                 val position = rememberSmoothPosition(status)
-                Column(
+
+                LinearProgressIndicator(
+                    progress = { (position.toFloat() / duration).coerceIn(0f, 1f) },
                     modifier = Modifier
-                        .padding(vertical = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    LinearProgressIndicator(
-                        progress = { (position.toFloat() / duration).coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .height(2.dp)
-                            .widthIn(max = 480.dp * playerScale)
-                            .fillMaxWidth(),
-                    )
-                }
+                        .padding(vertical = 32.dp)
+                        .widthIn(max = 480.dp * playerScale)
+                        .fillMaxWidth(),
+                    trackColor = ProgressIndicatorDefaults.linearTrackColor.copy(alpha = LocalUiOpacity.current),
+                )
             }
 
             AnimatedVisibility(
@@ -304,85 +290,28 @@ fun FullPlayer(
                 enter = expandVertically(animationSpec = tween(durationMillis = 1000)),
                 exit = shrinkVertically(animationSpec = tween(durationMillis = 1000))
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(Modifier.size(16.dp * playerScale))
-
-                    // Row 1: shuffle | prev | play/pause | next | repeat
-                    // D-pad DOWN from any button here bridges explicitly to the secondary row.
-                    PlayerControls(
-                        status = status,
-                        player = player,
-                        modifier = Modifier.widthIn(max = 480.dp * playerScale).fillMaxWidth(),
-                        scale = playerScale,
-                        playPauseFocusRequester = playPauseFocus,
-                        belowFocusRequester = bottomCenterFocus,
-                        leadingContent = { downMod ->
-                            val shuffleTint = if (status.shuffle) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            IconButton(onClick = { player.setShuffle(!status.shuffle) }, modifier = downMod.size(48.dp * playerScale)) {
-                                Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle", tint = shuffleTint, modifier = Modifier.size(24.dp * playerScale))
-                            }
-                        },
-                        trailingContent = { downMod ->
-                            val repeatTint = if (status.repeat != RepeatMode.Off) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            IconButton(onClick = { player.setRepeat(status.repeat.next()) }, modifier = downMod.size(48.dp * playerScale)) {
-                                Icon(
-                                    if (status.repeat == RepeatMode.One) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                                    contentDescription = "Repeat",
-                                    tint = repeatTint,
-                                    modifier = Modifier.size(24.dp * playerScale),
-                                )
-                            }
-                        },
-                    )
-
-                    // Row 2: queue (mock) | lyrics | favorite (mock)
-                    // D-pad DOWN loops back to play/pause instead of escaping to the bar behind the player.
-                    val loopUp = Modifier.focusProperties { down = playPauseFocus }
-                    Row(
-                        Modifier.widthIn(max = 480.dp * playerScale).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        IconButton(
-                            onClick = { showQueue = true },
-                            modifier = Modifier.size(48.dp * playerScale),
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Queue", modifier = Modifier.size(24.dp * playerScale))
-                        }
-                        val lyricsTint = if (showLyrics) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        IconButton(
-                            onClick = { showLyrics = !showLyrics },
-                            modifier = loopUp
-                                .focusRequester(bottomCenterFocus).then(loopUp).size(48.dp * playerScale),
-                        ) {
-                            Icon(Icons.Filled.Lyrics, contentDescription = "Lyrics", tint = lyricsTint, modifier = Modifier.size(24.dp * playerScale))
-                        }
-                        IconButton(
-                            onClick = {},
-                            modifier = loopUp.size(48.dp * playerScale),
-                        ) {
-                            Icon(Icons.Filled.Favorite, contentDescription = "Favorite", modifier = Modifier.size(24.dp * playerScale))
-                        }
-                    }
-
-                    Spacer(Modifier.size(24.dp * playerScale))
-                }
+                Spacer(Modifier.size(16.dp * playerScale))
+                PlayerControls(
+                    status = status,
+                    player = player,
+                    modifier = Modifier.widthIn(max = 480.dp * playerScale).fillMaxWidth(),
+                    showSecondaryControls = true,
+                    showTertiaryControls = true,
+                    showVolumeBar = !appContainer.useDeviceVolume,
+                    scale = playerScale,
+                    playPauseFocusRequester = playPauseFocus,
+                    showLyrics = showLyrics,
+                    onToggleLyrics = { showLyrics = !showLyrics },
+                    onOpenQueue = { showQueue = true },
+                )
             }
         }
 
-        // Sheets live at the Surface level (a sibling of the content Column, composed last) so the
-        // overlay fills the whole player and draws above all of it — they are plain in-composition
-        // overlays, not Popups, so layer order is just composition order here.
-        if (showTargets) {
-            PlaybackTargetSheet(onDismiss = { showTargets = false })
-        }
-
-        if (showQueue) {
-            QueueSheet(status = status, player = player, onDismiss = { showQueue = false })
-        }
     }
+    }
+
+    if (showQueue) {
+        QueueSheet(status = status, player = player, onDismiss = { showQueue = false })
     }
 }
 
@@ -445,9 +374,3 @@ private fun playerScaleFor(minDimension: Dp): Float {
     return 1f + t * (MaxPlayerScale - 1f)
 }
 
-/** Cycle Off → All → One → Off. */
-private fun RepeatMode.next(): RepeatMode = when (this) {
-    RepeatMode.Off -> RepeatMode.All
-    RepeatMode.All -> RepeatMode.One
-    RepeatMode.One -> RepeatMode.Off
-}

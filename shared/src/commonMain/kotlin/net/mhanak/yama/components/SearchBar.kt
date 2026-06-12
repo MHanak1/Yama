@@ -23,7 +23,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -41,19 +48,30 @@ fun SearchBar(
     height: Dp = 44.dp,
 ) {
     val colors = MaterialTheme.colorScheme
+    val focusManager = LocalFocusManager.current
     BasicTextField(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
         textStyle = LocalTextStyle.current.merge(MaterialTheme.typography.bodyLarge).copy(color = colors.onSurface),
         cursorBrush = SolidColor(colors.primary),
-        modifier = modifier.height(height),
+        // A focused text field swallows D-pad up/down (the field is single-line, so they'd otherwise
+        // do nothing), trapping TV focus on the search bar. Translate them into focus moves so the
+        // user can step down into the content and back up. Left/right still pass through for the caret.
+        modifier = modifier.height(height).onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            when (event.key) {
+                Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Down)
+                Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Up)
+                else -> false
+            }
+        },
         decorationBox = { innerTextField ->
             Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(percent = 50))
-                    .background(colors.surfaceVariant)
+                    .background(colors.secondaryContainer.copy(alpha = LocalUiOpacity.current))
                     .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

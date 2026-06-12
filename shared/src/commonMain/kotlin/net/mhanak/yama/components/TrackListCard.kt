@@ -5,13 +5,19 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.LowPriority
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Queue
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.CardDefaults
@@ -121,8 +127,8 @@ fun TrackListCard(
                         onDragStart = { settleJob?.cancel() },
                         onDragEnd = {
                             when {
-                                offsetX >= triggerPx -> addToQueue()
-                                offsetX <= -triggerPx -> playNext()
+                                offsetX >= triggerPx ->  playNext()
+                                offsetX <= -triggerPx -> addToQueue()
                             }
                             settleJob = scope.launch {
                                 Animatable(offsetX).animateTo(0f) { offsetX = value }
@@ -187,7 +193,7 @@ private fun TrackSwipeBackground(offset: Float, triggerReached: Boolean, modifie
 
     val startToEnd = offset > 0f
     val alignment = if (startToEnd) Alignment.CenterStart else Alignment.CenterEnd
-    val icon = if (startToEnd) Icons.Filled.QueueMusic else Icons.Filled.Queue
+    val icon = if (startToEnd) Icons.AutoMirrored.Filled.QueueMusic else Icons.Filled.LowPriority
     val color =
         if (startToEnd) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.secondaryContainer
@@ -202,11 +208,22 @@ private fun TrackSwipeBackground(offset: Float, triggerReached: Boolean, modifie
             .padding(horizontal = 24.dp),
         contentAlignment = alignment,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.scale(iconScale),
-        )
+        Row (
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ){
+            if (!startToEnd) {
+                Text("Add to Queue")
+            }
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.scale(iconScale),
+            )
+            if (startToEnd) {
+                Text("Play Next")
+            }
+        }
     }
 }

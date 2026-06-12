@@ -33,6 +33,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -79,11 +82,23 @@ fun AppNavRail(
     val targetWidth = if (expanded) EXPANDED_RAIL_WIDTH else NAV_RAIL_WIDTH
     val railWidth by animateDpAsState(targetWidth, label = "railWidth")
 
+    // Attached to whichever item matches the current screen; entering the rail from content (D-pad
+    // left) lands here rather than on the spatially-closest item.
+    val selectedItemFocus = remember { FocusRequester() }
+
     Column(
         modifier = modifier
             .fillMaxHeight()
             .width(railWidth)
             //.glassEffect(MaterialTheme.colorScheme.surfaceContainerLow)
+            // Entering the rail (D-pad left from content) lands on the item matching the current
+            // screen. focusProperties must precede focusGroup so onEnter applies to the rail's own
+            // focus target rather than its child items.
+            .then(
+                if (isTV) Modifier.focusProperties {
+                    onEnter = { runCatching { selectedItemFocus.requestFocus() } }
+                } else Modifier,
+            )
             // Isolate the rail as its own D-pad focus group so content focus never steps into it.
             .focusGroup()
             .then(if (isTV) Modifier.onFocusChanged { focused = it.hasFocus } else Modifier)
@@ -99,6 +114,7 @@ fun AppNavRail(
             icon = Icons.Default.Home,
             label = "Home",
             expanded = expanded,
+            focusRequester = if (homeSelected) selectedItemFocus else null,
         )
 
         HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
@@ -110,6 +126,7 @@ fun AppNavRail(
                 icon = tab.icon,
                 label = tab.label,
                 expanded = expanded,
+                focusRequester = if (selectedTab == tab) selectedItemFocus else null,
             )
         }
 
@@ -131,6 +148,7 @@ fun AppNavRail(
             icon = Icons.Default.Settings,
             label = "Settings",
             expanded = expanded,
+            focusRequester = if (settingsSelected) selectedItemFocus else null,
         )
     }
 }
@@ -142,6 +160,7 @@ private fun RailItem(
     icon: ImageVector,
     label: String,
     expanded: Boolean,
+    focusRequester: FocusRequester? = null,
 ) {
     val containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
     val contentColor =
@@ -149,6 +168,7 @@ private fun RailItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .padding(horizontal = 8.dp, vertical = 3.dp)
             .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(50))

@@ -27,6 +27,7 @@ import org.jellyfin.sdk.model.api.PlaystateCommand
 import org.jellyfin.sdk.model.api.PlaystateMessage
 import org.jellyfin.sdk.model.api.SessionInfoDto
 import org.jellyfin.sdk.model.api.SessionsMessage
+import kotlin.time.TimeSource
 
 /**
  * The live WebSocket layer for one Jellyfin session. The Kotlin SDK's [ApiClient.webSocket] manages
@@ -66,6 +67,19 @@ class JellyfinSocket(private val source: JellyfinSource) {
     private val _sessions = MutableStateFlow<List<SessionInfoDto>>(emptyList())
     val sessions: StateFlow<List<SessionInfoDto>> = _sessions.asStateFlow()
 
+    // Whether the live WebSocket currently reports itself connected. Stale state (a frozen remote
+    // now-playing / queue / seekbar on a controller) is almost always a symptom of this going false,
+    // so the UI can surface a "reconnecting" hint instead of presenting stale data as live.
+    private val _connected = MutableStateFlow(false)
+    val connected: StateFlow<Boolean> = _connected.asStateFlow()
+
+    // When we last received a SessionsMessage. The server pushes one roughly every second while a
+    // socket is subscribed, so a long gap means the socket is half-open (the SDK reports Connected but
+    // no data flows) — the watchdog uses this to force a REST resync until the SDK notices and reconnects.
+    // Touched from several coroutines on the IO dispatcher, so volatile for visibility.
+    @Volatile
+    private var lastSessionsPush = TimeSource.Monotonic.markNow()
+
     fun bind(api: ApiClient) {
         unbind()
         val s = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -91,17 +105,45 @@ class JellyfinSocket(private val source: JellyfinSource) {
 
         // Subscribing auto-sends SessionsStartMessage; the server then pushes the full session list
         // on every change. Drives the cast-target list and remote players' status.
-        s.launch { ws.subscribe<SessionsMessage>().collect { _sessions.value = it.data.orEmpty() } }
+        s.launch {
+            ws.subscribe<SessionsMessage>().collect {
+                _sessions.value = it.data.orEmpty()
+                lastSessionsPush = TimeSource.Monotonic.markNow()
+            }
+        }
 
         // The server only treats a session as remote-controllable while its socket is connected, so
         // (re)advertise capabilities every time the socket reaches Connected — this also covers
-        // reconnects and avoids racing the connection with a one-shot post at bind time.
+        // reconnects and avoids racing the connection with a one-shot post at bind time. On every
+        // (re)connect we also resync over REST: re-subscription can miss the gap during the outage, so
+        // pull a fresh snapshot at once rather than waiting for the next push.
         s.launch {
             ws.state.collect { state ->
                 println("[Yama] socket state = $state")
-                if (state is SocketApiState.Connected) {
+                val isConnected = state is SocketApiState.Connected
+                _connected.value = isConnected
+                if (isConnected) {
+                    lastSessionsPush = TimeSource.Monotonic.markNow()
                     runCatching { postCapabilities(api) }
                         .onFailure { println("[Yama] postCapabilities failed: $it") }
+                    resyncSessions()
+                }
+            }
+        }
+
+        // Watchdog for a half-open socket: the SDK can keep reporting Connected after the underlying
+        // connection has silently died, during which no SessionsMessage arrives and a controller's view
+        // of the remote device freezes. While we believe we're connected but have heard nothing for
+        // STALE_PUSH_THRESHOLD_MS, fall back to a REST resync so state stays live until the SDK notices
+        // the dead socket and reconnects (which fires the state collector above). Gated to the
+        // connected-but-silent case so a genuine offline period doesn't poll REST in a tight loop.
+        s.launch {
+            while (true) {
+                delay(WATCHDOG_INTERVAL_MS)
+                if (_connected.value &&
+                    lastSessionsPush.elapsedNow().inWholeMilliseconds >= STALE_PUSH_THRESHOLD_MS
+                ) {
+                    resyncSessions()
                 }
             }
         }
@@ -113,6 +155,7 @@ class JellyfinSocket(private val source: JellyfinSource) {
         boundApi = null
         refreshJob = null
         _sessions.value = emptyList()
+        _connected.value = false
     }
 
     /**
@@ -129,7 +172,12 @@ class JellyfinSocket(private val source: JellyfinSource) {
     suspend fun resyncSessions() {
         val api = boundApi ?: return
         runCatching { api.sessionApi.getSessions().content }
-            .onSuccess { _sessions.value = it }
+            .onSuccess {
+                _sessions.value = it
+                // Count a successful REST pull as a "push" so the watchdog backs off to its stale
+                // threshold rather than refiring every interval while a half-open socket persists.
+                lastSessionsPush = TimeSource.Monotonic.markNow()
+            }
             .onFailure { println("[Yama] resyncSessions failed: $it") }
     }
 
@@ -161,7 +209,8 @@ class JellyfinSocket(private val source: JellyfinSource) {
         val command = when (request.playCommand) {
             PlayCommand.PLAY_NEXT -> RemoteCommand.PlayNext(tracks)
             PlayCommand.PLAY_LAST -> RemoteCommand.AddToQueue(tracks)
-            else -> RemoteCommand.Play(tracks, request.startIndex ?: 0)
+            // Jellyfin ticks are 100-nanosecond units → milliseconds.
+            else -> RemoteCommand.Play(tracks, request.startIndex ?: 0, (request.startPositionTicks ?: 0L) / 10_000)
         }
         _remoteCommands.emit(command)
     }
@@ -193,7 +242,17 @@ class JellyfinSocket(private val source: JellyfinSource) {
                 data.arguments["Volume"]?.toIntOrNull()?.let { RemoteCommand.SetVolume(it / 100f) } ?: return
             GeneralCommandType.VOLUME_UP -> RemoteCommand.VolumeUp
             GeneralCommandType.VOLUME_DOWN -> RemoteCommand.VolumeDown
-            // Repeat/shuffle/mute and the rest are not handled yet.
+            // Jellyfin sends the RepeatMode enum serial name in the "RepeatMode" argument.
+            GeneralCommandType.SET_REPEAT_MODE -> when (data.arguments["RepeatMode"]) {
+                "RepeatAll" -> RemoteCommand.SetRepeat(RemoteCommand.Repeat.All)
+                "RepeatOne" -> RemoteCommand.SetRepeat(RemoteCommand.Repeat.One)
+                "RepeatNone" -> RemoteCommand.SetRepeat(RemoteCommand.Repeat.Off)
+                else -> return
+            }
+            // The "ShuffleMode" argument is the GroupShuffleMode serial name ("Shuffle"/"Sorted").
+            GeneralCommandType.SET_SHUFFLE_QUEUE ->
+                RemoteCommand.SetShuffle(data.arguments["ShuffleMode"] == "Shuffle")
+            // Mute and the rest are not handled yet.
             else -> return
         }
         _remoteCommands.emit(command)
@@ -201,6 +260,12 @@ class JellyfinSocket(private val source: JellyfinSource) {
 
     private companion object {
         const val LIBRARY_DEBOUNCE_MS = 1_500L
+
+        // How often the half-open-socket watchdog checks for a stalled push stream.
+        const val WATCHDOG_INTERVAL_MS = 5_000L
+        // Silence longer than this (while still nominally connected) means the socket is half-open;
+        // the server pushes ~every second, so this is well clear of normal cadence.
+        const val STALE_PUSH_THRESHOLD_MS = 10_000L
 
         // The remote-control commands this device understands, advertised so controllers (e.g. the
         // Jellyfin web UI) show the matching buttons. Transport (play/pause/seek/next) rides on the

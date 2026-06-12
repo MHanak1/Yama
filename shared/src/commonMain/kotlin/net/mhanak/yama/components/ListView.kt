@@ -22,12 +22,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,14 +48,21 @@ fun ListView(
     prefetchUrls: List<String?>? = null,
     content: LazyListScope.() -> Unit
 ) {
+    // On TV, register this list as the screen's primary focus target so screen-entry focus lands in
+    // the content (restoring the previously focused row) rather than elsewhere. See TvFocus.kt.
+    val contentFocus = remember { FocusRequester() }
+    RegisterPrimaryContentFocus(contentFocus)
     LazyColumn(
         state = state,
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = contentPadding.plus(PaddingValues(8.dp)),
         content = content,
+        // focusRestorer/focusRequester must precede focusGroup so they apply to the group's focus
+        // target (which reads properties from itself and its ancestors), not the child rows.
         modifier = modifier
-            .focusGroup()
+            .focusRequester(contentFocus)
             .focusRestorer()
+            .focusGroup()
     )
     if (prefetchUrls != null) {
         // AsyncImageListCard renders its art in a fixed 64.dp box — decode prefetched images at

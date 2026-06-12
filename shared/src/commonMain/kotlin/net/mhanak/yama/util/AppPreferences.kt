@@ -26,7 +26,7 @@ object AppPreferences {
         set(value) { settings.putBoolean("blur_enabled", value) }
 
     var uiOpacity: Float
-        get() = settings.getFloat("ui_opacity", 0.7f)
+        get() = if (blurEnabled) settings.getFloat("ui_opacity", 0.7f) else 1.0f
         set(value) { settings.putFloat("ui_opacity", value) }
 
     // Global UI scaling factor applied via LocalDensity (1.0 = system default).
@@ -52,7 +52,7 @@ object AppPreferences {
     // How far album-derived colours spread through the UI (player only, + detail screens, or the whole
     // app). Defaults to Player — the original "tint enabled" behaviour.
     var albumTintMode: AlbumTintMode
-        get() = AlbumTintMode.entries.getOrElse(settings.getInt("album_tint_mode", AlbumTintMode.Player.ordinal)) { AlbumTintMode.Player }
+        get() = AlbumTintMode.entries.getOrElse(settings.getInt("album_tint_mode", AlbumTintMode.AllUi.ordinal)) { AlbumTintMode.AllUi }
         set(value) { settings.putInt("album_tint_mode", value.ordinal) }
 
     // Whether other clients may remote-control ("Play On") this device. Off by default.
