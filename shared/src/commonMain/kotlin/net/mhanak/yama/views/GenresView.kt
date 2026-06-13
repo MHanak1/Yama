@@ -17,6 +17,7 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.AsyncImageGridCard
 import net.mhanak.yama.components.ErrorCard
 import net.mhanak.yama.components.GridView
+import net.mhanak.yama.components.SelectableKind
 import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
 import yama.shared.generated.resources.folder
@@ -27,6 +28,7 @@ fun GenresView(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     query: String = "",
+    favoritesOnly: Boolean = false,
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
@@ -34,9 +36,11 @@ fun GenresView(
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
 
-    val filtered = remember(genres, query) {
-        if (query.isBlank()) genres
-        else genres.filter { it.name.contains(query, ignoreCase = true) }
+    val filtered = remember(genres, query, favoritesOnly) {
+        genres.filter {
+            (!favoritesOnly || it.favorite) &&
+                (query.isBlank() || it.name.contains(query, ignoreCase = true))
+        }
     }
 
     when {
@@ -52,8 +56,8 @@ fun GenresView(
         ) {
             ErrorCard(message = refreshError!!.message ?: "Failed to load genres")
         }
-        filtered.isEmpty() && query.isNotBlank() ->
-            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier)
+        filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
+            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(
             modifier = modifier,
             contentPadding = contentPadding,
@@ -66,6 +70,8 @@ fun GenresView(
                     imageHash = genre.imageHash,
                     onClick = { onGenreClick(genre.id) },
                     imageFallback = painterResource(Res.drawable.folder),
+                    selectableKind = SelectableKind.Genre,
+                    selectionId = genre.id,
                 )
             }
         }

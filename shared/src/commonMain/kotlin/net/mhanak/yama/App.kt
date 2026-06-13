@@ -14,9 +14,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import dev.chrisbanes.haze.rememberHazeState
+import net.mhanak.yama.components.AppColorTheme
+import net.mhanak.yama.components.DetailTint
+import net.mhanak.yama.components.LocalDetailTint
 import net.mhanak.yama.components.LocalHazeState
-import net.mhanak.yama.components.PlayingAlbumColorTheme
 import net.mhanak.yama.components.LocalUiOpacity
+import net.mhanak.yama.components.RequestLocalAudioPermission
+import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.screens.LoginScreen
 import net.mhanak.yama.screens.MainScreen
 import net.mhanak.yama.util.AppTheme
@@ -32,6 +36,10 @@ fun App() {
     remember { ComposeUiFlags.isFocusRestorationEnabled = true }
     val appContainer = remember { AppContainer.shared }
     val hazeState = rememberHazeState()
+    // The artwork of whichever detail screen is open; recolours the whole app and is painted as the
+    // app background. Provided here (above MainScreen) so both the theme wrapper below and the shell
+    // can read it. Detail views register into it via RegisterDetailTint.
+    val detailTint = remember { DetailTint() }
     val darkTheme = when (appContainer.themeMode) {
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
@@ -48,11 +56,13 @@ fun App() {
         LocalHazeState provides if (appContainer.blurEnabled) hazeState else null,
         LocalUiOpacity provides appContainer.uiOpacity,
         LocalDensity provides scaledDensity,
+        LocalDetailTint provides detailTint,
     ) {
         AppTheme(darkTheme = darkTheme) {
-            // "All UI" tint level: recolour the entire app to the currently playing album (a no-op
-            // wrapper at the other levels, where only the player/detail screens tint themselves).
-            PlayingAlbumColorTheme(enabled = appContainer.albumTintMode.tintsEverything) {
+            // Recolour the whole app to the open detail screen's item (overriding the player) or, at the
+            // "All UI" level, to the currently playing album; the default theme otherwise. A no-op
+            // wrapper at lower levels, where only the player/detail screens tint themselves.
+            AppColorTheme(appContainer.albumTintMode) {
             Surface(modifier = Modifier.fillMaxSize()) {
                 val source = appContainer.activeMusicSource
                 val jellyfinSource = appContainer.jellyfinSource
@@ -63,6 +73,11 @@ fun App() {
                 }
 
                 if (source.isAuthenticated && !appContainer.showLoginScreen) {
+                    // The local source needs OS read-audio permission before its scan returns anything;
+                    // request it as soon as it's the active source, then kick a rescan once granted.
+                    if (source.type == SourceType.Local) {
+                        RequestLocalAudioPermission { granted -> if (granted) appContainer.localSource.rescan() }
+                    }
                     MainScreen()
                 } else {
                     LoginScreen(

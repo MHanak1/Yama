@@ -72,6 +72,8 @@ kotlin {
             // (a package dependency on Linux, bundled on Windows).
             implementation("uk.co.caprica:vlcj:4.8.3")
             implementation("com.vanniktech:blurhash:0.3.0")
+            // Embedded-tag reading for the local-files source (ID3 / Vorbis / FLAC / MP4).
+            implementation("net.jthink:jaudiotagger:3.0.1")
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

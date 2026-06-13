@@ -1,17 +1,12 @@
 package net.mhanak.yama.views
 
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -21,20 +16,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
-import com.materialkolor.PaletteStyle
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.components.BlurredBackgroundImage
+import net.mhanak.yama.components.DetailPlayActions
 import net.mhanak.yama.components.DetailViewHeader
-import net.mhanak.yama.components.DynamicColorTheme
-import net.mhanak.yama.components.GradientDirection
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.RegisterDetailTint
 import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Track
@@ -49,7 +35,6 @@ fun AlbumDetailView(
 ) {
     val appContainer = LocalAppContainer.current
     val albums by appContainer.activeMusicSource.albums.collectAsState()
-    val artists by appContainer.activeMusicSource.artists.collectAsState()
     val album = albums.find { it.id == albumId }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
@@ -57,58 +42,48 @@ fun AlbumDetailView(
         tracks = appContainer.activeMusicSource.getTracksForAlbum(albumId)
     }
 
-    DynamicColorTheme(
-        imageUrl = album?.imageUrl,
-        cacheKey = album?.id,
-        enabled = appContainer.albumTintMode.tintsDetails,
+    // Recolour the whole app to this album and paint its artwork as the app background (see AppColorTheme).
+    RegisterDetailTint(imageUrl = album?.imageUrl, cacheKey = album?.id)
+
+    ListView(
+        modifier = modifier
+            .glassSource(zIndex = 1f)
+            .statusBarsPadding(),
+        contentPadding = contentPadding,
     ) {
-        Surface(
-            modifier = modifier.fillMaxSize()
-                .glassSource(),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            BlurredBackgroundImage(
-                imageUrl = album?.imageUrl,
-                modifier = Modifier
-                    .alpha(0.4f)
-            )
+        item {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
         }
 
-        ListView(
-            modifier = modifier
-                .glassSource(zIndex = 1f)
-                .statusBarsPadding(),
-            contentPadding = contentPadding,
-        ) {
+        if (album != null) {
             item {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
-            }
-
-            if (album != null) {
-                item {
-                    val artist = artists.find { it.name == album.albumArtist }
-                    DetailViewHeader(
-                        onNavigate = onNavigate,
-                        imageUrl = album.imageUrl,
-                        name = album.name,
-                        artist = artist,
-                        //genres = TODO(),
-                        year = album.year,
-                    )
-                }
-            }
-
-            itemsIndexed(tracks) { index, track ->
-                TrackListCard(
-                    track = track,
-                    tracks = tracks,
-                    index = index,
-                    player = appContainer.playback.active,
-                    image = { track.trackNumber?.toString()?.let { Text(text = it) } },
+                DetailViewHeader(
+                    onNavigate = onNavigate,
+                    imageUrl = album.imageUrl,
+                    name = album.name,
+                    artist = album.albumArtist,
+                    genres = album.genres.ifEmpty { null },
+                    year = album.year,
+                    playActions = {
+                        DetailPlayActions(
+                            player = appContainer.playback.active,
+                            fetchTracks = { shuffled -> if (shuffled) tracks.shuffled() else tracks },
+                        )
+                    },
                 )
             }
+        }
+
+        itemsIndexed(tracks) { index, track ->
+            TrackListCard(
+                track = track,
+                tracks = tracks,
+                index = index,
+                player = appContainer.playback.active,
+                image = { track.trackNumber?.toString()?.let { Text(text = it) } },
+            )
         }
     }
 }

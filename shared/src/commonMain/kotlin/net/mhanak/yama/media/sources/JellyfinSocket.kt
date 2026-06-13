@@ -67,18 +67,34 @@ class JellyfinSocket(private val source: JellyfinSource) {
     private val _sessions = MutableStateFlow<List<SessionInfoDto>>(emptyList())
     val sessions: StateFlow<List<SessionInfoDto>> = _sessions.asStateFlow()
 
-    // Whether the live WebSocket currently reports itself connected. Stale state (a frozen remote
-    // now-playing / queue / seekbar on a controller) is almost always a symptom of this going false,
-    // so the UI can surface a "reconnecting" hint instead of presenting stale data as live.
+    // Whether the WebSocket *reports* itself connected. Not trustworthy on its own: a network drop
+    // (phone off wifi/data) leaves the socket half-open — no FIN/RST arrives, so this stays true while
+    // no data actually flows. Used only to gate the watchdog's recovery probe; the UI uses [connected].
+    private val _socketUp = MutableStateFlow(false)
+
+    // Liveness as the UI should see it: the socket is up *and* we've had fresh session data recently
+    // (a push, or a successful REST resync). This is what flips false on a real outage — including the
+    // half-open case [_socketUp] misses — so the "reconnecting" indicator actually appears. Recomputed
+    // by the watchdog and on every contact event.
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
-    // When we last received a SessionsMessage. The server pushes one roughly every second while a
-    // socket is subscribed, so a long gap means the socket is half-open (the SDK reports Connected but
-    // no data flows) — the watchdog uses this to force a REST resync until the SDK notices and reconnects.
-    // Touched from several coroutines on the IO dispatcher, so volatile for visibility.
+    // When we last had fresh session data (a SessionsMessage push or a successful resync). The server
+    // pushes frequently while truly connected, so a long gap means the link is dead even if the socket
+    // still claims Connected. Touched from several coroutines on the IO dispatcher, so volatile.
     @Volatile
     private var lastSessionsPush = TimeSource.Monotonic.markNow()
+
+    // Guards against piling up REST probes while one is still in flight (a failing call on a dead
+    // network can hang until its connect timeout).
+    @Volatile
+    private var probing = false
+
+    // Liveness = socket up AND last contact recent. Call after any event that changes either input.
+    private fun recomputeLiveness() {
+        _connected.value = _socketUp.value &&
+            lastSessionsPush.elapsedNow().inWholeMilliseconds < LIVE_STALE_MS
+    }
 
     fun bind(api: ApiClient) {
         unbind()
@@ -109,6 +125,7 @@ class JellyfinSocket(private val source: JellyfinSource) {
             ws.subscribe<SessionsMessage>().collect {
                 _sessions.value = it.data.orEmpty()
                 lastSessionsPush = TimeSource.Monotonic.markNow()
+                recomputeLiveness()
             }
         }
 
@@ -121,29 +138,34 @@ class JellyfinSocket(private val source: JellyfinSource) {
             ws.state.collect { state ->
                 println("[Yama] socket state = $state")
                 val isConnected = state is SocketApiState.Connected
-                _connected.value = isConnected
+                _socketUp.value = isConnected
                 if (isConnected) {
-                    lastSessionsPush = TimeSource.Monotonic.markNow()
                     runCatching { postCapabilities(api) }
                         .onFailure { println("[Yama] postCapabilities failed: $it") }
                     resyncSessions()
                 }
+                recomputeLiveness()
             }
         }
 
-        // Watchdog for a half-open socket: the SDK can keep reporting Connected after the underlying
-        // connection has silently died, during which no SessionsMessage arrives and a controller's view
-        // of the remote device freezes. While we believe we're connected but have heard nothing for
-        // STALE_PUSH_THRESHOLD_MS, fall back to a REST resync so state stays live until the SDK notices
-        // the dead socket and reconnects (which fires the state collector above). Gated to the
-        // connected-but-silent case so a genuine offline period doesn't poll REST in a tight loop.
+        // Liveness watchdog. A network drop leaves the socket half-open — it still claims Connected
+        // while no data flows — so we can't trust the socket state alone. Each tick we recompute
+        // liveness from the staleness clock *first* (so [connected] flips false at ~LIVE_STALE_MS even
+        // if a probe below hangs on the dead network's connect timeout), then, if we've heard nothing
+        // for STALE_PUSH_THRESHOLD_MS, fire a REST resync probe that doubles as the recovery path. A
+        // successful probe refreshes the clock, so a quiet-but-reachable server stays live; a failing
+        // one leaves it stale and the next recompute keeps the indicator up. The probe runs detached
+        // (so a hung call never stalls the cadence) and is single-flighted and gated to a nominally-up
+        // socket so a clean offline period doesn't pile up REST calls.
         s.launch {
             while (true) {
                 delay(WATCHDOG_INTERVAL_MS)
-                if (_connected.value &&
+                recomputeLiveness()
+                if (_socketUp.value && !probing &&
                     lastSessionsPush.elapsedNow().inWholeMilliseconds >= STALE_PUSH_THRESHOLD_MS
                 ) {
-                    resyncSessions()
+                    probing = true
+                    s.launch { try { resyncSessions() } finally { probing = false } }
                 }
             }
         }
@@ -155,6 +177,7 @@ class JellyfinSocket(private val source: JellyfinSource) {
         boundApi = null
         refreshJob = null
         _sessions.value = emptyList()
+        _socketUp.value = false
         _connected.value = false
     }
 
@@ -174,9 +197,10 @@ class JellyfinSocket(private val source: JellyfinSource) {
         runCatching { api.sessionApi.getSessions().content }
             .onSuccess {
                 _sessions.value = it
-                // Count a successful REST pull as a "push" so the watchdog backs off to its stale
-                // threshold rather than refiring every interval while a half-open socket persists.
+                // A successful REST pull is fresh contact: refresh the staleness clock (so the watchdog
+                // backs off and liveness holds) and recompute, since reachable-via-REST counts as live.
                 lastSessionsPush = TimeSource.Monotonic.markNow()
+                recomputeLiveness()
             }
             .onFailure { println("[Yama] resyncSessions failed: $it") }
     }
@@ -261,11 +285,14 @@ class JellyfinSocket(private val source: JellyfinSource) {
     private companion object {
         const val LIBRARY_DEBOUNCE_MS = 1_500L
 
-        // How often the half-open-socket watchdog checks for a stalled push stream.
-        const val WATCHDOG_INTERVAL_MS = 5_000L
-        // Silence longer than this (while still nominally connected) means the socket is half-open;
-        // the server pushes ~every second, so this is well clear of normal cadence.
-        const val STALE_PUSH_THRESHOLD_MS = 10_000L
+        // How often the liveness watchdog probes / re-evaluates.
+        const val WATCHDOG_INTERVAL_MS = 3_000L
+        // No fresh contact for this long (while nominally connected) triggers an active REST probe —
+        // the server pushes frequently, so this is well clear of normal cadence.
+        const val STALE_PUSH_THRESHOLD_MS = 6_000L
+        // No fresh contact for this long flips [connected] false (UI shows "reconnecting"). Equal to the
+        // probe threshold: a tick at/after this both probes and, if the probe fails, marks the link down.
+        const val LIVE_STALE_MS = 6_000L
 
         // The remote-control commands this device understands, advertised so controllers (e.g. the
         // Jellyfin web UI) show the matching buttons. Transport (play/pause/seek/next) rides on the

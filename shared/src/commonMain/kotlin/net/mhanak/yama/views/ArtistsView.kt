@@ -17,6 +17,7 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.AsyncImageGridCard
 import net.mhanak.yama.components.ErrorCard
 import net.mhanak.yama.components.GridView
+import net.mhanak.yama.components.SelectableKind
 import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
 import yama.shared.generated.resources.artist
@@ -27,6 +28,7 @@ fun ArtistsView(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     query: String = "",
+    favoritesOnly: Boolean = false,
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
@@ -34,9 +36,11 @@ fun ArtistsView(
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
 
-    val filtered = remember(artists, query) {
-        if (query.isBlank()) artists
-        else artists.filter { it.name.contains(query, ignoreCase = true) }
+    val filtered = remember(artists, query, favoritesOnly) {
+        artists.filter {
+            (!favoritesOnly || it.favorite) &&
+                (query.isBlank() || it.name.contains(query, ignoreCase = true))
+        }
     }
 
     when {
@@ -52,8 +56,8 @@ fun ArtistsView(
         ) {
             ErrorCard(message = refreshError!!.message ?: "Failed to load artists")
         }
-        filtered.isEmpty() && query.isNotBlank() ->
-            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier)
+        filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
+            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(
             modifier = modifier,
             contentPadding = contentPadding,
@@ -66,6 +70,8 @@ fun ArtistsView(
                     imageHash = artist.imageHash,
                     imageFallback = painterResource(Res.drawable.artist),
                     onClick = { onArtistClick(artist.id) },
+                    selectableKind = SelectableKind.Artist,
+                    selectionId = artist.id,
                 )
             }
         }

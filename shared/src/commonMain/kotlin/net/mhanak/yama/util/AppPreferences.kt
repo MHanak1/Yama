@@ -72,4 +72,70 @@ object AppPreferences {
     var keepScreenOnWhilePlaying: Boolean
         get() = settings.getBoolean("keep_screen_on_while_playing", true)
         set(value) { settings.putBoolean("keep_screen_on_while_playing", value) }
+
+    // The SourceType the user last had active (by name), restored on launch so the app reopens on the
+    // same source. Null until the user first switches source — callers fall back to their own default.
+    var lastSourceType: String?
+        get() = settings.getStringOrNull("last_source_type")
+        set(value) {
+            if (value == null) settings.remove("last_source_type")
+            else settings.putString("last_source_type", value)
+        }
+
+    // Last "Play On" target chosen for a given source ([key] = a SourceType name), restored when that
+    // source becomes active. Stored as an opaque string the playback layer encodes/decodes; absent (or
+    // null) means local playback. Kept per source so each source resumes its own cast device.
+    fun lastRemoteTarget(key: String): String? = settings.getStringOrNull("last_remote_target_$key")
+
+    fun setLastRemoteTarget(key: String, encoded: String?) {
+        if (encoded == null) settings.remove("last_remote_target_$key")
+        else settings.putString("last_remote_target_$key", encoded)
+    }
+
+    // Library IDs the user has *deselected* for a given session ([key] = "serverUrl|userId"). Storing
+    // the excluded set (rather than the included one) means the default — nothing stored — includes
+    // every library, and libraries added on the server later are included automatically.
+    fun excludedLibraries(key: String): Set<String> {
+        val raw = settings.getStringOrNull("excluded_libraries_$key") ?: return emptySet()
+        return if (raw.isEmpty()) emptySet() else raw.split('\n').toSet()
+    }
+
+    fun setExcludedLibraries(key: String, ids: Set<String>) {
+        if (ids.isEmpty()) settings.remove("excluded_libraries_$key")
+        else settings.putString("excluded_libraries_$key", ids.joinToString("\n"))
+    }
+
+    // Hide local files with no embedded metadata (no readable title) from the library. On by default;
+    // the index still stores them, so toggling this off brings them back without a rescan.
+    var skipTracksWithoutMetadata: Boolean
+        get() = settings.getBoolean("skip_tracks_without_metadata", true)
+        set(value) { settings.putBoolean("skip_tracks_without_metadata", value) }
+
+    // Watched folders for the local-files source. Null (key absent) means "not configured yet" so the
+    // source can seed the platform default Music dir on first run; an explicitly empty set is stored
+    // as a sentinel so a user who removed every folder isn't re-seeded.
+    fun localFolders(): List<String>? {
+        val raw = settings.getStringOrNull("local_folders") ?: return null
+        return if (raw.isEmpty()) emptyList() else raw.split('\n')
+    }
+
+    fun setLocalFolders(folders: List<String>) {
+        // Store empty as a single newline sentinel so getStringOrNull stays non-null ("configured, but
+        // empty") rather than reverting to the default-seed path.
+        settings.putString("local_folders", if (folders.isEmpty()) "" else folders.joinToString("\n"))
+    }
+
+    // Favourites for the local source, persisted per kind (the local index itself stays favourite-
+    // agnostic). [kind] is a FavoritableKind name, e.g. "Track" / "Album".
+    fun localFavorites(kind: String): Set<String> {
+        val raw = settings.getStringOrNull("local_fav_$kind") ?: return emptySet()
+        return if (raw.isEmpty()) emptySet() else raw.split('\n').toSet()
+    }
+
+    fun setLocalFavorite(kind: String, id: String, favorite: Boolean) {
+        val current = localFavorites(kind).toMutableSet()
+        if (favorite) current.add(id) else current.remove(id)
+        if (current.isEmpty()) settings.remove("local_fav_$kind")
+        else settings.putString("local_fav_$kind", current.joinToString("\n"))
+    }
 }

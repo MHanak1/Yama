@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -64,8 +65,15 @@ fun AdaptiveNavigationLayout(
         val forceExpanded = maxWidth >= ExpandedLayoutBreakpoint
 
         // Background hazeSource: glass surfaces inside content (zIndex=1) only blur this, not each
-        // other — see Glass.kt for the full zIndex layering explanation.
-        Box(Modifier.fillMaxSize().glassSource(zIndex = 0f))
+        // other — see Glass.kt for the full zIndex layering explanation. While a detail screen is open
+        // its artwork fills this layer as the app-wide background (the playing track never does); glass
+        // content surfaces above then blur it, so it reads as a soft wash behind everything.
+        Box(Modifier.fillMaxSize().glassSource(zIndex = 0f)) {
+            BlurredBackgroundImage(
+                imageUrl = LocalDetailTint.current?.imageUrl,
+                modifier = Modifier.alpha(0.25f),
+            )
+        }
 
         // Medium/wide use the larger interactive bar; TV keeps the compact one (the rail's "Now
         // playing" entry is the real control surface there).

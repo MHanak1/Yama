@@ -6,8 +6,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +27,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.util.AlbumTintMode
 
 /** Default transition duration when the seed colour changes (e.g. on track change). Short on purpose. */
 const val DynamicColorAnimationMs = 500
@@ -115,30 +119,83 @@ fun DynamicColorTheme(
 }
 
 /**
- * App-wide variant of [DynamicColorTheme] that seeds from whatever the active player is currently
- * playing (its album, so every track of an album shares one scheme), falling back to the default theme
- * when nothing is playing. Used for the "All UI" tint level.
+ * Holds the artwork of the detail screen currently open (album/artist/genre/playlist), if any. A detail
+ * view registers its item via [RegisterDetailTint] while it's in composition; the app reads this to
+ * recolour the *whole* UI to that item and to paint the item's blurred artwork as the app background.
+ *
+ * Last writer wins (so across a detail→detail navigation the entering screen takes over and the leaving
+ * one only clears itself if it's still the owner), mirroring [net.mhanak.yama.components.PrimaryContentFocus].
+ */
+@Stable
+class DetailTint {
+    var imageUrl: String? by mutableStateOf(null)
+        private set
+    var cacheKey: String? by mutableStateOf(null)
+        private set
+    private var owner: Any? = null
+
+    fun register(owner: Any, imageUrl: String?, cacheKey: String?) {
+        this.owner = owner
+        this.imageUrl = imageUrl
+        this.cacheKey = cacheKey
+    }
+
+    fun unregister(owner: Any) {
+        if (this.owner === owner) {
+            this.owner = null
+            imageUrl = null
+            cacheKey = null
+        }
+    }
+}
+
+val LocalDetailTint = compositionLocalOf<DetailTint?> { null }
+
+/**
+ * Registers [imageUrl]/[cacheKey] as the active detail screen's artwork for as long as this call is in
+ * composition, so the app-wide theme ([AppColorTheme]) recolours to it and the shell paints it as the
+ * background. No-op when no [DetailTint] is provided (e.g. an overlay drawn outside the NavHost).
+ */
+@Composable
+fun RegisterDetailTint(imageUrl: String?, cacheKey: String?) {
+    val holder = LocalDetailTint.current ?: return
+    val owner = remember { Any() }
+    DisposableEffect(holder, imageUrl, cacheKey) {
+        holder.register(owner, imageUrl, cacheKey)
+        onDispose { holder.unregister(owner) }
+    }
+}
+
+/**
+ * App-wide tint wrapper. Seeds the whole UI's [ColorScheme] from, in order of precedence:
+ *
+ * 1. the **open detail screen's** item (gated on [AlbumTintMode.tintsDetails]) — so opening an album/
+ *    artist/genre/playlist recolours the entire app to it, overriding the player; then
+ * 2. the **currently playing album** (gated on [AlbumTintMode.tintsEverything], the "All UI" level);
+ * 3. otherwise no seed → the default theme.
  *
  * The player's [net.mhanak.yama.media.playback.PlayerStatus] ticks frequently (position updates), so
  * the collection is isolated here: this composable re-runs on every tick, but [DynamicColorTheme] is
- * skipped whenever the seed [imageUrl]/[cacheKey] are unchanged, so [content] (the whole app) is not
- * recomposed between track changes.
- *
- * It always delegates to [DynamicColorTheme] (passing [enabled] through) rather than branching on
- * [enabled] itself, so flipping the "All UI" setting on/off doesn't tear down and recreate the whole
- * app — it just starts/stops feeding a seed, and the scheme animates between default and album colours.
+ * skipped whenever the resolved seed is unchanged, so [content] (the whole app) is not recomposed
+ * between track changes. It always delegates to a single [DynamicColorTheme] rather than branching, so
+ * gaining/losing a seed just animates between default and album colours without tearing down the app.
  */
 @Composable
-fun PlayingAlbumColorTheme(enabled: Boolean, content: @Composable () -> Unit) {
+fun AppColorTheme(tintMode: AlbumTintMode, content: @Composable () -> Unit) {
+    val detail = LocalDetailTint.current
     val player = LocalAppContainer.current.playback.active
     val status by player.status.collectAsState()
     val track = status.current
-    DynamicColorTheme(
-        imageUrl = track?.imageUrl,
-        cacheKey = track?.albumId ?: track?.id,
-        enabled = enabled,
-        content = content,
-    )
+
+    val detailUrl = detail?.imageUrl
+    val imageUrl: String?
+    val cacheKey: String?
+    when {
+        detailUrl != null && tintMode.tintsDetails -> { imageUrl = detailUrl; cacheKey = detail?.cacheKey }
+        tintMode.tintsEverything -> { imageUrl = track?.imageUrl; cacheKey = track?.albumId ?: track?.id }
+        else -> { imageUrl = null; cacheKey = null }
+    }
+    DynamicColorTheme(imageUrl = imageUrl, cacheKey = cacheKey, content = content)
 }
 
 /**

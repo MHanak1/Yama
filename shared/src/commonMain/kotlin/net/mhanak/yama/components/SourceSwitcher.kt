@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -21,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.sources.SourceType
+
+// The SourceIcon label for a given source type (matches the keys SourceIcon switches on).
+private fun SourceType.iconLabel(): String = when (this) {
+    SourceType.Jellyfin -> "Jellyfin"
+    SourceType.Subsonic -> "Subsonic"
+    SourceType.Local -> "Local Files"
+}
 
 @Composable
 fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, onRequestClose: () -> Unit = {}) {
@@ -44,12 +54,21 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
     val scope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
 
+    // The active source drives the header icon/label; the Jellyfin user name is only meaningful when
+    // Jellyfin is the active source.
+    val activeType = appContainer.activeMusicSource.type
+
     val sessions = jellyfinSource.sessions
     val currentSessionId = jellyfinSource.currentSessionId
     val currentSession = sessions.firstOrNull { it.id == currentSessionId }
     val sortedSessions = remember(sessions, currentSessionId) {
         sessions.sortedByDescending { it.id == currentSessionId }
     }
+    // The library picker reflects the *active* source (it's empty for sources without the concept,
+    // e.g. Local), not Jellyfin specifically.
+    val activeSource = appContainer.activeMusicSource
+    val libraries by activeSource.libraries.collectAsState()
+    val enabledLibraryIds by activeSource.enabledLibraryIds.collectAsState()
     val menuFocusRequester = remember { FocusRequester() }
 
     // On TV the DropdownMenu popup can fail to claim D-pad focus, letting events fall through
@@ -68,17 +87,17 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
         Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
             if (collapsed) {
                 IconButton(onClick = { expanded = true }) {
-                    SourceIcon("Jellyfin")
+                    SourceIcon(activeType.iconLabel())
                 }
             } else {
                 GlassOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SourceIcon("Jellyfin")
+                        SourceIcon(activeType.iconLabel())
                         Spacer(Modifier.width(8.dp))
                         // Single line so the button doesn't wrap and grow vertically while the rail
                         // is mid-expansion (it's narrower than the text for a few frames).
                         Text(
-                            currentSession?.userName ?: "Jellyfin",
+                            if (activeType == SourceType.Local) "Local Files" else currentSession?.userName ?: "Jellyfin",
                             style = MaterialTheme.typography.bodyLarge,
                             maxLines = 1,
                             softWrap = false,
@@ -105,7 +124,7 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
             // One item per saved Jellyfin session; active one sorted first and bolded.
             // Logout button shown only for the first (active) session.
             sortedSessions.forEachIndexed { index, session ->
-                val isActive = session.id == currentSessionId
+                val isActive = session.id == currentSessionId && activeType == SourceType.Jellyfin
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -128,13 +147,49 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
                         }
                     } else null,
                     onClick = {
+                        appContainer.selectSource(jellyfinSource)
                         jellyfinSource.switchSession(session)
                         expanded = false
                     },
                 )
             }
 
-            // Future source types go here.
+            // Local files — always available (no auth). Selecting it swaps the active source so the
+            // whole library/player surface re-binds to the on-device index.
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "Local Files",
+                        fontWeight = if (activeType == SourceType.Local) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                },
+                leadingIcon = { SourceIcon("Local Files") },
+                onClick = {
+                    appContainer.selectSource(appContainer.localSource)
+                    expanded = false
+                    onRequestClose()
+                },
+            )
+
+            // Library picker for the active source: tick which libraries feed the albums/artists/genres
+            // views. Toggling leaves the menu open so several can be changed in one pass.
+            if (libraries.isNotEmpty()) {
+                HorizontalDivider()
+                Text(
+                    "Libraries",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                )
+                libraries.forEach { library ->
+                    val checked = library.id in enabledLibraryIds
+                    DropdownMenuItem(
+                        text = { Text(library.name) },
+                        leadingIcon = { Checkbox(checked = checked, onCheckedChange = null) },
+                        onClick = { activeSource.setLibraryEnabled(library.id, !checked) },
+                    )
+                }
+            }
 
             HorizontalDivider()
 

@@ -1,6 +1,11 @@
 package net.mhanak.yama.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -23,16 +28,26 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -81,9 +96,52 @@ fun GridView(
     }
 }
 
+/**
+ * When [selectable] is non-null the card joins the library multi-selection: a long-press or
+ * shift+left-click toggles it, and once any item is selected a plain tap toggles instead of opening it.
+ * A selected card is outlined in the primary colour and, while selection mode is active, shows a
+ * check/empty-circle indicator over its artwork.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun GridCard(onClick: () -> Unit = {}, image: (@Composable BoxScope.() -> Unit)? = null, title: String? = null, subtitle: String? = null) {
-    ElevatedCard(onClick = onClick) {
+fun GridCard(
+    onClick: () -> Unit = {},
+    image: (@Composable BoxScope.() -> Unit)? = null,
+    title: String? = null,
+    subtitle: String? = null,
+    selectable: GridSelection? = null,
+) {
+    val selected = selectable?.selected == true
+    // The grid recycles card slots, so keep the shift-click gesture (keyed on Unit, never relaunched)
+    // pointing at the *current* item's toggle rather than the one captured when the slot was first laid
+    // out — otherwise shift-clicking a recycled card toggles whichever album used to occupy it.
+    val onToggle = rememberUpdatedState(selectable?.onToggle)
+    val clickModifier = if (selectable != null) {
+        Modifier
+            .combinedClickable(
+                onClick = { if (selectable.active) selectable.onToggle() else onClick() },
+                onLongClick = selectable.onToggle,
+            )
+            // Shift+left-click toggles selection on desktop (where there's no long-press). Handled in a
+            // separate gesture so combinedClickable's tap still fires for an unmodified click.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val event = awaitPointerEvent()
+                    if (event.type == PointerEventType.Press &&
+                        event.buttons.isPrimaryPressed &&
+                        event.keyboardModifiers.isShiftPressed
+                    ) {
+                        onToggle.value?.invoke()
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+    } else {
+        Modifier.combinedClickable(onClick = onClick)
+    }
+    ElevatedCard(
+        modifier = clickModifier,
+    ) {
         Column(
             modifier = Modifier
                 .padding(12.dp)
@@ -97,6 +155,20 @@ fun GridCard(onClick: () -> Unit = {}, image: (@Composable BoxScope.() -> Unit)?
                 contentAlignment = Alignment.Center
             ) {
                 image?.invoke(this)
+                if (selectable?.active == true) {
+                    Icon(
+                        if (selected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                        contentDescription = if (selected) "Selected" else "Not selected",
+                        tint = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                            .padding(2.dp),
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -119,6 +191,14 @@ fun GridCard(onClick: () -> Unit = {}, image: (@Composable BoxScope.() -> Unit)?
     }
 }
 
+/** Selection wiring for one [GridCard]: whether it's [selected], whether selection mode is [active]
+ * (so a plain tap toggles rather than opens), and the [onToggle] action. */
+data class GridSelection(
+    val selected: Boolean,
+    val active: Boolean,
+    val onToggle: () -> Unit,
+)
+
 @Composable
 fun AsyncImageGridCard(
     onClick: () -> Unit = {},
@@ -127,7 +207,19 @@ fun AsyncImageGridCard(
     imageFallback: Painter? = null,
     title: String? = null,
     subtitle: String? = null,
+    // When both are provided and a LocalLibrarySelection is present, the card becomes multi-selectable.
+    selectableKind: SelectableKind? = null,
+    selectionId: String? = null,
 ) {
+    val selection = LocalLibrarySelection.current
+    val gridSelection = if (selection != null && selectableKind != null && selectionId != null) {
+        GridSelection(
+            selected = selection.isSelected(selectionId),
+            active = selection.isActive,
+            onToggle = { selection.toggle(selectableKind, selectionId) },
+        )
+    } else null
+
     GridCard(
         onClick = onClick,
         image = {
@@ -135,5 +227,6 @@ fun AsyncImageGridCard(
         },
         title = title,
         subtitle = subtitle,
+        selectable = gridSelection,
     )
 }

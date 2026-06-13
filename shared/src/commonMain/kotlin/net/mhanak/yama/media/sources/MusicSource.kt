@@ -1,11 +1,13 @@
 package net.mhanak.yama.media.sources
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Artist
 import net.mhanak.yama.media.model.Genre
 import net.mhanak.yama.media.model.Lyrics
+import net.mhanak.yama.media.model.MusicLibrary
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
 
@@ -15,13 +17,13 @@ enum class SourceType {
     Local,
 }
 
-enum class TrackSortOrder {
-    Alphabetical,
-    ReleaseDate,
-    PlayCount,
-    RecentlyAdded,
-    RecentlyPlayed,
-    Random,
+enum class TrackSortOrder(val label: String) {
+    Alphabetical("Name"),
+    ReleaseDate("Year"),
+    PlayCount("Plays"),
+    RecentlyAdded("Added"),
+    RecentlyPlayed("Played"),
+    Random("Random"),
 }
 
 interface MusicSource {
@@ -39,6 +41,22 @@ interface MusicSource {
     val refreshError: StateFlow<Throwable?>
 
     /**
+     * Top-level libraries the source exposes (Jellyfin music views; later Navidrome/local folders).
+     * Empty for sources that have no such concept. The user picks which to include via [enabledLibraryIds].
+     */
+    val libraries: StateFlow<List<MusicLibrary>> get() = NoLibraries
+
+    /**
+     * IDs of the libraries currently included in the browsed content (albums, artists, genres —
+     * playlists stay global). New libraries are enabled by default. Empty here means *nothing* is
+     * shown (the user deselected every library), not "all".
+     */
+    val enabledLibraryIds: StateFlow<Set<String>> get() = NoLibrarySelection
+
+    /** Toggle a library on/off; the source persists the choice and re-[refresh]es. No-op where unsupported. */
+    fun setLibraryEnabled(id: String, enabled: Boolean) {}
+
+    /**
      * Emits whenever the backend signals its library changed (e.g. a Jellyfin scan), so callers can
      * re-[refresh]. Null for backends without a live push channel (the data is pull-only there).
      */
@@ -52,8 +70,9 @@ interface MusicSource {
 
     suspend fun refresh()
     suspend fun getTracksForAlbum(albumId: String): List<Track>
-    suspend fun getTracksForArtist(artistId: String, limit: Int = 100, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
-    suspend fun getTracksForGenre(genreId: String, limit: Int = 100, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
+    suspend fun getTracksForArtist(artistId: String, limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
+    suspend fun getTracksForGenre(genreId: String, limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
+    suspend fun getAllTracks(limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track> = emptyList()
     suspend fun getTracksForPlaylist(playlistId: String): List<Track>
     suspend fun getAlbumsForArtist(artistId: String): List<Album>
     suspend fun getAlbumsForGenre(genreId: String): List<Album>
@@ -88,16 +107,21 @@ interface MusicSource {
     suspend fun reportPlaybackStopped(track: Track, positionMs: Long) {}
 
     /**
-     * Rating / favouriting. Liking items is universal, but the *style* (heart vs stars) and which
-     * [RateableKind]s are rateable differ per backend, so [ratingStyle] declares both for a given
-     * kind — returning [RatingStyle.None] tells the UI to hide the control. The default source
-     * supports no rating at all; override these together on sources that do.
+     * Favouriting. Liking items is universal, but *which* [FavoritableKind]s can be favourited
+     * differs per backend, so [supportsFavorites] declares it per kind — returning false tells the
+     * UI to hide the control. The default source supports none; override these together on sources
+     * that do.
      */
-    fun ratingStyle(kind: RateableKind): RatingStyle = RatingStyle.None
+    fun supportsFavorites(kind: FavoritableKind): Boolean = false
 
-    /** Current rating of an item, or [Rating.Unrated] when unknown. Only called for rateable kinds. */
-    suspend fun getRating(kind: RateableKind, id: String): Rating = Rating.Unrated
+    /** Whether the item is currently favourited. Only called for kinds [supportsFavorites] allows. */
+    suspend fun isFavorite(kind: FavoritableKind, id: String): Boolean = false
 
-    /** Persist [rating] for an item. Only called for rateable kinds. */
-    suspend fun setRating(kind: RateableKind, id: String, rating: Rating) {}
+    /** Persist the favourite state for an item. Only called for kinds [supportsFavorites] allows. */
+    suspend fun setFavorite(kind: FavoritableKind, id: String, favorite: Boolean) {}
 }
+
+// Shared, immutable defaults for sources that don't support multiple libraries — avoids allocating a
+// fresh flow on every property access.
+private val NoLibraries = MutableStateFlow<List<MusicLibrary>>(emptyList())
+private val NoLibrarySelection = MutableStateFlow<Set<String>>(emptySet())

@@ -1,80 +1,38 @@
 package net.mhanak.yama.views
 
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.components.DynamicColorTheme
-import net.mhanak.yama.components.ListView
-import net.mhanak.yama.components.TrackListCard
-import net.mhanak.yama.components.glassSource
-import net.mhanak.yama.media.model.Track
+import net.mhanak.yama.views.CollectionDetailView
+import net.mhanak.yama.screens.GenreTracksRoute
 
 @Composable
-fun GenreDetailView(genreId: String, onBack: () -> Unit, onNavigate: (Any) -> Unit = {}, modifier: Modifier = Modifier, contentPadding: PaddingValues = PaddingValues()) {
+fun GenreDetailView(
+    genreId: String,
+    onBack: () -> Unit,
+    onNavigate: (Any) -> Unit = {},
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+) {
     val appContainer = LocalAppContainer.current
     val genres by appContainer.activeMusicSource.genres.collectAsState()
     val genre = genres.find { it.id == genreId }
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
-    LaunchedEffect(genreId) {
-        tracks = appContainer.activeMusicSource.getTracksForGenre(genreId)
-    }
-
-    DynamicColorTheme(
+    CollectionDetailView(
+        name = genre?.name,
         imageUrl = genre?.imageUrl,
-        cacheKey = genre?.id,
-        enabled = appContainer.albumTintMode.tintsDetails,
-    ) {
-        ListView(
-            modifier = modifier
-                .glassSource(zIndex = 1f)
-                .statusBarsPadding(),
-            contentPadding = contentPadding,
-        ) {
-            item {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
-            }
-
-            if (genre != null) {
-                item {
-                    AsyncImage(
-                        model = genre.imageUrl,
-                        contentDescription = genre.name,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f),
-                    )
-                }
-            }
-
-            itemsIndexed(tracks) { index, track ->
-                TrackListCard(
-                    track = track,
-                    tracks = tracks,
-                    index = index,
-                    player = appContainer.playback.active,
-                )
-            }
-        }
-    }
+        cacheKey = genreId,
+        onBack = onBack,
+        onNavigate = onNavigate,
+        onViewAllTracks = { onNavigate(GenreTracksRoute(genreId)) },
+        fetchTopTracks = { limit, sortBy ->
+            appContainer.activeMusicSource.getTracksForGenre(genreId, limit, 0, sortBy)
+        },
+        fetchAlbums = { appContainer.activeMusicSource.getAlbumsForGenre(genreId) },
+        modifier = modifier,
+        contentPadding = contentPadding,
+    )
 }

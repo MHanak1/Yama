@@ -22,3 +22,9 @@ data class GenreDetailRoute(val genreId: String)
 
 @Serializable
 data class PlaylistDetailRoute(val playlistId: String)
+
+@Serializable
+data class ArtistTracksRoute(val artistId: String)
+
+@Serializable
+data class GenreTracksRoute(val genreId: String)

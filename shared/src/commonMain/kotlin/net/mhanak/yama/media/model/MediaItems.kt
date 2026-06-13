@@ -8,6 +8,8 @@ data class Album(
     val songCount: Int?,
     val imageUrl: String?,
     val imageHash: String?,
+    val favorite: Boolean = false,
+    val genres: List<String> = emptyList(),
 )
 
 data class Artist(
@@ -15,6 +17,8 @@ data class Artist(
     val name: String,
     val imageUrl: String?,
     val imageHash: String?,
+    val favorite: Boolean = false,
+    val genres: List<String> = emptyList(),
 )
 
 data class Track(
@@ -35,6 +39,8 @@ data class Playlist(
     val itemCount: Int?,
     val imageUrl: String?,
     val imageHash: String?,
+    val favorite: Boolean = false,
+    val genres: List<String> = emptyList(),
 )
 
 data class Genre(
@@ -42,4 +48,15 @@ data class Genre(
     val name: String,
     val imageUrl: String?,
     val imageHash: String?,
+    val favorite: Boolean = false,
+)
+
+/**
+ * A top-level library/folder the source exposes (a Jellyfin music view, and in future a Navidrome
+ * folder or a local-files directory). The user can toggle which libraries are included in the
+ * browsed albums/artists/genres.
+ */
+data class MusicLibrary(
+    val id: String,
+    val name: String,
 )

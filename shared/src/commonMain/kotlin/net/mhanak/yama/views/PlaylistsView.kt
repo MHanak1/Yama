@@ -27,6 +27,7 @@ fun PlaylistsView(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     query: String = "",
+    favoritesOnly: Boolean = false,
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
@@ -34,9 +35,11 @@ fun PlaylistsView(
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
 
-    val filtered = remember(playlists, query) {
-        if (query.isBlank()) playlists
-        else playlists.filter { it.name.contains(query, ignoreCase = true) }
+    val filtered = remember(playlists, query, favoritesOnly) {
+        playlists.filter {
+            (!favoritesOnly || it.favorite) &&
+                (query.isBlank() || it.name.contains(query, ignoreCase = true))
+        }
     }
 
     when {
@@ -52,8 +55,8 @@ fun PlaylistsView(
         ) {
             ErrorCard(message = refreshError!!.message ?: "Failed to load playlists")
         }
-        filtered.isEmpty() && query.isNotBlank() ->
-            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier)
+        filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
+            NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(
             modifier = modifier,
             contentPadding = contentPadding,

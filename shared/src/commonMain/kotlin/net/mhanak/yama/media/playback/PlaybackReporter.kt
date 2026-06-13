@@ -18,9 +18,15 @@ import kotlin.time.TimeSource
  * Observes [localStatus] only — when we control a remote device the local player is idle, so nothing
  * is reported here (the remote device reports its own playback). Reporting itself is a no-op on
  * sources that don't support it.
+ *
+ * [isLocalActive] gates reporting to when this device is the active player. On Android the local
+ * engine's `MediaController` follows whatever the session exposes, so once `PlaybackService` swaps
+ * the session to the remote-bridge player while casting, [localStatus] can transiently mirror the
+ * remote device — and that device already reports its own playback, so we must not double-report.
  */
 class PlaybackReporter(
     private val localStatus: StateFlow<PlayerStatus>,
+    private val isLocalActive: () -> Boolean,
     private val source: () -> MusicSource,
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -45,7 +51,9 @@ class PlaybackReporter(
 
             localStatus.collect { status ->
                 val track = status.current
-                val isActive = track != null && status.state in ACTIVE_STATES
+                // Only report while this device is the active player; when casting, the remote device
+                // reports its own playback (and localStatus may briefly mirror it — see the class doc).
+                val isActive = isLocalActive() && track != null && status.state in ACTIVE_STATES
                 if (!isActive) {
                     currentTrack?.let { source().reportPlaybackStopped(it, lastPositionMs) }
                     currentTrack = null

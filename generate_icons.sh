@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SVG="$SCRIPT_DIR/icon.svg"
 BANNER_SVG="$SCRIPT_DIR/banner.svg"
 ANDROID_RES="$SCRIPT_DIR/androidApp/src/main/res"
+SHARED_RES="$SCRIPT_DIR/shared/src/androidMain/res"
 DESKTOP_RES="$SCRIPT_DIR/desktopApp/src/main/resources"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -31,13 +32,15 @@ echo "Android vector drawables..."
 SVG="$SVG" \
 FG_OUT="$ANDROID_RES/drawable-v24/ic_launcher_foreground.xml" \
 MONO_OUT="$ANDROID_RES/drawable/ic_launcher_monochrome.xml" \
+NOTIF_OUT="$SHARED_RES/drawable/ic_notification_waveform.xml" \
 python3 << 'PYEOF'
 import xml.etree.ElementTree as ET, os, re, sys
 
-SVG_PATH = os.environ['SVG']
-FG_OUT   = os.environ['FG_OUT']
-MONO_OUT = os.environ['MONO_OUT']
-NS       = 'http://www.w3.org/2000/svg'
+SVG_PATH  = os.environ['SVG']
+FG_OUT    = os.environ['FG_OUT']
+MONO_OUT  = os.environ['MONO_OUT']
+NOTIF_OUT = os.environ['NOTIF_OUT']
+NS        = 'http://www.w3.org/2000/svg'
 
 tree = ET.parse(SVG_PATH)
 root = tree.getroot()
@@ -88,12 +91,14 @@ x2 = grad_coords.get('x2', vw)
 y2 = grad_coords.get('y2', '0')
 stops_str = '\n'.join(stop_lines)
 
-# Scale to 2/3 (adaptive-icon safe zone) so the waveform clears the circular
-# launcher and splash-screen masks.
-scale  = 2.0 / 3.0
 cx, cy = float(vw) / 2, float(vh) / 2
 
-HEADER = f'''<?xml version="1.0" encoding="utf-8"?>
+# Launcher icons scale the waveform to 2/3 (the adaptive-icon safe zone) so it
+# clears the circular launcher and splash-screen masks. The notification small
+# icon has no mask, so it fills the full canvas (scale 1.0) to read larger in
+# the status bar.
+def header(scale):
+    return f'''<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -105,6 +110,8 @@ HEADER = f'''<?xml version="1.0" encoding="utf-8"?>
         android:pivotY="{cy:.3f}"
         android:scaleX="{scale:.6f}"
         android:scaleY="{scale:.6f}">'''
+
+HEADER = header(2.0 / 3.0)
 
 PATH_ATTRS = f'''        <path
             android:pathData="{path_data}"
@@ -137,6 +144,13 @@ write(FG_OUT, f'''{HEADER}
 {FOOTER}''')
 
 write(MONO_OUT, f'''{HEADER}
+{PATH_ATTRS}
+            android:strokeColor="#FFFFFFFF" />
+{FOOTER}''')
+
+# Media3 playback-notification small icon (shared module): same white waveform,
+# but full-canvas (no safe-zone shrink) and tinted by the system.
+write(NOTIF_OUT, f'''{header(1.0)}
 {PATH_ATTRS}
             android:strokeColor="#FFFFFFFF" />
 {FOOTER}''')

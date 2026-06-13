@@ -26,6 +26,7 @@ import org.jellyfin.sdk.model.api.PlaybackOrder
 import org.jellyfin.sdk.model.api.PlaystateCommand
 import org.jellyfin.sdk.model.api.SessionInfoDto
 import kotlin.math.abs
+import kotlin.time.TimeSource
 
 /**
  * A [Player] that controls *another* Jellyfin session ("cast" / Play On a different device). It owns
@@ -76,15 +77,56 @@ class JellyfinRemotePlayer(
     private val optimisticShuffle = MutableStateFlow<Boolean?>(null)
     private var optimisticShuffleClearJob: Job? = null
 
+    // Optimistic now-playing override, same rationale as [optimisticPlaying] but for the queue/track a
+    // PLAY_NOW selects: a `skipTo`/`playNow`/queue-edit round-trips through the server and back as a
+    // session push before [reportedStatus] reflects it, so without this the controller keeps showing
+    // the *old* track for that whole window (seconds, sometimes far longer if the server's push lags).
+    // We apply the intended queue immediately and drop it once the device reports that track playing
+    // (or the timeout). [resyncBurst] runs alongside to pull the real state in quickly.
+    private val optimisticNowPlaying = MutableStateFlow<OptimisticNowPlaying?>(null)
+    private var optimisticNowPlayingClearJob: Job? = null
+
+    // Optimistic seek override. A SEEK round-trips through the server and back as a session push before
+    // [reportedStatus] reflects it; until then the seek bar snaps back to the *old* reported position
+    // (the UI's smoothing re-anchors to it), so a seek looks unresponsive for that window. We apply the
+    // seeked position immediately — the UI's per-frame extrapolation advances from it — and drop it once
+    // the device reports a position consistent with the seek (or after the timeout). Unlike the other
+    // overrides we can't match a fixed value: position keeps advancing, so [seekMark] tracks when the
+    // seek was issued and the clear compares against target+elapsed (see the collector below).
+    private val optimisticPosition = MutableStateFlow<Long?>(null)
+    private var optimisticPositionClearJob: Job? = null
+    private var seekMark: TimeSource.Monotonic.ValueTimeMark? = null
+
+    // The "what's playing / where" group: the reported state with the now-playing and seek overrides
+    // applied. Split out from the toggle overrides below only because `combine` has no typed overload
+    // past five flows; position is applied last so a seek wins over the (usually 0) now-playing anchor.
+    private val playbackStatus =
+        combine(reportedStatus, optimisticNowPlaying, optimisticPosition) { reported, nowPlaying, position ->
+            var result = reported
+            if (nowPlaying != null) {
+                result = result.copy(
+                    current = nowPlaying.current,
+                    queue = nowPlaying.queue,
+                    queueIndex = nowPlaying.queueIndex,
+                    positionMs = nowPlaying.positionMs,
+                    durationMs = nowPlaying.current?.durationTicks?.let { it / 10_000 } ?: 0L,
+                    state = PlaybackState.Playing,
+                    isPlaying = true,
+                )
+            }
+            if (position != null) result = result.copy(positionMs = position)
+            result
+        }
+
     override val status: StateFlow<PlayerStatus> =
         combine(
-            reportedStatus,
+            playbackStatus,
             optimisticPlaying,
             optimisticRepeat,
             optimisticShuffle,
-        ) { reported, playing, repeat, shuffle ->
-            var result = reported
-            if (playing != null && playing != reported.isPlaying) {
+        ) { base, playing, repeat, shuffle ->
+            var result = base
+            if (playing != null && playing != result.isPlaying) {
                 result = result.copy(
                     isPlaying = playing,
                     state = if (playing) PlaybackState.Playing else PlaybackState.Paused,
@@ -117,6 +159,63 @@ class JellyfinRemotePlayer(
                     optimisticShuffleClearJob?.cancel()
                     optimisticShuffle.value = null
                 }
+                // Drop the now-playing override once the device reports the track we asked it to play
+                // (its queue/position are then authoritative). A different reported track means someone
+                // else changed it; let the timeout clear ours so we don't fight them indefinitely.
+                val onp = optimisticNowPlaying.value
+                if (onp != null && reported.current?.id == onp.current?.id) {
+                    optimisticNowPlayingClearJob?.cancel()
+                    optimisticNowPlaying.value = null
+                }
+                // Drop the seek override once the device reports a position consistent with the seek.
+                // Position advances, so "consistent" means within tolerance of target + however long the
+                // device has been playing since the seek — not the fixed target. A report still near the
+                // *old* position (the device hasn't acted yet) stays far from this and keeps the override.
+                val op = optimisticPosition.value
+                val mark = seekMark
+                if (op != null && mark != null) {
+                    val expected = op + if (reported.isPlaying) mark.elapsedNow().inWholeMilliseconds else 0L
+                    if (abs(reported.positionMs - expected) < SEEK_RESYNC_EPSILON_MS) {
+                        optimisticPositionClearJob?.cancel()
+                        optimisticPosition.value = null
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setOptimisticNowPlaying(value: OptimisticNowPlaying) {
+        optimisticNowPlaying.value = value
+        optimisticNowPlayingClearJob?.cancel()
+        optimisticNowPlayingClearJob = scope.launch {
+            delay(OPTIMISTIC_TIMEOUT_MS)
+            optimisticNowPlaying.value = null
+        }
+        // A new now-playing track carries its own (usually 0) position; a lingering seek target from the
+        // previous track would otherwise force the seek bar to the wrong spot.
+        optimisticPositionClearJob?.cancel()
+        optimisticPosition.value = null
+    }
+
+    private fun setOptimisticPosition(positionMs: Long) {
+        optimisticPosition.value = positionMs
+        seekMark = TimeSource.Monotonic.markNow()
+        optimisticPositionClearJob?.cancel()
+        optimisticPositionClearJob = scope.launch {
+            delay(OPTIMISTIC_TIMEOUT_MS)
+            optimisticPosition.value = null
+        }
+    }
+
+    // The server's live session push can lag well behind a queue-changing command we just sent (that
+    // lag is what leaves the controller's now-playing stale), so pull fresh snapshots over REST a few
+    // times right after the command. The authoritative state — and thus the optimistic-overlay clear —
+    // then catches up in about a second instead of waiting for the next push.
+    private fun resyncBurst() {
+        scope.launch {
+            repeat(RESYNC_BURST_COUNT) {
+                delay(RESYNC_BURST_INTERVAL_MS)
+                runCatching { resync() }
             }
         }
     }
@@ -171,6 +270,20 @@ class JellyfinRemotePlayer(
 
     private fun play(command: PlayCommand, tracks: List<Track>, startIndex: Int = 0, startPositionTicks: Long? = null) {
         if (tracks.isEmpty()) return
+        // PLAY_NOW replaces the queue and the now-playing track; reflect that immediately rather than
+        // waiting for the round-trip. (PLAY_NEXT/PLAY_LAST only append, leaving the current track — and
+        // thus the visible now-playing — unchanged, so they need no override.)
+        if (command == PlayCommand.PLAY_NOW) {
+            val index = startIndex.coerceIn(0, tracks.lastIndex)
+            setOptimisticNowPlaying(
+                OptimisticNowPlaying(
+                    current = tracks[index],
+                    queue = tracks,
+                    queueIndex = index,
+                    positionMs = (startPositionTicks ?: 0L) / 10_000,
+                ),
+            )
+        }
         scope.launch {
             runCatching {
                 api.sessionApi.play(
@@ -182,6 +295,7 @@ class JellyfinRemotePlayer(
                 )
             }
         }
+        resyncBurst()
     }
 
     private fun playstate(command: PlaystateCommand, seekPositionTicks: Long? = null) {
@@ -233,9 +347,15 @@ class JellyfinRemotePlayer(
         playstate(PlaystateCommand.PLAY_PAUSE)
     }
 
-    override fun next() = playstate(PlaystateCommand.NEXT_TRACK)
-    override fun previous() = playstate(PlaystateCommand.PREVIOUS_TRACK)
-    override fun seekTo(positionMs: Long) = playstate(PlaystateCommand.SEEK, positionMs * 10_000)
+    // next/previous change the now-playing track too, but which track the device lands on depends on
+    // its repeat/shuffle state, so we can't safely predict it for an optimistic override — instead just
+    // pull the real state in quickly so the visible track doesn't lag the device by the push interval.
+    override fun next() { playstate(PlaystateCommand.NEXT_TRACK); resyncBurst() }
+    override fun previous() { playstate(PlaystateCommand.PREVIOUS_TRACK); resyncBurst() }
+    override fun seekTo(positionMs: Long) {
+        setOptimisticPosition(positionMs)
+        playstate(PlaystateCommand.SEEK, positionMs * 10_000)
+    }
 
     // Jellyfin has no "skip to queue index" command; replay the current queue starting at [index].
     override fun skipTo(index: Int) {
@@ -375,6 +495,14 @@ class JellyfinRemotePlayer(
         scope.cancel()
     }
 
+    // The queue/track a PLAY_NOW selects, held as an optimistic override until the device reports it.
+    private data class OptimisticNowPlaying(
+        val current: Track?,
+        val queue: List<Track>,
+        val queueIndex: Int,
+        val positionMs: Long,
+    )
+
     private companion object {
         // Safety net so a dropped transport command can't pin the play/pause button to the wrong
         // state indefinitely; a healthy session push normally clears the override well before this.
@@ -383,5 +511,15 @@ class JellyfinRemotePlayer(
         // Reported volume is coarse (integer percent); treat anything within this of the optimistic
         // level as "caught up" so the overlay clears cleanly.
         const val VOLUME_EPSILON = 0.02f
+
+        // How close a reported position must be to (seek target + elapsed) to count as the device having
+        // honoured the seek, clearing the override. Wide enough to absorb report travel/interval lag
+        // (a couple of seconds); a pre-seek report still near the old position stays well outside it.
+        const val SEEK_RESYNC_EPSILON_MS = 2_500L
+
+        // After a queue-changing command, pull the session over REST this many times at this spacing so
+        // the real now-playing arrives within ~a second rather than on the (sometimes much slower) push.
+        const val RESYNC_BURST_COUNT = 4
+        const val RESYNC_BURST_INTERVAL_MS = 500L
     }
 }

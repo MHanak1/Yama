@@ -15,6 +15,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,12 +65,17 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.materialkolor.PaletteStyle
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.painterResource
+import yama.shared.generated.resources.Res
+import yama.shared.generated.resources.album
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.components.BlurredBackgroundImage
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.components.DynamicColorTheme
 import net.mhanak.yama.components.ImmersiveMode
+import net.mhanak.yama.components.LibraryReference
+import net.mhanak.yama.components.LibraryReferenceType
 import net.mhanak.yama.components.LocalUiOpacity
 import net.mhanak.yama.components.PlatformUserInteractionEffect
 import net.mhanak.yama.components.PlayerIdleTimeoutMs
@@ -105,6 +111,7 @@ fun FullPlayer(
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
     peekHeight: Dp = 0.dp,
+    onNavigate: (Any) -> Unit = {},
 ) {
     val track = status.current
     val scope = rememberCoroutineScope()
@@ -262,7 +269,7 @@ fun FullPlayer(
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
-                        ArtworkAndInfo(track = track, scale = playerScale, modifier = Modifier.fillMaxSize())
+                        ArtworkAndInfo(track = track, scale = playerScale, onNavigate = onNavigate, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -315,11 +322,17 @@ fun FullPlayer(
     }
 }
 
-/** Artwork image + track name + artist, vertically centered within the available space. */
+/**
+ * Artwork image + track name + artist, vertically centered within the available space. The album
+ * name (above the cover) and the artist (below the track name) are [LibraryReference]s: clickable
+ * links to their detail screens when they resolve against the active library, plain text otherwise.
+ * Following such a link navigates via [onNavigate] (which also collapses the player).
+ */
 @Composable
 private fun ArtworkAndInfo(
     track: Track?,
     scale: Float,
+    onNavigate: (Any) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier) {
@@ -330,12 +343,38 @@ private fun ArtworkAndInfo(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            AsyncImage(
-                model = track?.imageUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(artSize).clip(RoundedCornerShape(20.dp)),
-            )
+            track?.album?.let { album ->
+                LibraryReference(
+                    label = album,
+                    type = LibraryReferenceType.Album,
+                    onNavigate = onNavigate,
+                    textOnly = true,
+                    style = MaterialTheme.typography.titleMedium.scaled(scale),
+                )
+                Spacer(Modifier.size(12.dp * scale))
+            }
+            // Artwork, with an album-icon placeholder underneath that shows through whenever the
+            // track has no cover (or it fails to load) — the AsyncImage simply draws nothing on top.
+            Box(
+                modifier = Modifier
+                    .size(artSize)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(Res.drawable.album),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.fillMaxSize(0.5f),
+                )
+                AsyncImage(
+                    model = track?.imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             Spacer(Modifier.size(24.dp * scale))
             Text(
                 track?.name ?: "",
@@ -344,15 +383,26 @@ private fun ArtworkAndInfo(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            track?.artists?.joinToString(", ")?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.titleMedium.scaled(scale),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (!track?.artists.isNullOrEmpty()) {
+                Row {
+                    track.artists.forEachIndexed { index, artist ->
+                        if (index > 0) {
+                            Text(
+                                text = ", ",
+                                style = MaterialTheme.typography.titleMedium.scaled(scale)
+                                    .copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
+                        }
+                        LibraryReference(
+                            label = artist,
+                            type = LibraryReferenceType.Artist,
+                            onNavigate = onNavigate,
+                            textOnly = true,
+                            style = MaterialTheme.typography.titleMedium.scaled(scale)
+                                .copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
+                        )
+                    }
+                }
             }
         }
     }

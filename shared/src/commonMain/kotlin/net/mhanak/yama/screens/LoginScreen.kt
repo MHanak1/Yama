@@ -74,8 +74,10 @@ import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.Async
 import net.mhanak.yama.components.ErrorCard
+import net.mhanak.yama.components.LocalLibrarySettings
 import net.mhanak.yama.components.SourceIcon
 import net.mhanak.yama.components.VerticalScrollbarIfNeeded
+import net.mhanak.yama.components.supportsDirectoryPicker
 import net.mhanak.yama.util.tabFocusTraversal
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.quickConnectApi
@@ -169,12 +171,45 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
                 when (targetState) {
                     0 -> JellyfinMain()
                     1 -> {}
-                    2 -> {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = {}) { Text("Select Folder") }
-                    }
+                    2 -> LocalFilesMain(onDismiss)
                 }
             }
+        }
+    }
+}
+
+/**
+ * The "Local Files" tab of the login screen. There's nothing to authenticate — the local source is
+ * always usable — so this just makes it the active source (which flips [App] to [MainScreen], since
+ * [net.mhanak.yama.media.sources.local.LocalSource.isAuthenticated] is always true). Folders are
+ * managed afterwards in Settings.
+ */
+@Composable
+fun LocalFilesMain(onDismiss: (() -> Unit)?) {
+    val appContainer = LocalAppContainer.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            if (supportsDirectoryPicker) {
+                "Play music stored on this device. Add the folders you want to scan — you can change " +
+                    "these any time in Settings."
+            } else {
+                "Play music stored on this device. Your media library is indexed automatically."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        // Reuse the Settings folder manager (folder list + add/rescan, or the auto-index note where
+        // there's no picker) so onboarding and Settings stay in sync.
+        LocalLibrarySettings()
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = {
+            appContainer.selectSource(appContainer.localSource)
+            onDismiss?.invoke()
+        }) {
+            Text("Use Local Library")
         }
     }
 }

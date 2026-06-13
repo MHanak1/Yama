@@ -54,12 +54,12 @@ import androidx.compose.ui.unit.isSpecified
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.GlassFilledIconButton
 import net.mhanak.yama.components.GlassIconButton
-import net.mhanak.yama.components.RatingControl
+import net.mhanak.yama.components.FavoriteButton
 import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlayerStatus
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.playback.RepeatMode
-import net.mhanak.yama.media.sources.RateableKind
+import net.mhanak.yama.media.sources.FavoritableKind
 import kotlin.time.TimeSource
 
 /**
@@ -295,8 +295,8 @@ fun PlayerControls(
                             modifier = Modifier.size(24.dp * scale),
                         )
                     }
-                    RatingControl(
-                        kind = RateableKind.Track,
+                    FavoriteButton(
+                        kind = FavoritableKind.Track,
                         itemId = status.current?.id,
                         modifier = loopUp.size(48.dp * scale),
                         iconSize = 24.dp * scale,

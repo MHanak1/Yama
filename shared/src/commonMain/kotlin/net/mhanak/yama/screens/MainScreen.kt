@@ -71,6 +71,7 @@ import net.mhanak.yama.components.BottomBarDestination
 import net.mhanak.yama.components.KeepScreenOn
 import net.mhanak.yama.components.LocalPrimaryContentFocus
 import net.mhanak.yama.components.PlatformBackHandler
+import net.mhanak.yama.components.PlatformDeviceWakeEffect
 import net.mhanak.yama.components.PrimaryContentFocus
 import net.mhanak.yama.components.PlatformUserInteractionEffect
 import net.mhanak.yama.components.PlayerIdleTimeoutMs
@@ -82,6 +83,10 @@ import net.mhanak.yama.components.player.FullPlayer
 import net.mhanak.yama.components.player.NowPlayingBar
 import net.mhanak.yama.components.player.VolumeIndicator
 import net.mhanak.yama.isTelevisionDevice
+import androidx.compose.foundation.layout.statusBarsPadding
+import net.mhanak.yama.components.PaginatedTrackList
+import net.mhanak.yama.components.glassSource
+import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.views.AlbumDetailView
 import net.mhanak.yama.views.ArtistDetailView
 import net.mhanak.yama.views.GenreDetailView
@@ -179,6 +184,11 @@ fun MainScreen() {
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
         appContainer.playback.active.refresh()
     }
+
+    // On Android, when the device wakes and the app returns to the foreground, a socket left
+    // backgrounded may be silently half-open. Rebuild the connection at once rather than waiting
+    // ~30s for OkHttp to notice. No-op on desktop (we don't want window refocus to reconnect).
+    PlatformDeviceWakeEffect { appContainer.onDeviceWake() }
 
     // Tapping the Android media notification (or a remote "Play On" handoff to this device) asks —
     // via the controller — to open the full player.
@@ -355,6 +365,28 @@ fun MainScreen() {
                 val route = backStackEntry.toRoute<PlaylistDetailRoute>()
                 PlaylistDetailView(playlistId = route.playlistId, onBack = { navController.popBackStack() }, onNavigate = { navController.navigate(it) }, contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues())
             }
+            detailComposable<ArtistTracksRoute> { backStackEntry ->
+                val route = backStackEntry.toRoute<ArtistTracksRoute>()
+                val src = appContainer.activeMusicSource
+                PaginatedTrackList(
+                    loadPage = { offset, limit, sortBy -> src.getTracksForArtist(route.artistId, limit, offset, sortBy) },
+                    defaultSort = TrackSortOrder.PlayCount,
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize().glassSource(zIndex = 1f).statusBarsPadding(),
+                    contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues(),
+                )
+            }
+            detailComposable<GenreTracksRoute> { backStackEntry ->
+                val route = backStackEntry.toRoute<GenreTracksRoute>()
+                val src = appContainer.activeMusicSource
+                PaginatedTrackList(
+                    loadPage = { offset, limit, sortBy -> src.getTracksForGenre(route.genreId, limit, offset, sortBy) },
+                    defaultSort = TrackSortOrder.PlayCount,
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize().glassSource(zIndex = 1f).statusBarsPadding(),
+                    contentPadding = PaddingValues(bottom = bottomInset) + WindowInsets.navigationBars.asPaddingValues(),
+                )
+            }
         }
     }
     }
@@ -385,6 +417,10 @@ fun MainScreen() {
                 playerExpansion = playerExpansion,
                 onCollapse = { scope.launch { playerExpansion.animateTo(0f) } },
                 peekHeight = playerPeek,
+                onNavigate = { route ->
+                    scope.launch { playerExpansion.animateTo(0f, tween(450, easing = FastOutSlowInEasing)) }
+                    navController.navigate(route) { launchSingleTop = true }
+                },
             )
         }
 
