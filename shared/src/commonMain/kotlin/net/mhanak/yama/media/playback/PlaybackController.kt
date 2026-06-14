@@ -115,22 +115,26 @@ class PlaybackController(private val source: () -> MusicSource) {
     }
 
     /**
-     * Apply a command pushed by a remote controller ("Play On" from another client). Play requests
-     * always target the local player (and make it the viewed player, since "Play On <this device>"
-     * means here); transport commands act on whatever player is currently viewed.
-     *
-     * NOTE (temporary): forcing the view to local on an inbound Play is correct only while the two axes
-     * are coupled — it makes the device show what's being cast to it. Once simultaneous local + remote
-     * is supported (PLAYBACK_PLAN.md Phase 2), an inbound Play should leave the view alone when the UI
-     * is showing another player (local plays in the background as an endpoint) and route transport to
-     * [local] rather than [viewed].
+     * Whether the current local playback was started by the user on this device ([SelfInitiated]) or
+     * pushed here by a remote controller ([ServerDriven]). Null when the local player is idle.
+     * Used in Phase 3+ to decide whether local decode should keep running when a remote target is
+     * selected (server-driven endpoint stays alive; self-initiated hands off if the user requests it).
+     */
+    enum class PlaybackOrigin { SelfInitiated, ServerDriven }
+    var localPlaybackOrigin: PlaybackOrigin? = null
+        private set
+
+    /**
+     * Apply a command pushed by a remote controller ("Play On" from another client). All commands
+     * are routed to the [local] player (the endpoint axis) — these are commands addressed *to this
+     * device*, not to whatever the UI happens to be viewing. The view is left alone so a user who is
+     * controlling another device continues to see that device's state while also being a playback
+     * endpoint (Phase 2 two-axis model — see PLAYBACK_PLAN.md).
      */
     fun handleRemoteCommand(command: RemoteCommand) {
         when (command) {
             is RemoteCommand.Play -> {
-                // Another device pushed playback here; that's not the user choosing local for this
-                // source, so don't overwrite their remembered cast target.
-                selectTarget(null, remember = false)
+                localPlaybackOrigin = PlaybackOrigin.ServerDriven
                 // A controller's reorder/removal arrives as a fresh Play with the same now-playing track;
                 // applyRemotePlay rearranges the live queue in place when it can. Only a genuine new
                 // playback (which restarts) should surface the full player, like a notification tap.
@@ -139,25 +143,65 @@ class PlaybackController(private val source: () -> MusicSource) {
             }
             is RemoteCommand.PlayNext -> local.playNext(command.tracks)
             is RemoteCommand.AddToQueue -> local.addToQueue(command.tracks)
-            RemoteCommand.Resume -> viewed.play()
-            RemoteCommand.Pause -> viewed.pause()
-            RemoteCommand.PlayPause -> viewed.togglePlayPause()
-            RemoteCommand.Stop -> viewed.stop()
-            RemoteCommand.Next -> viewed.next()
-            RemoteCommand.Previous -> viewed.previous()
-            is RemoteCommand.Seek -> viewed.seekTo(command.positionMs)
-            is RemoteCommand.SetVolume -> { viewed.setVolume(command.level); _volumeChanged.tryEmit(Unit) }
-            RemoteCommand.VolumeUp -> { viewed.volumeUp(); _volumeChanged.tryEmit(Unit) }
-            RemoteCommand.VolumeDown -> { viewed.volumeDown(); _volumeChanged.tryEmit(Unit) }
-            is RemoteCommand.SetRepeat -> viewed.setRepeat(
+            // Transport commands from a remote controller always target the local endpoint.
+            RemoteCommand.Resume -> local.play()
+            RemoteCommand.Pause -> local.pause()
+            RemoteCommand.PlayPause -> local.togglePlayPause()
+            RemoteCommand.Stop -> local.stop()
+            RemoteCommand.Next -> local.next()
+            RemoteCommand.Previous -> local.previous()
+            is RemoteCommand.Seek -> local.seekTo(command.positionMs)
+            is RemoteCommand.SetVolume -> { local.setVolume(command.level); _volumeChanged.tryEmit(Unit) }
+            RemoteCommand.VolumeUp -> { local.volumeUp(); _volumeChanged.tryEmit(Unit) }
+            RemoteCommand.VolumeDown -> { local.volumeDown(); _volumeChanged.tryEmit(Unit) }
+            is RemoteCommand.SetRepeat -> local.setRepeat(
                 when (command.mode) {
                     RemoteCommand.Repeat.Off -> RepeatMode.Off
                     RemoteCommand.Repeat.All -> RepeatMode.All
                     RemoteCommand.Repeat.One -> RepeatMode.One
                 },
             )
-            is RemoteCommand.SetShuffle -> viewed.setShuffle(command.enabled)
+            is RemoteCommand.SetShuffle -> local.setShuffle(command.enabled)
         }
+    }
+
+    /**
+     * Transfer the queue from [from] to [to]: captures [from]'s queue, position, and play state;
+     * stops [from]; and loads the queue into [to] (playing or paused to match [from]'s state).
+     *
+     * Source-agnostic — works for any [Player] pair via the [Player] interface. Each player's own
+     * implementation handles any backend-specific details (e.g. [JellyfinRemotePlayer] chains a
+     * pause after the play command to guarantee ordering; its [Player.stop] uses a fire-and-forget
+     * scope so it survives an immediately following [release]).
+     */
+    fun transferQueue(from: Player, to: Player) {
+        val status = from.status.value
+        from.stop()
+        val queue = status.queue
+        if (queue.isEmpty()) return
+        val index = status.queueIndex.coerceAtLeast(0)
+        val positionMs = status.positionMs
+        if (status.isPlaying) to.playNow(queue, index, positionMs)
+        else to.loadQueuePaused(queue, index, positionMs)
+    }
+
+    /**
+     * Transfer the current local queue to [target] and switch the view to it. Switches the view
+     * first so [viewed] is the remote player by the time [transferQueue] runs.
+     */
+    fun transferQueueToTarget(target: RemoteTarget) {
+        selectTarget(target)
+        if (viewedTarget?.id != target.id) return  // source can't cast; selectTarget was a no-op
+        transferQueue(from = local, to = viewed)
+    }
+
+    /**
+     * Transfer the currently viewed remote queue to this device and switch the view back to local.
+     * Transfers first so the remote is stopped before [selectTarget] releases its player.
+     */
+    fun transferQueueToLocal() {
+        transferQueue(from = viewed, to = local)
+        selectTarget(null)
     }
 
     // RemoteTarget round-trips through prefs as JSON — safe for XML-backed stores (java.util.prefs).

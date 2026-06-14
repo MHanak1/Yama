@@ -74,6 +74,11 @@ kotlin {
             implementation("com.vanniktech:blurhash:0.3.0")
             // Embedded-tag reading for the local-files source (ID3 / Vorbis / FLAC / MP4).
             implementation("net.jthink:jaudiotagger:3.0.1")
+            // MPRIS D-Bus integration for Linux media key / taskbar / system tray support.
+            // The transport jar is discovered at runtime via ServiceLoader; without it the
+            // MprisService silently no-ops (the start() guard catches the missing-transport error).
+            implementation("com.github.hypfvieh:dbus-java-core:5.1.0")
+            implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.0")
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

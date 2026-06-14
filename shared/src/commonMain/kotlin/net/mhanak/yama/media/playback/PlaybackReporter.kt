@@ -15,14 +15,13 @@ import kotlin.time.TimeSource
  * now-playing / play counts / resume positions, and so remote controllers can see what this device
  * is doing (essential for Jellyfin "Play On").
  *
- * Observes [localStatus] only — when we control a remote device the local player is idle, so nothing
- * is reported here (the remote device reports its own playback). Reporting itself is a no-op on
- * sources that don't support it.
+ * Observes [localStatus] only. Reporting itself is a no-op on sources that don't support it.
  *
- * [isLocalActive] gates reporting to when this device is the active player. On Android the local
- * engine's `MediaController` follows whatever the session exposes, so once `PlaybackService` swaps
- * the session to the remote-bridge player while casting, [localStatus] can transiently mirror the
- * remote device — and that device already reports its own playback, so we must not double-report.
+ * [isLocalActive] is a caller-supplied gate for suppressing reports in scenarios where [localStatus]
+ * could transiently mirror a remote player. Since Phase 2 the Android engine goes directly to the
+ * ExoPlayer (no `MediaController` / session bridge), so [localStatus] always reflects true local
+ * state — the gate is passed as `{ true }` and the reporter's own `track != null && state in
+ * ACTIVE_STATES` check handles idle periods.
  */
 class PlaybackReporter(
     private val localStatus: StateFlow<PlayerStatus>,

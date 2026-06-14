@@ -46,14 +46,13 @@ class MainActivity : ComponentActivity() {
 
     private val audioManager by lazy { getSystemService(AudioManager::class.java) }
 
-    // Hardware volume keys are handled by whether the active player drives *this device's* system
-    // media stream:
-    //  - It does (local playback in device-volume mode): nudge the system stream with FLAG_SHOW_UI so
-    //    the OS shows its normal volume panel and relative stepping. We do this ourselves rather than
-    //    let Media3's device-volume control handle the key, because that path moves it silently.
-    //  - It doesn't (casting, or local in-app gain): step the player directly on its own scale and
-    //    flag the change so the in-app indicator shows — the OS has no panel for those.
-    // The matching key-up is consumed whenever we handled the down so the system doesn't also act on it.
+    // Hardware volume keys are only intercepted during remote (cast) playback — to nudge the remote
+    // device's volume and show the in-app indicator (the OS has no panel for a device on the network).
+    // During local playback the keys are always passed through to the OS:
+    //  - device-volume mode: the OS raises/lowers the media stream and shows its own volume panel.
+    //  - in-app-gain mode: the OS does nothing audible (stream gain stays at 100%), and the user
+    //    controls volume exclusively through the in-app slider.
+    // The matching key-up is consumed whenever we handled the down so the OS doesn't also act on it.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (handleVolumeKeyDown(keyCode)) return true
         return super.onKeyDown(keyCode, event)
@@ -71,24 +70,20 @@ class MainActivity : ComponentActivity() {
         else -> null
     }
 
-    // We take over the keys when the viewed player drives the system stream (to show the OS panel
-    // ourselves) or otherwise accepts volume commands (casting to a controllable device / in-app gain).
+    // Only intercept during remote playback where a controllable target is selected.
     private fun handlesVolumeKeys(): Boolean {
-        val viewed = AppContainer.shared.playback.viewed
-        return viewed.controlsSystemVolume.value || viewed.volumeControllable.value
+        val playback = AppContainer.shared.playback
+        if (playback.viewedTarget == null) return false
+        return playback.viewed.volumeControllable.value
     }
 
     private fun handleVolumeKeyDown(keyCode: Int): Boolean {
         val direction = volumeKeyDirection(keyCode) ?: return false
         val playback = AppContainer.shared.playback
+        // Local playback: let the OS own the keys (device-volume panel or no-op).
+        if (playback.viewedTarget == null) return false
+        // Remote playback: step the remote player and show the in-app indicator.
         val viewed = playback.viewed
-        if (viewed.controlsSystemVolume.value) {
-            // The player drives the OS media stream — relative change with the standard volume panel.
-            val adjust = if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
-            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, adjust, AudioManager.FLAG_SHOW_UI)
-            return true
-        }
-        // Casting or in-app gain: step the player and surface the in-app indicator (no OS panel here).
         if (!viewed.volumeControllable.value) return false
         if (direction > 0) viewed.volumeUp() else viewed.volumeDown()
         playback.notifyVolumeChanged()

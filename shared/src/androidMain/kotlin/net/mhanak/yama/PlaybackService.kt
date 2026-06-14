@@ -12,6 +12,7 @@ import androidx.media3.session.MediaSessionService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.playback.RemoteMediaPlayer
@@ -22,12 +23,15 @@ import net.mhanak.yama.shared.R
  * [MediaSessionService] is what gives us the media notification, lockscreen controls, media-key
  * handling and background playback — Media3 derives all of it from the player's own playlist.
  *
- * The UI never touches this directly; [net.mhanak.yama.media.playback.MediaPlayerEngine] connects a
- * `MediaController` to it.
+ * [net.mhanak.yama.media.playback.MediaPlayerEngine] drives the ExoPlayer directly (in-process, no
+ * IPC hop) by subscribing to [exoPlayerFlow]. It keeps the service alive via a plain [bindService]
+ * binding ([android.content.Context.BIND_AUTO_CREATE]), so Media3 can promote the service to
+ * foreground when playback starts.
  *
  * While casting ("Play On"), [observeActivePlayer] swaps the session's player from the ExoPlayer to a
- * [RemoteMediaPlayer] bridging the active remote player, so the OS media surfaces reflect and control
- * the remote device instead of this one.
+ * [RemoteMediaPlayer] bridging the active remote player, so the OS notification / lockscreen / media
+ * keys reflect and control the remote device. The ExoPlayer itself keeps running — Phase 2 of the
+ * two-axis model (see PLAYBACK_PLAN.md) removes the mutual-exclusion between local and remote.
  */
 class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
@@ -59,6 +63,7 @@ class PlaybackService : MediaSessionService() {
             .setDeviceVolumeControlEnabled(true)
             .build()
         localPlayer = player
+        exoPlayerFlow.value = player
         mediaSession = MediaSession.Builder(this, player)
             // Tapping the media notification launches the app and asks it to open the full player.
             .apply { sessionActivityIntent()?.let { setSessionActivity(it) } }
@@ -74,11 +79,9 @@ class PlaybackService : MediaSessionService() {
      * drive the remote device. `AppContainer.shared` is the process-wide singleton and the service
      * shares its process, so this observes it directly.
      *
-     * NOTE (temporary): the hand-off below pauses the local ExoPlayer when viewing a remote, which is
-     * what makes local and remote playback mutually exclusive today. Once simultaneous playback lands
-     * (PLAYBACK_PLAN.md Phase 2), local decode must keep running for server-driven endpoint playback —
-     * the engine will observe the ExoPlayer directly so this swap only moves the *notification*, not
-     * the audio.
+     * The ExoPlayer is not paused on hand-off (Phase 2 of the two-axis model — see PLAYBACK_PLAN.md):
+     * local decode keeps running as an endpoint while the UI shows and controls the remote. Only the
+     * notification surface moves.
      */
     private fun observeActivePlayer() {
         val playback = AppContainer.shared.playback
@@ -91,9 +94,6 @@ class PlaybackService : MediaSessionService() {
                     remotePlayer?.release()
                     remotePlayer = null
                 } else {
-                    // Hand off: stop decoding here so audio doesn't keep playing locally while the
-                    // user controls the remote device. (Temporary — see the note above.)
-                    exo.pause()
                     val bridge = RemoteMediaPlayer(viewed, Looper.getMainLooper())
                     session.player = bridge
                     remotePlayer?.release()
@@ -125,6 +125,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         scope.cancel()
+        // Signal the engine to detach before releasing the player so it can remove its listener cleanly.
+        exoPlayerFlow.value = null
         // The session's current player may be the remote bridge, so release the engine and bridge
         // explicitly rather than only whatever the session happens to hold right now.
         mediaSession?.release()
@@ -139,5 +141,13 @@ class PlaybackService : MediaSessionService() {
     companion object {
         /** Intent extra MainActivity reads to open the full-screen player on launch. */
         const val OPEN_PLAYER_EXTRA = "net.mhanak.yama.OPEN_PLAYER"
+
+        /**
+         * The active [ExoPlayer] for in-process direct access. Set in [onCreate] and cleared in
+         * [onDestroy] before the player is released, so subscribers can remove their listeners cleanly.
+         * [net.mhanak.yama.media.playback.MediaPlayerEngine] subscribes to drive the player without
+         * going through the IPC hop of a `MediaController`.
+         */
+        val exoPlayerFlow = MutableStateFlow<ExoPlayer?>(null)
     }
 }

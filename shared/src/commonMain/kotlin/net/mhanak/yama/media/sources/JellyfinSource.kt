@@ -73,6 +73,7 @@ import org.jellyfin.sdk.model.UUID as JellyfinUUID
 
 class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : MusicSource, RemotePlaybackProvider {
     override val type: SourceType = SourceType.Jellyfin
+    override val supportsStreamingQuality: Boolean = true
     // Rebuilt by [reconnect] on device wake so a fresh instance (and thus a fresh OkHttp connection
     // pool) replaces one whose pooled sockets died while the app was backgrounded.
     var jellyfin = newJellyfinInstance()
@@ -608,12 +609,14 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         val deviceId = session?.sessionDeviceId ?: getDeviceId()
         val userId = session?.userId
         val containers = "opus,webm,mp3,aac,m4a,flac,webma,wav,ogg"
+        val maxBitrate = AppPreferences.streamingQuality.maxBitrateBps
         return buildString {
             append(baseUrl).append("/Audio/").append(trackId).append("/universal")
             append("?DeviceId=").append(deviceId)
             if (userId != null) append("&UserId=").append(userId)
             append("&Container=").append(containers)
             append("&EnableRedirection=true")
+            if (maxBitrate != null) append("&MaxStreamingBitrate=").append(maxBitrate)
             append("&api_key=").append(token)
         }
     }

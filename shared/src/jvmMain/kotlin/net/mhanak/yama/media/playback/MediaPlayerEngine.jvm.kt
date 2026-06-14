@@ -1,5 +1,12 @@
 package net.mhanak.yama.media.playback
 
+import com.sun.jna.Function
+import com.sun.jna.Native
+import com.sun.jna.Pointer
+import com.sun.jna.platform.win32.Guid.GUID
+import com.sun.jna.platform.win32.Ole32
+import com.sun.jna.ptr.FloatByReference
+import com.sun.jna.ptr.PointerByReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,9 +33,8 @@ actual class MediaPlayerEngine actual constructor() {
     private val _volume = MutableStateFlow(1f)
     actual val volume: StateFlow<Float> = _volume.asStateFlow()
 
-    // libvlc only exposes an in-app gain — there's no OS device-volume control on the desktop — so the
-    // app never controls the system volume here.
-    actual val controlsSystemVolume: StateFlow<Boolean> = MutableStateFlow(false)
+    private val _controlsSystemVolume = MutableStateFlow(false)
+    actual val controlsSystemVolume: StateFlow<Boolean> = _controlsSystemVolume.asStateFlow()
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -37,6 +43,7 @@ actual class MediaPlayerEngine actual constructor() {
     private var mediaLoaded = false
     private var repeat = RepeatMode.Off
     private var shuffle = false
+    private var useDeviceVolume = false
 
     // Built lazily so a missing libvlc only disables playback instead of crashing app launch.
     private val component: AudioPlayerComponent? by lazy {
@@ -82,7 +89,9 @@ actual class MediaPlayerEngine actual constructor() {
         mediaLoaded = true
         p.media().play(queue[i].uri)
         // libvlc resets volume to default on a fresh media; reassert the chosen level.
-        p.audio().setVolume((_volume.value * 100).toInt())
+        // When device volume is active the in-app gain must stay at 100 so only the OS level matters.
+        val gainLevel = if (_controlsSystemVolume.value) 1f else _volume.value
+        p.audio().setVolume((gainLevel * 100).toInt())
         pushState(PlaybackState.Buffering, true)
     }
 
@@ -212,11 +221,33 @@ actual class MediaPlayerEngine actual constructor() {
     actual fun setVolume(level: Float) {
         val clamped = level.coerceIn(0f, 1f)
         _volume.value = clamped
-        player?.audio()?.setVolume((clamped * 100).toInt())
+        if (_controlsSystemVolume.value) {
+            SystemVolume.set(clamped)
+        } else {
+            player?.audio()?.setVolume((clamped * 100).toInt())
+        }
     }
 
-    // libvlc only exposes an in-app gain; there's no OS device-volume control here, so this is a no-op.
-    actual fun setVolumeMode(useDeviceVolume: Boolean) {}
+    actual fun setVolumeMode(useDeviceVolume: Boolean) {
+        this.useDeviceVolume = useDeviceVolume
+        if (!useDeviceVolume) {
+            _controlsSystemVolume.value = false
+            // Reassert in-app gain so libvlc immediately reflects the slider value.
+            player?.audio()?.setVolume((_volume.value * 100).toInt())
+            return
+        }
+        // Check availability off the main thread; brief startup race is harmless — slider just
+        // stays in in-app mode until the check resolves.
+        scope.launch(Dispatchers.IO) {
+            val canControl = SystemVolume.isAvailable
+            _controlsSystemVolume.value = canControl
+            if (canControl) {
+                // Pin in-app gain so the system volume isn't additionally attenuated.
+                player?.audio()?.setVolume(100)
+                SystemVolume.get()?.let { _volume.value = it }
+            }
+        }
+    }
 
     actual fun setRepeat(mode: RepeatMode) {
         repeat = mode
@@ -232,4 +263,114 @@ actual class MediaPlayerEngine actual constructor() {
         scope.cancel()
         component?.release()
     }
+}
+
+/**
+ * OS-level volume control for desktop.
+ *
+ * - **Linux**: pactl (PulseAudio / PipeWire-pulse).
+ * - **macOS**: osascript.
+ * - **Windows**: direct JNA COM dispatch into WASAPI's IAudioEndpointVolume — no process spawn,
+ *   no Add-Type compilation delay.
+ */
+private object SystemVolume {
+    private val os = System.getProperty("os.name").lowercase()
+    private val isLinux = os.contains("linux")
+    private val isMac = os.contains("mac")
+    private val isWindows = os.contains("windows")
+
+    val isAvailable: Boolean by lazy {
+        when {
+            isLinux -> runCatching {
+                ProcessBuilder("pactl", "get-sink-volume", "@DEFAULT_SINK@")
+                    .redirectErrorStream(true).start().waitFor() == 0
+            }.getOrDefault(false)
+            isMac -> true
+            isWindows -> true
+            else -> false
+        }
+    }
+
+    fun get(): Float? = when {
+        isLinux -> runCatching {
+            val out = ProcessBuilder("pactl", "get-sink-volume", "@DEFAULT_SINK@")
+                .start().inputStream.bufferedReader().readText()
+            // "Volume: front-left: 65536 / 75% / 0.00 dB, ..."
+            Regex("""/ (\d+)%""").find(out)?.groupValues?.get(1)?.toIntOrNull()?.div(100f)
+        }.getOrNull()
+        isMac -> runCatching {
+            ProcessBuilder("osascript", "-e", "output volume of (get volume settings)")
+                .start().inputStream.bufferedReader().readText().trim().toIntOrNull()?.div(100f)
+        }.getOrNull()
+        isWindows -> WindowsVolume.get()
+        else -> null
+    }
+
+    fun set(level: Float) {
+        val pct = (level * 100).toInt().coerceIn(0, 100)
+        when {
+            isLinux -> runCatching { ProcessBuilder("pactl", "set-sink-volume", "@DEFAULT_SINK@", "$pct%").start() }
+            isMac -> runCatching { ProcessBuilder("osascript", "-e", "set volume output volume $pct").start() }
+            isWindows -> WindowsVolume.set(level)
+        }
+    }
+}
+
+/**
+ * Windows WASAPI volume via JNA COM vtable dispatch. No process spawn, no compilation step.
+ *
+ * COM vtable indices used (0–2 are always QueryInterface/AddRef/Release from IUnknown):
+ * - IMMDeviceEnumerator index 4: GetDefaultAudioEndpoint
+ * - IMMDevice index 3:           Activate
+ * - IAudioEndpointVolume index 7: SetMasterVolumeLevelScalar
+ * - IAudioEndpointVolume index 9: GetMasterVolumeLevelScalar
+ */
+private object WindowsVolume {
+    private val CLSID_MMDE = GUID.fromString("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+    private val IID_MMDE   = GUID.fromString("{A95664D2-9614-4F35-A746-DE8DB63617E6}")
+    private val IID_AEV    = GUID.fromString("{5CDF2C82-841E-4546-9722-0CF74078229A}")
+
+    fun get(): Float? = withVolume { vol ->
+        val out = FloatByReference()
+        vtbl(vol, 9, vol, out)
+        out.value
+    }
+
+    fun set(level: Float) {
+        withVolume<Unit> { vol -> vtbl(vol, 7, vol, level, null) }
+    }
+
+    private fun <T> withVolume(block: (Pointer) -> T): T? = runCatching {
+        Ole32.INSTANCE.CoInitializeEx(null, 0)
+        try {
+            val enumRef = PointerByReference()
+            Ole32.INSTANCE.CoCreateInstance(CLSID_MMDE, null, 1 /* CLSCTX_INPROC_SERVER */, IID_MMDE, enumRef)
+            val enumerator = enumRef.value
+
+            val deviceRef = PointerByReference()
+            vtbl(enumerator, 4, enumerator, 0 /* eRender */, 0 /* eConsole */, deviceRef)
+            release(enumerator)
+
+            val device = deviceRef.value
+            val volRef = PointerByReference()
+            vtbl(device, 3, device, IID_AEV, 1 /* CLSCTX_INPROC_SERVER */, null, volRef)
+            release(device)
+
+            val vol = volRef.value
+            block(vol).also { release(vol) }
+        } finally {
+            Ole32.INSTANCE.CoUninitialize()
+        }
+    }.getOrNull()
+
+    // Dispatch a COM vtable method by index. The COM object itself is always args[0].
+    private fun vtbl(obj: Pointer, idx: Int, vararg args: Any?): Int {
+        val fn = Function.getFunction(
+            obj.getPointer(0).getPointer(idx.toLong() * Native.POINTER_SIZE.toLong()),
+            Function.ALT_CONVENTION,
+        )
+        return fn.invokeInt(args)
+    }
+
+    private fun release(obj: Pointer) { vtbl(obj, 2, obj) }
 }

@@ -5,13 +5,15 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Queue-aware, low-level playback engine — the only part of playback that is platform-specific.
  *
- * - **androidMain:** a Media3 [androidx.media3.common.Player] (a `MediaController` bound to a
- *   `MediaSessionService`), so the OS gets a notification, lockscreen controls and media-key handling
- *   for free, driven by the engine's own playlist.
+ * - **androidMain:** drives the [androidx.media3.exoplayer.ExoPlayer] hosted by `PlaybackService`
+ *   directly (in-process, no IPC hop). The OS notification / lockscreen / media keys come from the
+ *   [androidx.media3.session.MediaSession] in `PlaybackService`, which is kept separate from the
+ *   engine's direct ExoPlayer access (Phase 2 two-axis model — see PLAYBACK_PLAN.md). [status]
+ *   always reflects true local decode state, never the remote bridge the session may be showing.
  * - **jvmMain:** vlcj (libvlc), with the queue managed by hand.
  *
  * It is intentionally queue-aware (rather than a one-URL-at-a-time player) precisely so the Android
- * actual can hand its whole playlist to Media3. [LocalPlayer] sits on top and translates the
+ * actual can hand its whole playlist to the ExoPlayer. [LocalPlayer] sits on top and translates the
  * domain-level [net.mhanak.yama.media.model.Track] queue into [PlayableMedia] for the engine.
  *
  * Constructed with a no-arg constructor; platform actuals obtain whatever they need internally (the

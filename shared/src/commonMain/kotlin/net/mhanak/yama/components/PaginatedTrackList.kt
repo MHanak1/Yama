@@ -120,8 +120,14 @@ fun PaginatedTrackList(
                 // The list is paginated, so play/shuffle act on a single page pulled fresh from the
                 // backend (capped at PAGE_SIZE): "Play" keeps the current sort, "Shuffle" asks the
                 // backend for a random page rather than reshuffling only what's loaded.
+                // When the current sort is already Random, "Play" reuses the loaded list so the played
+                // queue matches the displayed order instead of fetching a new (different) random page.
                 fetchTracks = { shuffled ->
-                    loadPage(0, PAGE_SIZE, if (shuffled) TrackSortOrder.Random else sortOrder)
+                    when {
+                        shuffled -> loadPage(0, PAGE_SIZE, TrackSortOrder.Random)
+                        sortOrder == TrackSortOrder.Random && tracks.isNotEmpty() -> tracks
+                        else -> loadPage(0, PAGE_SIZE, sortOrder)
+                    }
                 },
             )
         }

@@ -29,6 +29,7 @@ import net.mhanak.yama.session.JellyfinSessionRepository
 import net.mhanak.yama.util.AlbumTintMode
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.SecureStorage
+import net.mhanak.yama.util.StreamingQuality
 import net.mhanak.yama.util.ThemeMode
 
 val LocalAppContainer = compositionLocalOf<AppContainer> {
@@ -98,6 +99,11 @@ class AppContainer {
             AppPreferences.keepScreenOnWhilePlaying = value
         }
 
+    private val _streamingQuality = mutableStateOf(AppPreferences.streamingQuality)
+    var streamingQuality: StreamingQuality
+        get() = _streamingQuality.value
+        set(value) { _streamingQuality.value = value; AppPreferences.streamingQuality = value }
+
     private val _skipTracksWithoutMetadata = mutableStateOf(AppPreferences.skipTracksWithoutMetadata)
     var skipTracksWithoutMetadata: Boolean
         get() = _skipTracksWithoutMetadata.value
@@ -119,8 +125,10 @@ class AppContainer {
         // on Main because the transport calls reach the engine directly (Android's Media3
         // MediaController must be called from the main thread).
         scope.launch(Dispatchers.Main) { jellyfinSource.remoteCommands.collect(playback::handleRemoteCommand) }
-        // Mirror local playback back to the backend (now-playing, play counts, resume).
-        PlaybackReporter(playback.local.status, { playback.viewedTarget == null }, { activeMusicSource }).start()
+        // Mirror local playback back to the backend (now-playing, play counts, resume). The gate is
+        // always true since Phase 2: the engine goes directly to ExoPlayer, so localStatus never
+        // mirrors the remote bridge. The reporter's own track-null / ACTIVE_STATES guard covers idle.
+        PlaybackReporter(playback.local.status, { true }, { activeMusicSource }).start()
         observeCastTargetAvailability()
         persistQueueOnChange()
         scope.launch(Dispatchers.IO) { restoreSavedQueue() }

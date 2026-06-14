@@ -1,6 +1,7 @@
 package net.mhanak.yama.components.player
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Speaker
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -25,11 +27,15 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,13 +59,18 @@ import net.mhanak.yama.media.playback.RemoteTarget
  * It also hosts a [VolumeSlider] for the currently active player — the local engine volume when
  * playing here, or the controlled device's volume when casting (whichever the active player exposes).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PlaybackTargetSheet(onDismiss: () -> Unit) {
     val appContainer = LocalAppContainer.current
     val provider = appContainer.activeMusicSource as? RemotePlaybackProvider
     val targets by (provider?.remoteTargets ?: EMPTY_TARGETS).collectAsState()
     val viewedTarget = appContainer.playback.viewedTarget
+
+    // Set when a remote target is long-pressed; cleared when the dialog is dismissed.
+    var longPressedTarget by remember { mutableStateOf<RemoteTarget?>(null) }
+    // Set when "This device" is long-pressed while viewing a remote — shows the transfer-to-local dialog.
+    var showLocalTransferDialog by remember { mutableStateOf(false) }
 
     // The live push can be stale right after backgrounding; pull a fresh snapshot when the sheet opens
     // so the device list (and the controlled device's reported volume) is current.
@@ -116,6 +127,9 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
                         appContainer.playback.selectTarget(null)
                         onDismiss()
                     },
+                    onLongClick = if (viewedTarget != null) {
+                        { showLocalTransferDialog = true }
+                    } else null,
                 )
 
                 targets.forEach { target ->
@@ -128,6 +142,7 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
                             appContainer.playback.selectTarget(target)
                             onDismiss()
                         },
+                        onLongClick = { longPressedTarget = target },
                     )
                 }
 
@@ -149,14 +164,60 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
             }
         }
     }
+
+    longPressedTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { longPressedTarget = null },
+            title = { Text(target.name) },
+            text = { Text("Transfer your current queue to this device, or just switch the view to it?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    longPressedTarget = null
+                    appContainer.playback.transferQueueToTarget(target)
+                    onDismiss()
+                }) { Text("Transfer queue") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    longPressedTarget = null
+                    appContainer.playback.selectTarget(target)
+                    onDismiss()
+                }) { Text("Switch view") }
+            },
+        )
+    }
+
+    if (showLocalTransferDialog) {
+        AlertDialog(
+            onDismissRequest = { showLocalTransferDialog = false },
+            title = { Text("This device") },
+            text = { Text("Transfer the remote queue to this device, or just switch the view back to it?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLocalTransferDialog = false
+                    appContainer.playback.transferQueueToLocal()
+                    onDismiss()
+                }) { Text("Transfer queue") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showLocalTransferDialog = false
+                    appContainer.playback.selectTarget(null)
+                    onDismiss()
+                }) { Text("Switch view") }
+            },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TargetRow(
     icon: ImageVector,
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     subtitle: String? = null,
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
@@ -170,7 +231,7 @@ private fun TargetRow(
             { Icon(Icons.Filled.Check, contentDescription = "Selected", tint = tint) }
         } else null,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
     )
 }
 

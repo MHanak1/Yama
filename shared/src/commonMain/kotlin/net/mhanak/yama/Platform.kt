@@ -14,3 +14,6 @@ expect fun getDeviceName(): String
 expect fun getAppDataDir(): Path
 
 expect fun isTelevisionDevice(): Boolean
+
+/** Default for the "Use device volume" preference. True on Android; false on desktop (opt-in). */
+expect val defaultUseDeviceVolume: Boolean

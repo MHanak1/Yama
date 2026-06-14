@@ -1,14 +1,16 @@
 package net.mhanak.yama.media.playback
 
 import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.net.Uri
-import androidx.core.content.ContextCompat
+import android.os.IBinder
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player as Media3Player
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
+import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,8 +27,15 @@ import net.mhanak.yama.PlaybackService
 import kotlin.math.roundToInt
 
 /**
- * Android engine: drives a Media3 [MediaController] bound to [PlaybackService]. The controller
- * connects asynchronously, so commands issued before it is ready are buffered and replayed.
+ * Android engine: drives the [ExoPlayer] hosted by [PlaybackService] directly (in-process, no IPC
+ * hop via `MediaController`). Subscribes to [PlaybackService.exoPlayerFlow] to get the player as
+ * soon as the service starts; commands issued before that are buffered and replayed. A plain
+ * [Context.bindService] call (with [Context.BIND_AUTO_CREATE]) starts the service and keeps it alive
+ * for the engine's lifetime so Media3 can promote it to foreground when playback starts.
+ *
+ * Driving the ExoPlayer directly ensures [status] always reflects true local decode state — never the
+ * [net.mhanak.yama.media.playback.RemoteMediaPlayer] bridge that [PlaybackService] swaps into the
+ * [androidx.media3.session.MediaSession] while casting.
  */
 actual class MediaPlayerEngine actual constructor() {
     private val _status = MutableStateFlow(EngineStatus())
@@ -39,37 +48,55 @@ actual class MediaPlayerEngine actual constructor() {
     actual val controlsSystemVolume: StateFlow<Boolean> = _controlsSystemVolume.asStateFlow()
 
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
-    private var controller: MediaController? = null
-    private val pending = mutableListOf<(MediaController) -> Unit>()
+    private var player: ExoPlayer? = null
+    private val pending = mutableListOf<(ExoPlayer) -> Unit>()
     private var pollJob: Job? = null
+    private var serviceConn: ServiceConnection? = null
 
     // When true, volume acts on the device (media stream) level; otherwise on the in-app gain. Falls
-    // back to in-app gain whenever device-volume control isn't actually available on the controller.
+    // back to in-app gain whenever device-volume control isn't actually available on the player.
     private var useDeviceVolume = true
+
+    private val playerListener = object : Media3Player.Listener {
+        override fun onEvents(p: Media3Player, events: Media3Player.Events) {
+            pushStatus()
+            (p as? ExoPlayer)?.let { pushVolume(it) }
+        }
+    }
 
     init {
         val context = MyApplication.appContext
-        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
-        future.addListener({
-            val c = future.get()
-            controller = c
-            c.addListener(object : Media3Player.Listener {
-                override fun onEvents(player: Media3Player, events: Media3Player.Events) {
+        // Keep the service alive via a binding. BIND_AUTO_CREATE starts it if it isn't running;
+        // the binding is held until release() so the service outlives any foreground/background
+        // transition and Media3 can promote it to foreground when playback starts.
+        val conn = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, binder: IBinder) {}
+            override fun onServiceDisconnected(name: ComponentName) {}
+        }
+        serviceConn = conn
+        context.bindService(Intent(context, PlaybackService::class.java), conn, Context.BIND_AUTO_CREATE)
+
+        // Attach to the ExoPlayer as soon as the service publishes it and re-attach if it ever
+        // restarts. Null emissions mean the service is being destroyed; detach cleanly so the player
+        // can be released safely.
+        scope.launch {
+            PlaybackService.exoPlayerFlow.collect { exo ->
+                player?.removeListener(playerListener)
+                player = exo
+                if (exo != null) {
+                    exo.addListener(playerListener)
+                    pending.forEach { it(exo) }
+                    pending.clear()
                     pushStatus()
-                    pushVolume(c)
+                    pushVolume(exo)
                 }
-            })
-            pending.forEach { it(c) }
-            pending.clear()
-            pushStatus()
-            pushVolume(c)
-        }, ContextCompat.getMainExecutor(context))
+            }
+        }
     }
 
-    private inline fun withController(crossinline action: (MediaController) -> Unit) {
-        val c = controller
-        if (c != null) action(c) else pending.add { action(it) }
+    private inline fun withPlayer(crossinline action: (ExoPlayer) -> Unit) {
+        val p = player
+        if (p != null) action(p) else pending.add { action(it) }
     }
 
     private fun PlayableMedia.toMediaItem(): MediaItem =
@@ -86,82 +113,82 @@ actual class MediaPlayerEngine actual constructor() {
             )
             .build()
 
-    actual fun setQueue(items: List<PlayableMedia>, startIndex: Int) = withController { c ->
+    actual fun setQueue(items: List<PlayableMedia>, startIndex: Int) = withPlayer { p ->
         if (items.isEmpty()) {
-            c.clearMediaItems()
-            return@withController
+            p.clearMediaItems()
+            return@withPlayer
         }
-        c.setMediaItems(items.map { it.toMediaItem() }, startIndex.coerceIn(0, items.size - 1), 0)
-        c.prepare()
-        c.play()
+        p.setMediaItems(items.map { it.toMediaItem() }, startIndex.coerceIn(0, items.size - 1), 0)
+        p.prepare()
+        p.play()
         ensurePolling()
     }
 
-    actual fun loadQueue(items: List<PlayableMedia>, startIndex: Int) = withController { c ->
+    actual fun loadQueue(items: List<PlayableMedia>, startIndex: Int) = withPlayer { p ->
         if (items.isEmpty()) {
-            c.clearMediaItems()
-            return@withController
+            p.clearMediaItems()
+            return@withPlayer
         }
-        c.setMediaItems(items.map { it.toMediaItem() }, startIndex.coerceIn(0, items.size - 1), 0)
-        c.prepare()
-        // No c.play() — loads the queue in a paused/ready state
+        p.setMediaItems(items.map { it.toMediaItem() }, startIndex.coerceIn(0, items.size - 1), 0)
+        p.prepare()
+        // No p.play() — loads the queue in a paused/ready state
     }
 
-    actual fun addToQueue(items: List<PlayableMedia>) = withController { c ->
-        c.addMediaItems(items.map { it.toMediaItem() })
+    actual fun addToQueue(items: List<PlayableMedia>) = withPlayer { p ->
+        p.addMediaItems(items.map { it.toMediaItem() })
     }
 
-    actual fun addNext(items: List<PlayableMedia>) = withController { c ->
-        val at = (c.currentMediaItemIndex + 1).coerceIn(0, c.mediaItemCount)
-        c.addMediaItems(at, items.map { it.toMediaItem() })
+    actual fun addNext(items: List<PlayableMedia>) = withPlayer { p ->
+        val at = (p.currentMediaItemIndex + 1).coerceIn(0, p.mediaItemCount)
+        p.addMediaItems(at, items.map { it.toMediaItem() })
     }
 
-    actual fun removeAt(index: Int) = withController { c ->
-        if (index in 0 until c.mediaItemCount) c.removeMediaItem(index)
+    actual fun removeAt(index: Int) = withPlayer { p ->
+        if (index in 0 until p.mediaItemCount) p.removeMediaItem(index)
     }
 
-    actual fun move(from: Int, to: Int) = withController { c -> c.moveMediaItem(from, to) }
-    actual fun clear() = withController { c -> c.clearMediaItems() }
+    actual fun move(from: Int, to: Int) = withPlayer { p -> p.moveMediaItem(from, to) }
+    actual fun clear() = withPlayer { p -> p.clearMediaItems() }
 
-    actual fun play() = withController { c -> c.play(); ensurePolling() }
-    actual fun pause() = withController { c -> c.pause() }
-    actual fun seekTo(positionMs: Long) = withController { c -> c.seekTo(positionMs) }
-    actual fun next() = withController { c -> c.seekToNextMediaItem() }
-    actual fun previous() = withController { c -> c.seekToPrevious() }
-    actual fun seekToIndex(index: Int) = withController { c -> c.seekTo(index, 0) }
+    actual fun play() = withPlayer { p -> p.play(); ensurePolling() }
+    actual fun pause() = withPlayer { p -> p.pause() }
+    actual fun seekTo(positionMs: Long) = withPlayer { p -> p.seekTo(positionMs) }
+    actual fun next() = withPlayer { p -> p.seekToNextMediaItem() }
+    actual fun previous() = withPlayer { p -> p.seekToPrevious() }
+    actual fun seekToIndex(index: Int) = withPlayer { p -> p.seekTo(index, 0) }
 
-    actual fun setRepeat(mode: RepeatMode) = withController { c ->
-        c.repeatMode = when (mode) {
+    actual fun setRepeat(mode: RepeatMode) = withPlayer { p ->
+        p.repeatMode = when (mode) {
             RepeatMode.Off -> Media3Player.REPEAT_MODE_OFF
             RepeatMode.All -> Media3Player.REPEAT_MODE_ALL
             RepeatMode.One -> Media3Player.REPEAT_MODE_ONE
         }
     }
 
-    actual fun setShuffle(enabled: Boolean) = withController { c -> c.shuffleModeEnabled = enabled }
+    actual fun setShuffle(enabled: Boolean) = withPlayer { p -> p.shuffleModeEnabled = enabled }
 
     actual fun setVolume(level: Float) {
         val clamped = level.coerceIn(0f, 1f)
-        withController { c ->
-            if (c.usingDevice()) {
-                val info = c.deviceInfo
+        withPlayer { p ->
+            if (p.usingDevice()) {
+                val info = p.deviceInfo
                 val target = info.minVolume + ((info.maxVolume - info.minVolume) * clamped).roundToInt()
-                c.setDeviceVolume(target, 0)
+                p.setDeviceVolume(target, 0)
             } else {
-                c.volume = clamped
+                p.volume = clamped
             }
-            pushVolume(c)
+            pushVolume(p)
         }
     }
 
     actual fun setVolumeMode(useDeviceVolume: Boolean) {
         this.useDeviceVolume = useDeviceVolume
-        withController { pushVolume(it) }
+        player?.let { pushVolume(it) }
     }
 
-    // Device (media-stream) volume is only usable when the session player has it enabled (see
+    // Device (media-stream) volume is only usable when the player has it enabled (see
     // PlaybackService.setDeviceVolumeControlEnabled) and reports a real range; otherwise fall back.
-    private fun MediaController.usingDevice(): Boolean =
+    private fun ExoPlayer.usingDevice(): Boolean =
         useDeviceVolume &&
             isCommandAvailable(Media3Player.COMMAND_GET_DEVICE_VOLUME) &&
             isCommandAvailable(Media3Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS) &&
@@ -169,23 +196,27 @@ actual class MediaPlayerEngine actual constructor() {
 
     // Mirror whichever volume we're driving into [_volume] as a normalized 0f..1f value, and publish
     // whether we're actually on the device (system) stream so the UI can defer to the OS volume panel.
-    private fun pushVolume(c: MediaController) {
-        val usingDevice = c.usingDevice()
+    private fun pushVolume(exo: ExoPlayer) {
+        val usingDevice = exo.usingDevice()
         _controlsSystemVolume.value = usingDevice
-        _volume.value = if (usingDevice) {
-            val info = c.deviceInfo
+        if (usingDevice) {
+            // Pin the in-app gain so the device volume isn't additionally attenuated.
+            exo.volume = 1f
+            val info = exo.deviceInfo
             val range = (info.maxVolume - info.minVolume).coerceAtLeast(1)
-            ((c.deviceVolume - info.minVolume).toFloat() / range).coerceIn(0f, 1f)
+            _volume.value = ((exo.deviceVolume - info.minVolume).toFloat() / range).coerceIn(0f, 1f)
         } else {
-            c.volume.coerceIn(0f, 1f)
+            _volume.value = exo.volume.coerceIn(0f, 1f)
         }
     }
 
     actual fun release() {
         pollJob?.cancel()
-        controller?.release()
-        controller = null
+        player?.removeListener(playerListener)
+        player = null
         scope.cancel()
+        serviceConn?.let { runCatching { MyApplication.appContext.unbindService(it) } }
+        serviceConn = null
     }
 
     // Media3 only emits discrete events; position advances continuously, so poll while playing.
@@ -193,34 +224,34 @@ actual class MediaPlayerEngine actual constructor() {
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
             while (isActive) {
-                val c = controller ?: break
-                if (c.isPlaying) pushStatus()
+                val p = player ?: break
+                if (p.isPlaying) pushStatus()
                 delay(500)
             }
         }
     }
 
     private fun pushStatus() {
-        val c = controller ?: return
+        val p = player ?: return
         val state = when {
-            c.playbackState == Media3Player.STATE_BUFFERING -> PlaybackState.Buffering
-            c.playbackState == Media3Player.STATE_ENDED -> PlaybackState.Ended
-            c.playbackState == Media3Player.STATE_IDLE -> PlaybackState.Idle
-            c.isPlaying -> PlaybackState.Playing
+            p.playbackState == Media3Player.STATE_BUFFERING -> PlaybackState.Buffering
+            p.playbackState == Media3Player.STATE_ENDED -> PlaybackState.Ended
+            p.playbackState == Media3Player.STATE_IDLE -> PlaybackState.Idle
+            p.isPlaying -> PlaybackState.Playing
             else -> PlaybackState.Paused
         }
         _status.value = EngineStatus(
             state = state,
-            queueIndex = if (c.mediaItemCount == 0) -1 else c.currentMediaItemIndex,
-            positionMs = c.currentPosition.coerceAtLeast(0),
-            durationMs = if (c.duration == C.TIME_UNSET) 0 else c.duration,
-            isPlaying = c.isPlaying,
-            repeat = when (c.repeatMode) {
+            queueIndex = if (p.mediaItemCount == 0) -1 else p.currentMediaItemIndex,
+            positionMs = p.currentPosition.coerceAtLeast(0),
+            durationMs = if (p.duration == C.TIME_UNSET) 0 else p.duration,
+            isPlaying = p.isPlaying,
+            repeat = when (p.repeatMode) {
                 Media3Player.REPEAT_MODE_ALL -> RepeatMode.All
                 Media3Player.REPEAT_MODE_ONE -> RepeatMode.One
                 else -> RepeatMode.Off
             },
-            shuffle = c.shuffleModeEnabled,
+            shuffle = p.shuffleModeEnabled,
         )
     }
 }

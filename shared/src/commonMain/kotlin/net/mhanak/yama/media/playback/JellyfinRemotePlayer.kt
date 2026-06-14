@@ -268,7 +268,7 @@ class JellyfinRemotePlayer(
         )
     }
 
-    private fun play(command: PlayCommand, tracks: List<Track>, startIndex: Int = 0, startPositionTicks: Long? = null) {
+    private fun play(command: PlayCommand, tracks: List<Track>, startIndex: Int = 0, startPositionTicks: Long? = null, thenPause: Boolean = false) {
         if (tracks.isEmpty()) return
         // PLAY_NOW replaces the queue and the now-playing track; reflect that immediately rather than
         // waiting for the round-trip. (PLAY_NEXT/PLAY_LAST only append, leaving the current track — and
@@ -283,6 +283,7 @@ class JellyfinRemotePlayer(
                     positionMs = (startPositionTicks ?: 0L) / 10_000,
                 ),
             )
+            if (thenPause) setOptimisticPlaying(false)
         }
         scope.launch {
             runCatching {
@@ -293,6 +294,14 @@ class JellyfinRemotePlayer(
                     startIndex = startIndex,
                     startPositionTicks = startPositionTicks,
                 )
+                // Send PAUSE in the same coroutine so it's guaranteed to arrive after PLAY_NOW.
+                if (thenPause) {
+                    api.sessionApi.sendPlaystateCommand(
+                        sessionId = target.id,
+                        command = PlaystateCommand.PAUSE,
+                        controllingUserId = controllingUserId?.toString(),
+                    )
+                }
             }
         }
         resyncBurst()
@@ -323,7 +332,10 @@ class JellyfinRemotePlayer(
         }
     }
 
-    override fun playNow(tracks: List<Track>, startIndex: Int) = play(PlayCommand.PLAY_NOW, tracks, startIndex)
+    override fun playNow(tracks: List<Track>, startIndex: Int, startPositionMs: Long) =
+        play(PlayCommand.PLAY_NOW, tracks, startIndex, startPositionTicks = if (startPositionMs > 0) startPositionMs * 10_000 else null)
+    override fun loadQueuePaused(tracks: List<Track>, startIndex: Int, startPositionMs: Long) =
+        play(PlayCommand.PLAY_NOW, tracks, startIndex, startPositionTicks = if (startPositionMs > 0) startPositionMs * 10_000 else null, thenPause = true)
     override fun playNext(tracks: List<Track>) = play(PlayCommand.PLAY_NEXT, tracks)
     override fun addToQueue(tracks: List<Track>) = play(PlayCommand.PLAY_LAST, tracks)
 
@@ -339,7 +351,17 @@ class JellyfinRemotePlayer(
 
     override fun stop() {
         setOptimisticPlaying(false)
-        playstate(PlaystateCommand.STOP)
+        // Use a one-shot scope independent of [scope] so the STOP command survives a concurrent
+        // release() call — e.g. transferQueueToLocal() stops the remote then immediately releases it.
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            runCatching {
+                api.sessionApi.sendPlaystateCommand(
+                    sessionId = target.id,
+                    command = PlaystateCommand.STOP,
+                    controllingUserId = controllingUserId?.toString(),
+                )
+            }
+        }
     }
 
     override fun togglePlayPause() {
@@ -471,12 +493,6 @@ class JellyfinRemotePlayer(
         // commands (which many clients ignore), so we always send an absolute level.
         generalCommand(GeneralCommandType.SET_VOLUME, mapOf("Volume" to (clamped * 100).toInt().toString()))
     }
-
-    // Step the device with its native VOLUME_UP/VOLUME_DOWN commands so a key press behaves exactly
-    // like a press on the device's own remote — the device steps on its own scale and reports the new
-    // level back. (The absolute SET_VOLUME path is reserved for the slider's [setVolume].)
-    override fun volumeUp() = generalCommand(GeneralCommandType.VOLUME_UP, emptyMap())
-    override fun volumeDown() = generalCommand(GeneralCommandType.VOLUME_DOWN, emptyMap())
 
     override fun refresh() {
         scope.launch { runCatching { resync() } }

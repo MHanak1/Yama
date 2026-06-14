@@ -21,3 +21,5 @@ actual fun isTelevisionDevice(): Boolean {
     val uiModeManager = MyApplication.appContext.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
     return uiModeManager.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
 }
+
+actual val defaultUseDeviceVolume: Boolean = true

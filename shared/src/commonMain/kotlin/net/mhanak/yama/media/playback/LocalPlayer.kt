@@ -65,24 +65,29 @@ class LocalPlayer(
         )
     }
 
-    override fun playNow(tracks: List<Track>, startIndex: Int) {
+    override fun playNow(tracks: List<Track>, startIndex: Int, startPositionMs: Long) {
         queueJob?.cancel()
         queueJob = scope.launch {
             val items = tracks.map { it.toPlayable() }
             this@LocalPlayer.tracks.value = tracks
             engine.setQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
+            if (startPositionMs > 0) engine.seekTo(startPositionMs)
         }
     }
 
     /** Restore a saved queue without starting playback — the player stays paused at [startIndex]. */
-    fun loadQueue(tracks: List<Track>, startIndex: Int) {
+    fun loadQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long = 0) {
         queueJob?.cancel()
         queueJob = scope.launch {
             val items = tracks.map { it.toPlayable() }
             this@LocalPlayer.tracks.value = tracks
             engine.loadQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
+            if (startPositionMs > 0) engine.seekTo(startPositionMs)
         }
     }
+
+    override fun loadQueuePaused(tracks: List<Track>, startIndex: Int, startPositionMs: Long) =
+        loadQueue(tracks, startIndex, startPositionMs)
 
     /**
      * Apply a queue + start position pushed by a remote controller ("Play On this device"). When the
@@ -99,7 +104,7 @@ class LocalPlayer(
             reorderInPlace(tracks)
             return true
         }
-        playNow(tracks, startIndex)
+        playNow(tracks, startIndex, startPositionMs)
         return false
     }
 

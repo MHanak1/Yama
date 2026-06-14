@@ -18,8 +18,17 @@ interface Player {
 
     val status: StateFlow<PlayerStatus>
 
-    /** Replace the queue with [tracks] and start playing at [startIndex]. */
-    fun playNow(tracks: List<Track>, startIndex: Int = 0)
+    /** Replace the queue with [tracks] and start playing at [startIndex], seeking to [startPositionMs]. */
+    fun playNow(tracks: List<Track>, startIndex: Int = 0, startPositionMs: Long = 0)
+
+    /**
+     * Load [tracks] at [startIndex]/[startPositionMs] without starting playback. On players where
+     * there is no native "load paused" command (e.g. remote Jellyfin sessions), this sends a play
+     * command followed by a pause — chained so the pause is guaranteed to arrive after the play.
+     */
+    fun loadQueuePaused(tracks: List<Track>, startIndex: Int = 0, startPositionMs: Long = 0) {
+        playNow(tracks, startIndex, startPositionMs)
+    }
 
     /** Insert [tracks] immediately after the current item. */
     fun playNext(tracks: List<Track>)
@@ -71,11 +80,7 @@ interface Player {
     /** Set absolute output volume (0f..1f). No-op on players without volume control. */
     fun setVolume(level: Float)
 
-    /**
-     * Nudge volume by one [VOLUME_STEP]. Defaults to stepping [setVolume] from the last known level;
-     * a remote player overrides these to send the device's native volume-up/down commands so it steps
-     * on its own scale (and reports the new level back).
-     */
+    /** Nudge volume by one [VOLUME_STEP] via [setVolume]. */
     fun volumeUp() { volume.value?.let { setVolume((it + VOLUME_STEP).coerceAtMost(1f)) } }
     fun volumeDown() { volume.value?.let { setVolume((it - VOLUME_STEP).coerceAtLeast(0f)) } }
 
@@ -89,8 +94,8 @@ interface Player {
     fun release()
 }
 
-/** Half of one hardware/step volume increment, as a fraction of the full 0f..1f range. */
-const val VOLUME_STEP = 0.025f
+/** One volume step (1/50 of the full range) used by hardware-key nudges. */
+const val VOLUME_STEP = 0.02f
 
 // Shared constant flow for the [Player.controlsSystemVolume] default — most players never touch the
 // system volume, so they share this rather than each allocating one.

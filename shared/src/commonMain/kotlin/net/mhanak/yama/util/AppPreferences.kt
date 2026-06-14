@@ -1,6 +1,7 @@
 package net.mhanak.yama.util
 
 import com.russhwolf.settings.Settings
+import net.mhanak.yama.defaultUseDeviceVolume
 
 // commonMain
 object AppPreferences {
@@ -60,11 +61,11 @@ object AppPreferences {
         get() = settings.getBoolean("allow_remote_control", true)
         set(value) { settings.putBoolean("allow_remote_control", value) }
 
-    // Whether the in-app volume slider drives the device (media stream) volume rather than an in-app
-    // gain. On by default; the engine falls back to in-app gain where device volume isn't controllable
-    // (e.g. desktop). Android-specific in effect.
+    // Whether the in-app volume slider drives the system (media stream) volume rather than an in-app
+    // gain. Defaults true on Android, false on desktop (opt-in there); the engine falls back to
+    // in-app gain where system volume isn't controllable (e.g. Windows, or Linux without pactl).
     var useDeviceVolume: Boolean
-        get() = settings.getBoolean("use_device_volume", true)
+        get() = settings.getBoolean("use_device_volume", defaultUseDeviceVolume)
         set(value) { settings.putBoolean("use_device_volume", value) }
 
     // Whether to hold the screen awake while the full player is open and something is playing. On by
@@ -104,6 +105,12 @@ object AppPreferences {
         if (ids.isEmpty()) settings.remove("excluded_libraries_$key")
         else settings.putString("excluded_libraries_$key", ids.joinToString("\n"))
     }
+
+    // Streaming quality for sources that support server-side transcoding (Jellyfin). Original means no
+    // bitrate cap — direct-play when the container matches, else transcode at source quality.
+    var streamingQuality: StreamingQuality
+        get() = StreamingQuality.entries.getOrElse(settings.getInt("streaming_quality", StreamingQuality.Original.ordinal)) { StreamingQuality.Original }
+        set(value) { settings.putInt("streaming_quality", value.ordinal) }
 
     // Hide local files with no embedded metadata (no readable title) from the library. On by default;
     // the index still stores them, so toggling this off brings them back without a rescan.

@@ -80,6 +80,9 @@ interface MusicSource {
     /** Resolve track IDs to [Track]s, preserving the requested order. Used to fulfil remote "Play On". */
     suspend fun getTracksByIds(ids: List<String>): List<Track> = emptyList()
 
+    /** Whether this source honours [getStreamUrl]'s quality parameter (i.e. supports transcoding). */
+    val supportsStreamingQuality: Boolean get() = false
+
     /** A directly playable audio URL for the given track. */
     suspend fun getStreamUrl(trackId: String): String
 

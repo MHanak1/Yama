@@ -13,6 +13,8 @@ actual fun getPlatform(): Platform = JVMPlatform()
 
 actual fun isTelevisionDevice(): Boolean = false
 
+actual val defaultUseDeviceVolume: Boolean = false
+
 // jvmMain
 actual fun getDeviceName(): String =
     InetAddress.getLocalHost().hostName ?: System.getProperty("os.name") ?: "Desktop"
