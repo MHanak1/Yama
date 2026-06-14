@@ -1,5 +1,6 @@
 package net.mhanak.yama.views
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,7 @@ import net.mhanak.yama.components.AsyncImageListCard
 import net.mhanak.yama.components.CardImage
 import net.mhanak.yama.components.DetailPlayActions
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.FavoriteButton
 import net.mhanak.yama.components.ListView
 import net.mhanak.yama.components.RegisterDetailTint
 import net.mhanak.yama.components.SegmentedButtonRow
@@ -35,6 +37,7 @@ import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Track
+import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.screens.AlbumDetailRoute
 
@@ -57,6 +60,9 @@ fun CollectionDetailView(
     imageUrl: String?,
     cacheKey: String?,
     genres: List<String>? = null,
+    kind: FavoritableKind? = null,
+    itemId: String? = null,
+    initialFavorite: Boolean? = null,
     onBack: () -> Unit,
     onNavigate: (Any) -> Unit = {},
     onViewAllTracks: (() -> Unit)? = null,
@@ -91,8 +97,17 @@ fun CollectionDetailView(
         contentPadding = contentPadding,
     ) {
         item {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                if (kind != null) {
+                    FavoriteButton(kind = kind, itemId = itemId, initial = initialFavorite)
+                }
             }
         }
 
@@ -105,7 +120,7 @@ fun CollectionDetailView(
                     genres = genres,
                     playActions = {
                         DetailPlayActions(
-                            player = appContainer.playback.active,
+                            player = appContainer.playback.viewed,
                             // Collections can be huge, so cap at 100 tracks; shuffling pulls a random
                             // set from the backend rather than reshuffling only the displayed sort order.
                             fetchTracks = { shuffled ->
@@ -136,7 +151,7 @@ fun CollectionDetailView(
                 track = track,
                 tracks = tracks,
                 index = index,
-                player = appContainer.playback.active,
+                player = appContainer.playback.viewed,
                 subtitle = track.album,
                 image = { CardImage(imageUrl = album?.imageUrl ?: track.imageUrl, imageHash = album?.imageHash) },
             )

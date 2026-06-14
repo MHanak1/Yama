@@ -72,7 +72,7 @@ interface MusicSource {
     suspend fun getTracksForAlbum(albumId: String): List<Track>
     suspend fun getTracksForArtist(artistId: String, limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
     suspend fun getTracksForGenre(genreId: String, limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track>
-    suspend fun getAllTracks(limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical): List<Track> = emptyList()
+    suspend fun getAllTracks(limit: Int = 100, offset: Int = 0, sortBy: TrackSortOrder = TrackSortOrder.Alphabetical, favoritesOnly: Boolean = false, searchTerm: String? = null): List<Track> = emptyList()
     suspend fun getTracksForPlaylist(playlistId: String): List<Track>
     suspend fun getAlbumsForArtist(artistId: String): List<Album>
     suspend fun getAlbumsForGenre(genreId: String): List<Album>

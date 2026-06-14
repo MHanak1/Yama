@@ -74,6 +74,16 @@ class LocalPlayer(
         }
     }
 
+    /** Restore a saved queue without starting playback — the player stays paused at [startIndex]. */
+    fun loadQueue(tracks: List<Track>, startIndex: Int) {
+        queueJob?.cancel()
+        queueJob = scope.launch {
+            val items = tracks.map { it.toPlayable() }
+            this@LocalPlayer.tracks.value = tracks
+            engine.loadQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
+        }
+    }
+
     /**
      * Apply a queue + start position pushed by a remote controller ("Play On this device"). When the
      * push is really just a reorder/removal of the queue we're already playing — same now-playing
@@ -192,6 +202,7 @@ class LocalPlayer(
     // StateFlow is covariant, so the engine's non-null volume satisfies the nullable Player contract.
     override val volume: StateFlow<Float?> = engine.volume
     override val volumeControllable: StateFlow<Boolean> = MutableStateFlow(true)
+    override val controlsSystemVolume: StateFlow<Boolean> = engine.controlsSystemVolume
     override fun setVolume(level: Float) = engine.setVolume(level)
 
     /** Whether [setVolume] drives the device (media stream) volume or an in-app gain. Local-only, so

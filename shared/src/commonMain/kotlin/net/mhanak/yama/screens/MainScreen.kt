@@ -168,9 +168,24 @@ fun MainScreen() {
     val onSettings = destination?.hasRoute<SettingsRoute>() == true
 
     // The active player is Compose-observable so a future switch to a remote player rebinds the UI.
-    val player = appContainer.playback.active
+    val player = appContainer.playback.viewed
     val playerStatus by player.status.collectAsState()
     val activeVolume by player.volume.collectAsState()
+
+    // Surface the in-app volume indicator whenever the active player's level changes on its own —
+    // chiefly so a controller ("Play On") flashes the bar when it moves the remote device's volume
+    // (slider drag, or a change made on the device itself and reported back). Gated on the player not
+    // driving *this* device's system stream, where the OS shows its own panel instead. The target's
+    // remote-command case is handled separately by PlaybackController.volumeChanged below, which fires
+    // even in system-volume mode (a networked change pops no OS panel). Skips the value present at
+    // (re)bind so swapping the active player or first composition doesn't flash.
+    LaunchedEffect(player) {
+        var first = true
+        player.volume.collect {
+            if (first) first = false
+            else if (!player.controlsSystemVolume.value) appContainer.playback.notifyVolumeChanged()
+        }
+    }
     val playerExpansion = remember { Animatable(0f) }
     // Distance from the screen bottom to the mini-player bar's top (bar height on rail, bar + bottom
     // bar on slim). Captured from the layout's content bottom inset so the full player can rest with
@@ -182,7 +197,7 @@ fun MainScreen() {
     // this re-pulls it so the bar/full player don't show the track that was playing when we left. The
     // local player's refresh is a no-op (its engine state is always current).
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
-        appContainer.playback.active.refresh()
+        appContainer.playback.viewed.refresh()
     }
 
     // On Android, when the device wakes and the app returns to the foreground, a socket left
@@ -424,7 +439,13 @@ fun MainScreen() {
             )
         }
 
-        // Transient volume bar (right edge) shown only on remote volume changes.
-        VolumeIndicator(volume = activeVolume, remoteVolumeChange = appContainer.playback.remoteVolumeChange)
+        // Transient in-app volume bar (right edge). Shown whenever the playback controller signals a
+        // volume change that the OS won't surface itself — a remote command (incl. one changing this
+        // device's volume over the network) or an active-player level change (see the LaunchedEffect
+        // above). Local hardware keys driving the system stream stay on the OS panel and never emit.
+        VolumeIndicator(
+            volume = activeVolume,
+            volumeChanged = appContainer.playback.volumeChanged,
+        )
     }
 }

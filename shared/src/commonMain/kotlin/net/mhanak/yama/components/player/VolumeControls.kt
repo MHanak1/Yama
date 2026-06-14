@@ -78,16 +78,19 @@ fun VolumeSlider(player: Player, modifier: Modifier = Modifier) {
 }
 
 /**
- * A transient vertical volume bar pinned to the right edge, shown briefly when [remoteVolumeChange]
- * emits — i.e. only for volume changes triggered by a remote command, not local UI interaction.
+ * A transient vertical volume bar pinned to the right edge, shown briefly when [volumeChanged] emits
+ * — a remote command (incl. one that changes *this* device's volume over the network, where the OS
+ * shows no panel of its own), or a hardware-key press the OS won't surface itself. The emitter is
+ * responsible for only firing when no OS panel will appear (see PlaybackController), so this just
+ * shows whenever it's asked to.
  *
  * Place inside the root [Box] of the screen; it aligns itself to the center-right.
  */
 @Composable
-fun BoxScope.VolumeIndicator(volume: Float?, remoteVolumeChange: Flow<Unit>) {
+fun BoxScope.VolumeIndicator(volume: Float?, volumeChanged: Flow<Unit>) {
     var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(remoteVolumeChange) {
-        remoteVolumeChange.collect {
+    LaunchedEffect(volumeChanged) {
+        volumeChanged.collect {
             visible = true
             delay(1_500)
             visible = false

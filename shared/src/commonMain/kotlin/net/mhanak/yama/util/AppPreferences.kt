@@ -138,4 +138,23 @@ object AppPreferences {
         if (current.isEmpty()) settings.remove("local_fav_$kind")
         else settings.putString("local_fav_$kind", current.joinToString("\n"))
     }
+
+    // Last-played queue per source — track IDs in order plus the ID of the current item.
+    fun savedQueueTrackIds(sourceType: String): List<String> {
+        val raw = settings.getStringOrNull("saved_queue_ids_$sourceType") ?: return emptyList()
+        return if (raw.isEmpty()) emptyList() else raw.split('\n')
+    }
+
+    fun setSavedQueueTrackIds(sourceType: String, ids: List<String>) {
+        if (ids.isEmpty()) settings.remove("saved_queue_ids_$sourceType")
+        else settings.putString("saved_queue_ids_$sourceType", ids.joinToString("\n"))
+    }
+
+    fun savedQueueCurrentId(sourceType: String): String? =
+        settings.getStringOrNull("saved_queue_current_$sourceType")
+
+    fun setSavedQueueCurrentId(sourceType: String, id: String?) {
+        if (id == null) settings.remove("saved_queue_current_$sourceType")
+        else settings.putString("saved_queue_current_$sourceType", id)
+    }
 }

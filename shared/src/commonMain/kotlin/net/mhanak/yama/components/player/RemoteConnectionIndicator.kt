@@ -45,7 +45,7 @@ fun RemoteConnectionIndicator(
     val appContainer = LocalAppContainer.current
     val provider = appContainer.activeMusicSource as? RemotePlaybackProvider
     val connected by (provider?.connected ?: ALWAYS_CONNECTED).collectAsState()
-    val casting = appContainer.playback.activeTarget != null
+    val casting = appContainer.playback.viewedTarget != null
     val visible = provider != null && !connected && (casting || !requireCasting)
 
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {

@@ -149,7 +149,7 @@ fun PlayerControls(
 ) {
     val appContainer = LocalAppContainer.current
     val canCast = appContainer.activeMusicSource is RemotePlaybackProvider
-    val isCasting = appContainer.playback.activeTarget != null
+    val isCasting = appContainer.playback.viewedTarget != null
     var showTargets by remember { mutableStateOf(false) }
 
     val bottomCenterFocus = remember { FocusRequester() }

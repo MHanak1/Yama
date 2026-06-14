@@ -35,6 +35,9 @@ actual class MediaPlayerEngine actual constructor() {
     private val _volume = MutableStateFlow(1f)
     actual val volume: StateFlow<Float> = _volume.asStateFlow()
 
+    private val _controlsSystemVolume = MutableStateFlow(false)
+    actual val controlsSystemVolume: StateFlow<Boolean> = _controlsSystemVolume.asStateFlow()
+
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var controller: MediaController? = null
     private val pending = mutableListOf<(MediaController) -> Unit>()
@@ -92,6 +95,16 @@ actual class MediaPlayerEngine actual constructor() {
         c.prepare()
         c.play()
         ensurePolling()
+    }
+
+    actual fun loadQueue(items: List<PlayableMedia>, startIndex: Int) = withController { c ->
+        if (items.isEmpty()) {
+            c.clearMediaItems()
+            return@withController
+        }
+        c.setMediaItems(items.map { it.toMediaItem() }, startIndex.coerceIn(0, items.size - 1), 0)
+        c.prepare()
+        // No c.play() — loads the queue in a paused/ready state
     }
 
     actual fun addToQueue(items: List<PlayableMedia>) = withController { c ->
@@ -154,9 +167,12 @@ actual class MediaPlayerEngine actual constructor() {
             isCommandAvailable(Media3Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS) &&
             deviceInfo.maxVolume > deviceInfo.minVolume
 
-    // Mirror whichever volume we're driving into [_volume] as a normalized 0f..1f value.
+    // Mirror whichever volume we're driving into [_volume] as a normalized 0f..1f value, and publish
+    // whether we're actually on the device (system) stream so the UI can defer to the OS volume panel.
     private fun pushVolume(c: MediaController) {
-        _volume.value = if (c.usingDevice()) {
+        val usingDevice = c.usingDevice()
+        _controlsSystemVolume.value = usingDevice
+        _volume.value = if (usingDevice) {
             val info = c.deviceInfo
             val range = (info.maxVolume - info.minVolume).coerceAtLeast(1)
             ((c.deviceVolume - info.minVolume).toFloat() / range).coerceIn(0f, 1f)

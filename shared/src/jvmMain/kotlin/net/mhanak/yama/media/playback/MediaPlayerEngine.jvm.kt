@@ -26,10 +26,15 @@ actual class MediaPlayerEngine actual constructor() {
     private val _volume = MutableStateFlow(1f)
     actual val volume: StateFlow<Float> = _volume.asStateFlow()
 
+    // libvlc only exposes an in-app gain — there's no OS device-volume control on the desktop — so the
+    // app never controls the system volume here.
+    actual val controlsSystemVolume: StateFlow<Boolean> = MutableStateFlow(false)
+
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val queue = mutableListOf<PlayableMedia>()
     private var index = -1
+    private var mediaLoaded = false
     private var repeat = RepeatMode.Off
     private var shuffle = false
 
@@ -74,6 +79,7 @@ actual class MediaPlayerEngine actual constructor() {
         val p = player ?: return
         if (i !in queue.indices) return
         index = i
+        mediaLoaded = true
         p.media().play(queue[i].uri)
         // libvlc resets volume to default on a fresh media; reassert the chosen level.
         p.audio().setVolume((_volume.value * 100).toInt())
@@ -99,10 +105,25 @@ actual class MediaPlayerEngine actual constructor() {
         queue.addAll(items)
         if (items.isEmpty()) {
             index = -1
+            mediaLoaded = false
             player?.controls()?.stop()
             pushState(PlaybackState.Idle, false)
         } else {
             playIndex(startIndex.coerceIn(0, items.size - 1))
+        }
+    }
+
+    actual fun loadQueue(items: List<PlayableMedia>, startIndex: Int) {
+        queue.clear()
+        queue.addAll(items)
+        mediaLoaded = false
+        if (items.isEmpty()) {
+            index = -1
+            player?.controls()?.stop()
+            pushState(PlaybackState.Idle, false)
+        } else {
+            index = startIndex.coerceIn(0, items.size - 1)
+            pushState(PlaybackState.Paused, false)
         }
     }
 
@@ -137,18 +158,22 @@ actual class MediaPlayerEngine actual constructor() {
     actual fun clear() {
         queue.clear()
         index = -1
+        mediaLoaded = false
         player?.controls()?.stop()
         pushState(PlaybackState.Idle, false)
     }
 
     actual fun play() {
         val p = player ?: return
-        if (index == -1 && queue.isNotEmpty()) {
-            playIndex(0)
-        } else {
-            p.controls().setPause(false)
-            // Reflect intent immediately rather than waiting for libvlc's playing() event (see pause()).
-            pushState(PlaybackState.Playing, true)
+        when {
+            // Queue was restored via loadQueue but media never started — begin playing now.
+            !mediaLoaded && queue.isNotEmpty() -> playIndex(if (index >= 0) index else 0)
+            index == -1 && queue.isNotEmpty() -> playIndex(0)
+            else -> {
+                p.controls().setPause(false)
+                // Reflect intent immediately rather than waiting for libvlc's playing() event (see pause()).
+                pushState(PlaybackState.Playing, true)
+            }
         }
     }
 

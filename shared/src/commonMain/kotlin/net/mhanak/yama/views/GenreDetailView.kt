@@ -6,7 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.views.CollectionDetailView
+import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.screens.GenreTracksRoute
 
 @Composable
@@ -25,6 +25,9 @@ fun GenreDetailView(
         name = genre?.name,
         imageUrl = genre?.imageUrl,
         cacheKey = genreId,
+        kind = FavoritableKind.Genre,
+        itemId = genreId,
+        initialFavorite = genre?.favorite,
         onBack = onBack,
         onNavigate = onNavigate,
         onViewAllTracks = { onNavigate(GenreTracksRoute(genreId)) },

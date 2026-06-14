@@ -183,7 +183,7 @@ fun RegisterDetailTint(imageUrl: String?, cacheKey: String?) {
 @Composable
 fun AppColorTheme(tintMode: AlbumTintMode, content: @Composable () -> Unit) {
     val detail = LocalDetailTint.current
-    val player = LocalAppContainer.current.playback.active
+    val player = LocalAppContainer.current.playback.viewed
     val status by player.status.collectAsState()
     val track = status.current
 

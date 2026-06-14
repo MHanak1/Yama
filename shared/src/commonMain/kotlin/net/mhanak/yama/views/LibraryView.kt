@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.plus
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Cast
@@ -63,8 +66,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.components.ErrorCard
 import net.mhanak.yama.components.LibrarySelectionButtons
 import net.mhanak.yama.components.LibrarySelectionState
+import net.mhanak.yama.components.LocalHasPullToRefreshIndicator
 import net.mhanak.yama.components.LocalLibrarySelection
 import net.mhanak.yama.components.PlatformBackHandler
 import net.mhanak.yama.components.SearchBar
@@ -86,6 +91,12 @@ enum class LibraryTab(val label: String, val icon: ImageVector, val favoritableK
     Genres("Genres", Icons.Default.Category, FavoritableKind.Genre),
     Playlists("Playlists", Icons.Default.QueueMusic, FavoritableKind.Playlist),
     Tracks("Tracks", Icons.Default.MusicNote, FavoritableKind.Track),
+}
+
+private fun SelectableKind.toFavoritableKind(): FavoritableKind = when (this) {
+    SelectableKind.Album -> FavoritableKind.Album
+    SelectableKind.Artist -> FavoritableKind.Artist
+    SelectableKind.Genre -> FavoritableKind.Genre
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,9 +154,31 @@ fun LibraryView(
     fun playSelection(shuffled: Boolean) {
         scope.launch {
             val tracks = gatherSelectedTracks(shuffled)
-            if (tracks.isNotEmpty()) appContainer.playback.active.playNow(tracks)
+            if (tracks.isNotEmpty()) appContainer.playback.viewed.playNow(tracks)
             selection.clear()
         }
+    }
+
+    // Favourite state for the current selection: whether *every* selected item is already favourited
+    // (drives the heart's filled/outlined look) and whether the source can favourite this kind at all.
+    val selectionFavKind = selection.kind?.toFavoritableKind()
+    val selectionFavoritesSupported =
+        selectionFavKind != null && appContainer.activeMusicSource.supportsFavorites(selectionFavKind)
+    var allSelectedFavorite by remember { mutableStateOf(false) }
+    LaunchedEffect(selection.selectedIds.toList(), selectionFavKind, appContainer.activeMusicSource) {
+        val source = appContainer.activeMusicSource
+        val ids = selection.selectedIds
+        allSelectedFavorite =
+            selectionFavKind != null && ids.isNotEmpty() && ids.all { source.isFavorite(selectionFavKind, it) }
+    }
+
+    fun toggleSelectionFavorite() {
+        val kind = selectionFavKind ?: return
+        val target = !allSelectedFavorite
+        val ids = selection.selectedIds.toList()
+        allSelectedFavorite = target // optimistic; the writes are best-effort and re-read on next change.
+        val source = appContainer.activeMusicSource
+        scope.launch { ids.forEach { source.setFavorite(kind, it, target) } }
     }
 
     fun navigateTo(tab: LibraryTab) {
@@ -195,7 +228,7 @@ fun LibraryView(
                                     }
                                 }
                                 if (canCast) {
-                                    val isCasting = appContainer.playback.activeTarget != null
+                                    val isCasting = appContainer.playback.viewedTarget != null
                                     IconButton(onClick = { showTargets = true }) {
                                         Icon(
                                             if (isCasting) Icons.Filled.Speaker else Icons.Outlined.Speaker,
@@ -289,6 +322,9 @@ fun LibraryView(
         // Floating play/shuffle controls for the current multi-selection, above the overlaid player bar.
         LibrarySelectionButtons(
             visible = selection.isActive,
+            allFavorite = allSelectedFavorite,
+            favoritesSupported = selectionFavoritesSupported,
+            onToggleFavorite = { toggleSelectionFavorite() },
             onPlay = { playSelection(shuffled = false) },
             onShuffle = { playSelection(shuffled = true) },
             modifier = Modifier
@@ -329,7 +365,35 @@ private fun LibraryTabContent(
         LibraryTab.AlbumArtists -> AlbumArtistsView(onAlbumArtistClick = onAlbumArtistClick, modifier = modifier, contentPadding = contentPadding, query = query, favoritesOnly = favoritesOnly)
         LibraryTab.Genres -> GenresView(onGenreClick = onGenreClick, modifier = modifier, contentPadding = contentPadding, query = query, favoritesOnly = favoritesOnly)
         LibraryTab.Playlists -> PlaylistsView(onPlaylistClick = onPlaylistClick, modifier = modifier, contentPadding = contentPadding, query = query, favoritesOnly = favoritesOnly)
-        LibraryTab.Tracks -> TracksView(modifier = modifier, contentPadding = contentPadding)
+        LibraryTab.Tracks -> TracksView(modifier = modifier, contentPadding = contentPadding, favoritesOnly = favoritesOnly, query = query)
+    }
+}
+
+/**
+ * Centered loading state for a library grid. On platforms whose [PullToRefreshContainer] draws its own
+ * refresh spinner (Android), this renders nothing so the two don't stack on first load; desktop/TV —
+ * which have no pull indicator — keep the spinner.
+ */
+@Composable
+internal fun LibraryLoading(contentPadding: PaddingValues, modifier: Modifier = Modifier) {
+    if (LocalHasPullToRefreshIndicator.current) return
+    Box(modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator()
+    }
+}
+
+/**
+ * Error state for a library grid. Made vertically scrollable so the enclosing [PullToRefreshContainer]
+ * can still register a downward pull over it — without a scrollable child the gesture never fires, so
+ * the user couldn't retry by pulling.
+ */
+@Composable
+internal fun LibraryError(message: String, contentPadding: PaddingValues, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(contentPadding).padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        ErrorCard(message = message)
     }
 }
 

@@ -59,7 +59,7 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
     val appContainer = LocalAppContainer.current
     val provider = appContainer.activeMusicSource as? RemotePlaybackProvider
     val targets by (provider?.remoteTargets ?: EMPTY_TARGETS).collectAsState()
-    val activeTarget = appContainer.playback.activeTarget
+    val viewedTarget = appContainer.playback.viewedTarget
 
     // The live push can be stale right after backgrounding; pull a fresh snapshot when the sheet opens
     // so the device list (and the controlled device's reported volume) is current.
@@ -111,7 +111,7 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
                 TargetRow(
                     icon = Icons.Filled.Smartphone,
                     label = "This device",
-                    selected = activeTarget == null,
+                    selected = viewedTarget == null,
                     onClick = {
                         appContainer.playback.selectTarget(null)
                         onDismiss()
@@ -123,7 +123,7 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
                         icon = Icons.Filled.Speaker,
                         label = target.name,
                         subtitle = target.client,
-                        selected = activeTarget?.id == target.id,
+                        selected = viewedTarget?.id == target.id,
                         onClick = {
                             appContainer.playback.selectTarget(target)
                             onDismiss()
@@ -141,7 +141,7 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
                 }
 
                 VolumeSlider(
-                    player = appContainer.playback.active,
+                    player = appContainer.playback.viewed,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                 )
 

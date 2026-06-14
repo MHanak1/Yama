@@ -1,12 +1,13 @@
 package net.mhanak.yama.media.playback
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import net.mhanak.yama.media.model.Track
 
 /**
  * The playback abstraction the UI binds to. Today the only implementation is [LocalPlayer] (playback
  * on this device), but the interface is deliberately backend-agnostic so a remote player — Jellyfin
- * "Play On", Music Assistant — can be swapped in via [PlaybackController.active] without the UI knowing.
+ * "Play On", Music Assistant — can be swapped in via [PlaybackController.viewed] without the UI knowing.
  *
  * Queue manipulation lives here because every modern player needs it and remote backends manage their
  * own queues too; what differs is only how a command is carried out, not the surface.
@@ -58,6 +59,15 @@ interface Player {
      */
     val volumeControllable: StateFlow<Boolean>
 
+    /**
+     * Whether driving this player's volume changes *this device's* OS/system media-stream volume — in
+     * which case the OS shows its own volume panel, so the app shouldn't draw its in-app indicator or
+     * slider. False for remote players (they move another device's volume) and for local playback in
+     * in-app-gain mode or on a device that can't control the system stream. Reported honestly: false
+     * whenever the app can't actually control the system volume, regardless of the user's preference.
+     */
+    val controlsSystemVolume: StateFlow<Boolean> get() = NeverControlsSystemVolume
+
     /** Set absolute output volume (0f..1f). No-op on players without volume control. */
     fun setVolume(level: Float)
 
@@ -81,3 +91,7 @@ interface Player {
 
 /** Half of one hardware/step volume increment, as a fraction of the full 0f..1f range. */
 const val VOLUME_STEP = 0.025f
+
+// Shared constant flow for the [Player.controlsSystemVolume] default — most players never touch the
+// system volume, so they share this rather than each allocating one.
+private val NeverControlsSystemVolume: StateFlow<Boolean> = MutableStateFlow(false)

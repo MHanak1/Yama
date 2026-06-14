@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -135,7 +136,11 @@ fun FullPlayer(
     val snapBack = spring<Float>(stiffness = Spring.StiffnessMediumLow)
 
     val appContainer = LocalAppContainer.current
-    val isCasting = appContainer.playback.activeTarget != null
+    val isCasting = appContainer.playback.viewedTarget != null
+    // Show the in-app volume slider only when the player isn't driving the system volume (where the OS
+    // panel handles it). Reflects the *actual* capability, so it appears even if device-volume control
+    // was requested but is unavailable.
+    val controlsSystemVolume by player.controlsSystemVolume.collectAsState()
     var showLyrics by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var lyrics: Lyrics? by remember { mutableStateOf(null) }
@@ -266,6 +271,7 @@ fun FullPlayer(
                             lyrics = lyrics,
                             positionMs = smoothPosition,
                             scale = playerScale,
+                            onSeekTo = { player.seekTo(it) },
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -304,7 +310,7 @@ fun FullPlayer(
                     modifier = Modifier.widthIn(max = 480.dp * playerScale).fillMaxWidth(),
                     showSecondaryControls = true,
                     showTertiaryControls = true,
-                    showVolumeBar = !appContainer.useDeviceVolume,
+                    showVolumeBar = !controlsSystemVolume,
                     scale = playerScale,
                     playPauseFocusRequester = playPauseFocus,
                     showLyrics = showLyrics,

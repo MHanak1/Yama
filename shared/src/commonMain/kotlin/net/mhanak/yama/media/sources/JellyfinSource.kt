@@ -118,6 +118,13 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
     // controlled device's mirrored state is frozen.
     override val connected: StateFlow<Boolean> get() = socket.connected
 
+    /**
+     * Whether the live socket link is healthy *right now*, recomputed on the spot rather than read
+     * from the (possibly stale) [connected] snapshot — see [JellyfinSocket.isLinkHealthy]. Used by the
+     * device-wake handler to skip a pointless [reconnect] when the link is already up.
+     */
+    fun isLiveLinkHealthy(): Boolean = socket.isLinkHealthy()
+
     override fun createPlayer(target: RemoteTarget): Player {
         val currentApi = requireNotNull(api) { "Not connected to a server" }
         val userId = sessions.find { it.id == currentSessionId }?.userId?.let { JellyfinUUID.fromString(it) }
@@ -436,13 +443,17 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
     }
 
-    override suspend fun getAllTracks(limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
+    override suspend fun getAllTracks(limit: Int, offset: Int, sortBy: TrackSortOrder, favoritesOnly: Boolean, searchTerm: String?): List<Track> {
         val currentApi = api ?: return emptyList()
         return currentApi.itemsApi.getItems(
             includeItemTypes = listOf(BaseItemKind.AUDIO),
             recursive = true,
             sortBy = sortBy.toJellyfinSortBy(),
             sortOrder = listOf(sortBy.toSortOrder()),
+            // null leaves favourites unfiltered; true restricts to liked tracks.
+            isFavorite = if (favoritesOnly) true else null,
+            // null/blank searches everything; the backend matches the term against track names.
+            searchTerm = searchTerm?.takeIf { it.isNotBlank() },
             limit = limit,
             startIndex = offset,
         ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
@@ -655,11 +666,31 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
 
     override suspend fun setFavorite(kind: FavoritableKind, id: String, favorite: Boolean) {
         val currentApi = api ?: return
+        // Reflect the change in the cached browse lists at once — the favourites filter and detail
+        // headers read `favorite` straight off these (stale-while-revalidate), so without this they'd
+        // keep showing the old state until the next full refresh.
+        updateCachedFavorite(kind, id, favorite)
         val itemId = JellyfinUUID.fromString(id)
         val userId = currentUserId()
         runCatching {
             if (favorite) currentApi.userLibraryApi.markFavoriteItem(itemId, userId)
             else currentApi.userLibraryApi.unmarkFavoriteItem(itemId, userId)
+        }
+    }
+
+    private fun updateCachedFavorite(kind: FavoritableKind, id: String, favorite: Boolean) {
+        when (kind) {
+            FavoritableKind.Album ->
+                _albums.value = _albums.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
+            FavoritableKind.Artist -> {
+                _artists.value = _artists.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
+                _albumArtists.value = _albumArtists.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
+            }
+            FavoritableKind.Genre ->
+                _genres.value = _genres.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
+            FavoritableKind.Playlist ->
+                _playlists.value = _playlists.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
+            FavoritableKind.Track -> Unit // tracks aren't held in a cached browse list
         }
     }
 
@@ -726,7 +757,7 @@ private suspend fun ApiClient.fetchAlbums(parentId: JellyfinUUID? = null): List<
         recursive = true,
         sortBy = listOf(ItemSortBy.NAME),
         sortOrder = listOf(SortOrder.ASCENDING),
-        fields = listOf(ItemFields.CHILD_COUNT),
+        fields = listOf(ItemFields.CHILD_COUNT, ItemFields.GENRES),
         limit = 1_000,
     ).content.items?.map { item ->
         Album(
@@ -747,6 +778,7 @@ private suspend fun ApiClient.fetchArtists(parentId: JellyfinUUID? = null): List
         parentId = parentId,
         sortBy = listOf(ItemSortBy.NAME),
         sortOrder = listOf(SortOrder.ASCENDING),
+        fields = listOf(ItemFields.GENRES),
         limit = 5_000,
     ).content.items?.map { item ->
         Artist(
@@ -764,6 +796,7 @@ private suspend fun ApiClient.fetchAlbumArtists(parentId: JellyfinUUID? = null):
         parentId = parentId,
         sortBy = listOf(ItemSortBy.NAME),
         sortOrder = listOf(SortOrder.ASCENDING),
+        fields = listOf(ItemFields.GENRES),
         limit = 1_000,
     ).content.items?.map { item ->
         Artist(

@@ -11,19 +11,23 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LowPriority
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Queue
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,8 +55,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.Player
+import net.mhanak.yama.media.sources.FavoritableKind
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -80,6 +86,10 @@ fun TrackListCard(
     player: Player,
     modifier: Modifier = Modifier,
     subtitle: String? = track.artists?.joinToString(", "),
+    // When true, the horizontal swipe-to-queue gestures are disabled (the tap/long-press/right-click
+    // menu stays). Used where the row sits inside a horizontally swipeable container (the library
+    // pager) so the row's drag doesn't preempt the container's.
+    disableGestures: Boolean = false,
     image: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -91,9 +101,23 @@ fun TrackListCard(
     val playNext = { player.playNext(listOf(track)) }
     val addToQueue = { player.addToQueue(listOf(track)) }
 
+    val source = LocalAppContainer.current.activeMusicSource
+    val favoritesSupported = remember(source) { source.supportsFavorites(FavoritableKind.Track) }
+    var isFavorite by remember(source, track.id) { mutableStateOf(false) }
+    if (favoritesSupported) {
+        LaunchedEffect(source, track.id) { isFavorite = source.isFavorite(FavoritableKind.Track, track.id) }
+    }
+
     val density = LocalDensity.current
     val triggerPx = with(density) { SwipeTriggerDistance.toPx() }
     val scope = rememberCoroutineScope()
+
+    val toggleFavorite = {
+        val next = !isFavorite
+        isFavorite = next
+        scope.launch { source.setFavorite(FavoritableKind.Track, track.id, next) }
+        Unit
+    }
     // Plain state updated synchronously while dragging, so onDragEnd reads the true offset (a launched
     // Animatable.snapTo would lag behind the release). An Animatable only drives the snap-back.
     var offsetX by remember { mutableStateOf(0f) }
@@ -122,29 +146,32 @@ fun TrackListCard(
             },
             modifier = Modifier
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { settleJob?.cancel() },
-                        onDragEnd = {
-                            when {
-                                offsetX >= triggerPx ->  playNext()
-                                offsetX <= -triggerPx -> addToQueue()
-                            }
-                            settleJob = scope.launch {
-                                Animatable(offsetX).animateTo(0f) { offsetX = value }
-                            }
-                        },
-                        onDragCancel = {
-                            settleJob = scope.launch {
-                                Animatable(offsetX).animateTo(0f) { offsetX = value }
-                            }
-                        },
-                        onHorizontalDrag = { change, delta ->
-                            change.consume()
-                            offsetX += delta
-                        },
-                    )
-                }
+                .then(
+                    if (disableGestures) Modifier
+                    else Modifier.pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { settleJob?.cancel() },
+                            onDragEnd = {
+                                when {
+                                    offsetX >= triggerPx ->  playNext()
+                                    offsetX <= -triggerPx -> addToQueue()
+                                }
+                                settleJob = scope.launch {
+                                    Animatable(offsetX).animateTo(0f) { offsetX = value }
+                                }
+                            },
+                            onDragCancel = {
+                                settleJob = scope.launch {
+                                    Animatable(offsetX).animateTo(0f) { offsetX = value }
+                                }
+                            },
+                            onHorizontalDrag = { change, delta ->
+                                change.consume()
+                                offsetX += delta
+                            },
+                        )
+                    },
+                )
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val event = awaitPointerEvent()
@@ -157,7 +184,21 @@ fun TrackListCard(
                     }
                 },
         ) {
-            ListCardRow(image = image, title = track.name, subtitle = subtitle)
+            ListCardRow(
+                image = image,
+                title = track.name,
+                subtitle = subtitle,
+                endContent = if (favoritesSupported) {{
+                    IconButton(onClick = toggleFavorite, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                            contentDescription = if (isFavorite) "Remove favourite" else "Add favourite",
+                            tint = if (isFavorite) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }} else null,
+            )
         }
 
         DropdownMenu(
@@ -169,6 +210,12 @@ fun TrackListCard(
             TrackMenuItem("Play from here", Icons.Filled.PlayCircle) { menuExpanded = false; playFromHere() }
             TrackMenuItem("Play next", Icons.Filled.Queue) { menuExpanded = false; playNext() }
             TrackMenuItem("Add to queue", Icons.Filled.QueueMusic) { menuExpanded = false; addToQueue() }
+            if (favoritesSupported) {
+                TrackMenuItem(
+                    if (isFavorite) "Remove from favourites" else "Add to favourites",
+                    if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                ) { menuExpanded = false; toggleFavorite() }
+            }
         }
     }
 }

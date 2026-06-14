@@ -118,7 +118,7 @@ fun ListCardRow(
         }
 
         Spacer(Modifier.width(8.dp))
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 title ?: "",
                 style = MaterialTheme.typography.titleMedium,
@@ -132,8 +132,6 @@ fun ListCardRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-
-        Spacer(Modifier.weight(1f))
         endContent?.invoke(this)
     }
 }

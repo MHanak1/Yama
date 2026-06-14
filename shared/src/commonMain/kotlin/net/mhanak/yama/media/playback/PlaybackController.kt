@@ -5,43 +5,61 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.RemoteCommand
 import net.mhanak.yama.util.AppPreferences
 
 /**
- * Owns the currently active [Player] and is the single entry point the UI uses to control playback.
+ * The single entry point the UI uses to control playback. Models playback as two independent axes
+ * (see PLAYBACK_PLAN.md):
  *
- * [active] is Compose-observable so switching from [LocalPlayer] to a remote player (Jellyfin
+ * - **Endpoint axis** — [local]: this device's own playback, always alive and (Phase 2+) always
+ *   reported, driven by server "Play On" pushes ([handleRemoteCommand]) and/or by the UI.
+ * - **View axis** — [viewed] / [viewedTarget]: the fleet member the UI currently shows and drives
+ *   (this device or a remote target).
+ *
+ * [viewed] is Compose-observable so switching from [LocalPlayer] to a remote player (Jellyfin
  * "Play On" via [selectTarget]) rebinds the UI without rewiring — mirroring how `AppContainer`
  * swaps `activeMusicSource`.
+ *
+ * NOTE (temporary): the two axes are currently coupled — selecting a remote hands playback off, so a
+ * device can't play locally *and* control a remote at once. That exclusivity is not permanent; see
+ * PLAYBACK_PLAN.md (Phase 2) for the planned decoupling.
  */
 class PlaybackController(private val source: () -> MusicSource) {
-    // Playback on this device. Exposed so the reporter can observe local-only playback and so remote
-    // "Play On" requests can always be routed here regardless of which player is currently active.
+    // Playback on this device (the endpoint axis). Exposed so the reporter can observe local-only
+    // playback and so remote "Play On" requests can always be routed here regardless of what's viewed.
     val local = LocalPlayer(MediaPlayerEngine(), source)
 
-    var active: Player by mutableStateOf(local)
+    // The player the UI currently shows and drives (the view axis): [local] or a remote player.
+    var viewed: Player by mutableStateOf(local)
         private set
 
-    // The remote device playback is currently directed to, or null when playing on this device.
-    var activeTarget: RemoteTarget? by mutableStateOf(null)
+    // The remote target the view is directed to, or null when viewing this device.
+    var viewedTarget: RemoteTarget? by mutableStateOf(null)
         private set
 
-    val status get() = active.status
+    val status get() = viewed.status
 
     // Set when something outside the UI (e.g. tapping the Android media notification) asks to open
     // the full-screen player. MainScreen observes this and consumes it (resets it to false).
     var openPlayerRequest: Boolean by mutableStateOf(false)
 
-    // Emits when a volume change was triggered by a remote command (not local UI interaction).
-    private val _remoteVolumeChange = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val remoteVolumeChange: SharedFlow<Unit> = _remoteVolumeChange
+    // Emits when a volume change should surface the in-app volume indicator — a remote command, or a
+    // local hardware-key press while the OS won't show its own panel (casting / in-app gain). The
+    // indicator itself is additionally gated on the viewed player not controlling the system volume.
+    private val _volumeChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val volumeChanged: SharedFlow<Unit> = _volumeChanged
+
+    /** Signal a volume change so the in-app indicator shows (e.g. from a hardware-key handler). */
+    fun notifyVolumeChanged() { _volumeChanged.tryEmit(Unit) }
 
     /**
-     * Direct playback to [target] (a "cast" device), or back to this device when null. Builds a
-     * remote [Player] via the active source's [RemotePlaybackProvider] and swaps it in as [active];
-     * the previously active remote player is released. No-op if the source can't cast.
+     * Direct the view to [target] (a "cast" device), or back to this device when null. Builds a
+     * remote [Player] via the active source's [RemotePlaybackProvider] and swaps it in as [viewed];
+     * the previously viewed remote player is released. No-op if the source can't cast.
      *
      * When [remember] is true (the default — a user picking a device in the cast sheet) the choice is
      * persisted per source so switching away and back to this source restores it. Pass false for
@@ -49,17 +67,17 @@ class PlaybackController(private val source: () -> MusicSource) {
      * replaying a saved choice) so they don't overwrite what the user last asked for.
      */
     fun selectTarget(target: RemoteTarget?, remember: Boolean = true) {
-        if (target?.id == activeTarget?.id) return
-        val previous = active
+        if (target?.id == viewedTarget?.id) return
+        val previous = viewed
         val next = if (target == null) {
             local
         } else {
             (source() as? RemotePlaybackProvider)?.createPlayer(target) ?: return
         }
-        active = next
-        activeTarget = if (next === local) null else target
+        viewed = next
+        viewedTarget = if (next === local) null else target
         if (previous !== local && previous !== next) previous.release()
-        if (remember) AppPreferences.setLastRemoteTarget(source().type.name, activeTarget?.encode())
+        if (remember) AppPreferences.setLastRemoteTarget(source().type.name, viewedTarget?.encode())
     }
 
     /**
@@ -79,7 +97,7 @@ class PlaybackController(private val source: () -> MusicSource) {
     }
 
     /**
-     * Recreate the active remote player against the source's freshly rebuilt backend client. The
+     * Recreate the viewed remote player against the source's freshly rebuilt backend client. The
      * Jellyfin remote player captures its client at construction, so after the source rebuilds it on
      * device wake (see [net.mhanak.yama.media.sources.JellyfinSource.reconnect]) the old player's
      * transport commands would keep hitting the dead client. No-op when playing locally.
@@ -88,18 +106,24 @@ class PlaybackController(private val source: () -> MusicSource) {
      * remote player survives a connection refresh (or has none) wouldn't need this. Since [createPlayer]
      * just rebuilds a player for the same target, calling it for such a source is harmless if wasteful.
      */
-    fun rebuildActiveRemotePlayer() {
-        val target = activeTarget ?: return
-        val previous = active
+    fun rebuildViewedRemotePlayer() {
+        val target = viewedTarget ?: return
+        val previous = viewed
         val next = (source() as? RemotePlaybackProvider)?.createPlayer(target) ?: return
-        active = next
+        viewed = next
         if (previous !== local) previous.release()
     }
 
     /**
      * Apply a command pushed by a remote controller ("Play On" from another client). Play requests
-     * always target the local player (and make it active, since "Play On <this device>" means here);
-     * transport commands act on whatever player is currently active.
+     * always target the local player (and make it the viewed player, since "Play On <this device>"
+     * means here); transport commands act on whatever player is currently viewed.
+     *
+     * NOTE (temporary): forcing the view to local on an inbound Play is correct only while the two axes
+     * are coupled — it makes the device show what's being cast to it. Once simultaneous local + remote
+     * is supported (PLAYBACK_PLAN.md Phase 2), an inbound Play should leave the view alone when the UI
+     * is showing another player (local plays in the background as an endpoint) and route transport to
+     * [local] rather than [viewed].
      */
     fun handleRemoteCommand(command: RemoteCommand) {
         when (command) {
@@ -115,38 +139,30 @@ class PlaybackController(private val source: () -> MusicSource) {
             }
             is RemoteCommand.PlayNext -> local.playNext(command.tracks)
             is RemoteCommand.AddToQueue -> local.addToQueue(command.tracks)
-            RemoteCommand.Resume -> active.play()
-            RemoteCommand.Pause -> active.pause()
-            RemoteCommand.PlayPause -> active.togglePlayPause()
-            RemoteCommand.Stop -> active.stop()
-            RemoteCommand.Next -> active.next()
-            RemoteCommand.Previous -> active.previous()
-            is RemoteCommand.Seek -> active.seekTo(command.positionMs)
-            is RemoteCommand.SetVolume -> { active.setVolume(command.level); _remoteVolumeChange.tryEmit(Unit) }
-            RemoteCommand.VolumeUp -> { active.volumeUp(); _remoteVolumeChange.tryEmit(Unit) }
-            RemoteCommand.VolumeDown -> { active.volumeDown(); _remoteVolumeChange.tryEmit(Unit) }
-            is RemoteCommand.SetRepeat -> active.setRepeat(
+            RemoteCommand.Resume -> viewed.play()
+            RemoteCommand.Pause -> viewed.pause()
+            RemoteCommand.PlayPause -> viewed.togglePlayPause()
+            RemoteCommand.Stop -> viewed.stop()
+            RemoteCommand.Next -> viewed.next()
+            RemoteCommand.Previous -> viewed.previous()
+            is RemoteCommand.Seek -> viewed.seekTo(command.positionMs)
+            is RemoteCommand.SetVolume -> { viewed.setVolume(command.level); _volumeChanged.tryEmit(Unit) }
+            RemoteCommand.VolumeUp -> { viewed.volumeUp(); _volumeChanged.tryEmit(Unit) }
+            RemoteCommand.VolumeDown -> { viewed.volumeDown(); _volumeChanged.tryEmit(Unit) }
+            is RemoteCommand.SetRepeat -> viewed.setRepeat(
                 when (command.mode) {
                     RemoteCommand.Repeat.Off -> RepeatMode.Off
                     RemoteCommand.Repeat.All -> RepeatMode.All
                     RemoteCommand.Repeat.One -> RepeatMode.One
                 },
             )
-            is RemoteCommand.SetShuffle -> active.setShuffle(command.enabled)
+            is RemoteCommand.SetShuffle -> viewed.setShuffle(command.enabled)
         }
     }
 
-    // A RemoteTarget round-trips through prefs joined on the ASCII unit separator (U+001F, which
-    // can't occur in any field): "id\u001Fname\u001Fclient". client is optional — an empty tail.
-    private fun RemoteTarget.encode(): String = listOf(id, name, client ?: "").joinToString("\u001F")
+    // RemoteTarget round-trips through prefs as JSON — safe for XML-backed stores (java.util.prefs).
+    private fun RemoteTarget.encode(): String = Json.encodeToString(this)
 
-    private fun decodeTarget(raw: String): RemoteTarget? {
-        val parts = raw.split('\u001F')
-        val id = parts.getOrNull(0)?.takeIf { it.isNotEmpty() } ?: return null
-        return RemoteTarget(
-            id = id,
-            name = parts.getOrNull(1) ?: id,
-            client = parts.getOrNull(2)?.takeIf { it.isNotEmpty() },
-        )
-    }
+    private fun decodeTarget(raw: String): RemoteTarget? =
+        runCatching { Json.decodeFromString<RemoteTarget>(raw) }.getOrNull()
 }

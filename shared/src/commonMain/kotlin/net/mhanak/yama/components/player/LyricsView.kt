@@ -5,8 +5,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,6 +53,9 @@ fun LyricsView(
     modifier: Modifier = Modifier,
     // Multiplies the lyric text sizes so they grow with the rest of the player on large windows.
     scale: Float = 1f,
+    // When non-null, timed lyric lines become tappable and report their start time so the player can
+    // seek to that point in the song. Only wired for synced lyrics — unsynced lines carry no time.
+    onSeekTo: ((Long) -> Unit)? = null,
 ) {
     if (lyrics == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -81,7 +86,7 @@ fun LyricsView(
                 )
             }
         }
-        is Lyrics.Timed -> TimedLyricsView(lyrics, positionMs, scale, modifier)
+        is Lyrics.Timed -> TimedLyricsView(lyrics, positionMs, scale, onSeekTo, modifier)
     }
 }
 
@@ -90,6 +95,7 @@ private fun TimedLyricsView(
     lyrics: Lyrics.Timed,
     positionMs: Long,
     scale: Float,
+    onSeekTo: ((Long) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val wordSynced = remember(lyrics) { lyrics.lines.any { it.cues.isNotEmpty() } }
@@ -132,8 +138,16 @@ private fun TimedLyricsView(
                     (index - activeLineIndex).absoluteValue <= 2 -> 0.6f
                     else -> 0.3f
                 }
+                // Tapping a line jumps playback to its start. No ripple — a full-width ripple per line
+                // is visually noisy over lyrics; the seek itself is the feedback.
+                val clickMod = if (onSeekTo != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onSeekTo(line.startMs) }
+                } else Modifier
                 if (wordSynced && isActive && line.cues.isNotEmpty()) {
-                    WordSyncedLine(line = line, positionMs = positionMs, alpha = alpha, scale = scale)
+                    WordSyncedLine(line = line, positionMs = positionMs, alpha = alpha, scale = scale, modifier = clickMod)
                 } else {
                     Text(
                         text = line.text,
@@ -141,7 +155,7 @@ private fun TimedLyricsView(
                                 else MaterialTheme.typography.titleMedium.scaled(scale),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.fillMaxWidth().alpha(alpha).padding(vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().then(clickMod).alpha(alpha).padding(vertical = 8.dp),
                     )
                 }
             }
@@ -201,6 +215,7 @@ private fun WordSyncedLine(
     positionMs: Long,
     alpha: Float,
     scale: Float,
+    modifier: Modifier = Modifier,
 ) {
     val activeCueIndex = line.cues.indexOfLast { it.startMs <= positionMs }
     val primary = MaterialTheme.colorScheme.primary
@@ -236,6 +251,6 @@ private fun WordSyncedLine(
         text = annotated,
         style = MaterialTheme.typography.headlineSmall.scaled(scale),
         textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().alpha(alpha).padding(vertical = 8.dp),
+        modifier = modifier.fillMaxWidth().alpha(alpha).padding(vertical = 8.dp),
     )
 }

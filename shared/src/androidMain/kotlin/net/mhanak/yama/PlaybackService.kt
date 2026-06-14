@@ -67,27 +67,34 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * Reflect [net.mhanak.yama.media.playback.PlaybackController.active] onto the OS media session.
-     * When playing locally the session is backed by the [ExoPlayer]; while casting ("Play On") it's
-     * backed by a [RemoteMediaPlayer] bridging the active remote player, so the notification /
-     * lockscreen / media keys drive the remote device. `AppContainer.shared` is the process-wide
-     * singleton and the service shares its process, so this observes it directly.
+     * Reflect [net.mhanak.yama.media.playback.PlaybackController.viewed] onto the OS media session, so
+     * the notification follows whatever player the UI is showing. When viewing this device the session
+     * is backed by the [ExoPlayer]; while viewing a remote ("Play On") it's backed by a
+     * [RemoteMediaPlayer] bridging that remote player, so the notification / lockscreen / media keys
+     * drive the remote device. `AppContainer.shared` is the process-wide singleton and the service
+     * shares its process, so this observes it directly.
+     *
+     * NOTE (temporary): the hand-off below pauses the local ExoPlayer when viewing a remote, which is
+     * what makes local and remote playback mutually exclusive today. Once simultaneous playback lands
+     * (PLAYBACK_PLAN.md Phase 2), local decode must keep running for server-driven endpoint playback —
+     * the engine will observe the ExoPlayer directly so this swap only moves the *notification*, not
+     * the audio.
      */
     private fun observeActivePlayer() {
         val playback = AppContainer.shared.playback
         scope.launch {
-            snapshotFlow { playback.active }.distinctUntilChanged().collect { active ->
+            snapshotFlow { playback.viewed }.distinctUntilChanged().collect { viewed ->
                 val session = mediaSession ?: return@collect
                 val exo = localPlayer ?: return@collect
-                if (active === playback.local) {
+                if (viewed === playback.local) {
                     session.player = exo
                     remotePlayer?.release()
                     remotePlayer = null
                 } else {
                     // Hand off: stop decoding here so audio doesn't keep playing locally while the
-                    // user controls the remote device.
+                    // user controls the remote device. (Temporary — see the note above.)
                     exo.pause()
-                    val bridge = RemoteMediaPlayer(active, Looper.getMainLooper())
+                    val bridge = RemoteMediaPlayer(viewed, Looper.getMainLooper())
                     session.player = bridge
                     remotePlayer?.release()
                     remotePlayer = bridge

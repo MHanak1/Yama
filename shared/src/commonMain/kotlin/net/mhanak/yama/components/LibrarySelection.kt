@@ -6,12 +6,20 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
@@ -71,13 +79,19 @@ class LibrarySelectionState {
 val LocalLibrarySelection = compositionLocalOf<LibrarySelectionState?> { null }
 
 /**
- * The floating play/shuffle controls shown over the library while a multi-selection is active. A large
- * primary [Shuffle] button with a smaller [PlayArrow] button stacked above it, both glassy — shuffle
- * plays the selected items' tracks in random order, play keeps them in the order the items were picked.
+ * The floating controls shown over the library while a multi-selection is active. A large primary
+ * [Shuffle] button with smaller [PlayArrow] and favourite buttons stacked above it, all glassy and
+ * each captioned with a label to its left — shuffle plays the selected items' tracks in random order,
+ * play keeps them in the order the items were picked, and the heart toggles all selected items'
+ * favourite state. The heart is [Icons.Filled.Favorite] when every selected item is already favourited
+ * and [Icons.Outlined.FavoriteBorder] otherwise; it's hidden when the source can't favourite this kind.
  */
 @Composable
 fun LibrarySelectionButtons(
     visible: Boolean,
+    allFavorite: Boolean,
+    favoritesSupported: Boolean,
+    onToggleFavorite: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     modifier: Modifier = Modifier,
@@ -89,19 +103,60 @@ fun LibrarySelectionButtons(
         exit = scaleOut() + fadeOut(),
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            GlassFilledIconButton(onClick = onPlay, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = "Play selected")
+            if (favoritesSupported) {
+                LabeledAction(label = if (allFavorite) "Unfavourite" else "Favourite") {
+                    GlassFilledIconButton(onClick = onToggleFavorite, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            if (allFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                            contentDescription = if (allFavorite) "Remove selected from favourites" else "Add selected to favourites",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
             }
-            GlassFilledIconButton(onClick = onShuffle, modifier = Modifier.size(72.dp)) {
-                Icon(
-                    Icons.Filled.Shuffle,
-                    contentDescription = "Shuffle selected",
-                    modifier = Modifier.size(32.dp),
-                )
+            LabeledAction(label = "Play") {
+                GlassFilledIconButton(onClick = onPlay, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Play selected", tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+            LabeledAction(label = "Shuffle") {
+                GlassFilledIconButton(onClick = onShuffle, modifier = Modifier.size(72.dp)) {
+                    Icon(
+                        Icons.Filled.Shuffle,
+                        contentDescription = "Shuffle selected",
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         }
+    }
+}
+
+/** A selection action button with a glassy text [label] pill to its left. */
+@Composable
+private fun LabeledAction(
+    label: String,
+    button: @Composable () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier
+                .glassEffect(MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        button()
     }
 }

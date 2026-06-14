@@ -96,6 +96,18 @@ class JellyfinSocket(private val source: JellyfinSource) {
             lastSessionsPush.elapsedNow().inWholeMilliseconds < LIVE_STALE_MS
     }
 
+    /**
+     * Recompute [connected] on the spot and report it. The liveness watchdog is frozen while the app
+     * is backgrounded (Android), so [connected] can read a stale `true` right after the device wakes
+     * even though nothing has flowed for far longer than [LIVE_STALE_MS] (the socket sits half-open,
+     * awaiting OkHttp's timeout). Forcing a recompute first gives the caller — the device-wake
+     * reconnect — an up-to-date answer instead of that stale snapshot.
+     */
+    fun isLinkHealthy(): Boolean {
+        recomputeLiveness()
+        return _connected.value
+    }
+
     fun bind(api: ApiClient) {
         unbind()
         val s = CoroutineScope(Dispatchers.IO + SupervisorJob())

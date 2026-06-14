@@ -45,20 +45,42 @@ fun PaginatedTrackList(
     sortOptions: List<TrackSortOrder> = defaultSortOptions,
     defaultSort: TrackSortOrder = TrackSortOrder.Alphabetical,
     addSingleToQueue: Boolean = false,
+    // Disables the per-row swipe gestures (play-next / add-to-queue). Set where the row sits inside a
+    // horizontally swipeable container (the library pager) so the two don't fight over the drag.
+    disableGestures: Boolean = false,
+    // Extra dependency that, when changed, restarts loading from the first page — e.g. a favourites
+    // filter toggle whose effect is captured inside [loadPage] but isn't visible to the sort key.
+    reloadKey: Any? = null,
     onBack: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
     val appContainer = LocalAppContainer.current
+    val source = appContainer.activeMusicSource
     var sortOrder by remember { mutableStateOf(defaultSort) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var hasMore by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
+    // Reload from the top when the source is refreshed. A pull-to-refresh only re-runs
+    // source.refresh(), which repopulates the grid StateFlows — this list reads the backend directly,
+    // so without this it would ignore the pull (and any live library-change push). Bumped on each
+    // refresh *start*: getAllTracks always fetches fresh, so the rising edge is enough and avoids the
+    // double reload that keying on the boolean itself would cause.
+    var refreshGen by remember { mutableStateOf(0) }
+    LaunchedEffect(source) {
+        var first = true
+        source.isRefreshing.collect { refreshing ->
+            if (refreshing && !first) refreshGen++
+            first = false
+        }
+    }
+
     // One coroutine per sort order: loads pages sequentially, suspending between each until the
     // user scrolls within 20 rows of the bottom. Keying on sortOrder means a sort change cancels
     // the in-progress load cleanly and restarts from the beginning — no stuck isLoading flag.
-    LaunchedEffect(sortOrder) {
+    // [source] restarts the load when the active source is swapped; [refreshGen] on a refresh.
+    LaunchedEffect(sortOrder, reloadKey, source, refreshGen) {
         tracks = emptyList()
         hasMore = true
 
@@ -94,7 +116,7 @@ fun PaginatedTrackList(
 
         item {
             DetailPlayActions(
-                player = appContainer.playback.active,
+                player = appContainer.playback.viewed,
                 // The list is paginated, so play/shuffle act on a single page pulled fresh from the
                 // backend (capped at PAGE_SIZE): "Play" keeps the current sort, "Shuffle" asks the
                 // backend for a random page rather than reshuffling only what's loaded.
@@ -120,8 +142,9 @@ fun PaginatedTrackList(
                 track = track,
                 tracks = if (addSingleToQueue) listOf(track) else tracks,
                 index = index,
-                player = appContainer.playback.active,
+                player = appContainer.playback.viewed,
                 subtitle = track.artists?.joinToString(", ") ?: track.album,
+                disableGestures = disableGestures,
                 image = { CardImage(imageUrl = track.imageUrl) },
             )
         }

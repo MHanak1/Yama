@@ -263,8 +263,14 @@ class LocalSource(
         rows.filter { genreId in it.genreIds }
             .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack() }
 
-    override suspend fun getAllTracks(limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> =
-        rows.sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack() }
+    override suspend fun getAllTracks(limit: Int, offset: Int, sortBy: TrackSortOrder, favoritesOnly: Boolean, searchTerm: String?): List<Track> {
+        val favs = if (favoritesOnly) AppPreferences.localFavorites(FavoritableKind.Track.name) else null
+        val term = searchTerm?.takeIf { it.isNotBlank() }
+        return rows
+            .let { all -> if (favs != null) all.filter { it.id in favs } else all }
+            .let { all -> if (term != null) all.filter { it.title.contains(term, ignoreCase = true) } else all }
+            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack() }
+    }
 
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> = emptyList()
 

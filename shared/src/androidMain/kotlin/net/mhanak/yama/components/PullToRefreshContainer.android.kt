@@ -7,6 +7,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -41,6 +42,9 @@ actual fun PullToRefreshContainer(
             )
         },
     ) {
-        content()
+        // The box draws its own spinner during a refresh, so tell content to suppress any centered one.
+        CompositionLocalProvider(LocalHasPullToRefreshIndicator provides true) {
+            content()
+        }
     }
 }

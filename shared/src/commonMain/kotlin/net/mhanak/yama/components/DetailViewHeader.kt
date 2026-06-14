@@ -59,7 +59,7 @@ fun DetailViewHeader(
 
         if (wide) {
             Row(
-                verticalAlignment = Alignment.Bottom,
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 image()

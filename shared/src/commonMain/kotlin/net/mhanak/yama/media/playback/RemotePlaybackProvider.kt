@@ -1,11 +1,13 @@
 package net.mhanak.yama.media.playback
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
 
 /**
  * A device this app can "cast" to — another session the backend lets us remote-control (a Jellyfin
  * "Play On" target). [id] is the backend session id; [name]/[client] are for display.
  */
+@Serializable
 data class RemoteTarget(
     val id: String,
     val name: String,
@@ -15,7 +17,7 @@ data class RemoteTarget(
 /**
  * A [MusicSource][net.mhanak.yama.media.sources.MusicSource] that can hand off playback to another
  * device. The source discovers reachable targets ([remoteTargets]) and builds a [Player] that drives
- * one of them ([createPlayer]); `PlaybackController.selectTarget` swaps that player in as `active`,
+ * one of them ([createPlayer]); `PlaybackController.selectTarget` swaps that player in as `viewed`,
  * so the existing UI controls the remote device with no further wiring.
  *
  * Lives in `media.playback` (alongside [Player]) and is implemented by the source, mirroring how

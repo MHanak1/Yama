@@ -4,14 +4,23 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.mhanak.yama.media.playback.PlaybackController
 import net.mhanak.yama.media.playback.PlaybackReporter
+import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
@@ -111,7 +120,32 @@ class AppContainer {
         // MediaController must be called from the main thread).
         scope.launch(Dispatchers.Main) { jellyfinSource.remoteCommands.collect(playback::handleRemoteCommand) }
         // Mirror local playback back to the backend (now-playing, play counts, resume).
-        PlaybackReporter(playback.local.status, { playback.activeTarget == null }, { activeMusicSource }).start()
+        PlaybackReporter(playback.local.status, { playback.viewedTarget == null }, { activeMusicSource }).start()
+        observeCastTargetAvailability()
+        persistQueueOnChange()
+        scope.launch(Dispatchers.IO) { restoreSavedQueue() }
+    }
+
+    /**
+     * Drop back to local playback when the viewed "Play On" target disappears from the discovered list
+     * — whether it was never reachable (a remembered target restored on launch that's now offline) or it
+     * went away mid-session. Gated on a *non-empty* target list so we don't reset before targets have
+     * actually been fetched: an empty list can simply mean discovery hasn't produced results yet, and
+     * resetting then would undo a perfectly valid restore. Restoring local isn't a user choice, so it
+     * doesn't overwrite their remembered target.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeCastTargetAvailability() {
+        scope.launch(Dispatchers.Main) {
+            snapshotFlow { activeMusicSource }
+                .flatMapLatest { (it as? RemotePlaybackProvider)?.remoteTargets ?: flowOf(emptyList()) }
+                .collect { targets ->
+                    val target = playback.viewedTarget ?: return@collect
+                    if (targets.isNotEmpty() && targets.none { it.id == target.id }) {
+                        playback.selectTarget(null, remember = false)
+                    }
+                }
+        }
     }
 
     /**
@@ -129,8 +163,42 @@ class AppContainer {
      */
     fun onDeviceWake() {
         if (!jellyfinSource.isAuthenticated) return
+        // The half-open socket this works around only matters when the live link is actually down (or
+        // stale and awaiting OkHttp's write timeout). If it's still healthy — a short sleep, or the OS
+        // never froze us — recreating the client would needlessly tear down a working WebSocket (and
+        // rebuild the remote player bound to it), so leave it be.
+        if (jellyfinSource.isLiveLinkHealthy()) return
         jellyfinSource.reconnect()
-        playback.rebuildActiveRemotePlayer()
+        playback.rebuildViewedRemotePlayer()
+    }
+
+    private fun persistQueueOnChange() {
+        scope.launch {
+            playback.local.status
+                .map { Pair(it.queue.map { t -> t.id }, it.current?.id) }
+                .distinctUntilChanged()
+                .drop(1) // Skip the initial empty-queue state so it doesn't overwrite the saved queue before restoreSavedQueue reads it
+                .collect { (ids, currentId) ->
+                    val sourceType = activeMusicSource.type.name
+                    AppPreferences.setSavedQueueTrackIds(sourceType, ids)
+                    AppPreferences.setSavedQueueCurrentId(sourceType, currentId)
+                }
+        }
+    }
+
+    private suspend fun restoreSavedQueue() {
+        val sourceType = activeMusicSource.type.name
+        val ids = AppPreferences.savedQueueTrackIds(sourceType)
+        val currentId = AppPreferences.savedQueueCurrentId(sourceType)
+        if (ids.isEmpty()) return
+        runCatching {
+            val tracks = activeMusicSource.getTracksByIds(ids)
+            if (tracks.isEmpty()) return
+            val index = if (currentId != null) {
+                tracks.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+            } else 0
+            withContext(Dispatchers.Main) { playback.local.loadQueue(tracks, index) }
+        }
     }
 
     private val _blurEnabled = mutableStateOf(AppPreferences.blurEnabled)

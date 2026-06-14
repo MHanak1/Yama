@@ -34,7 +34,7 @@ import kotlin.time.TimeSource
  * purely from the live [sessions] push (the same `SessionsMessage` stream that powers the cast list),
  * so the UI reflects whatever the remote device reports.
  *
- * Created by [net.mhanak.yama.media.sources.JellyfinSource.createPlayer] and swapped into `PlaybackController.active`; the controller
+ * Created by [net.mhanak.yama.media.sources.JellyfinSource.createPlayer] and swapped into `PlaybackController.viewed`; the controller
  * calls [release] when switching away.
  */
 class JellyfinRemotePlayer(
@@ -472,20 +472,11 @@ class JellyfinRemotePlayer(
         generalCommand(GeneralCommandType.SET_VOLUME, mapOf("Volume" to (clamped * 100).toInt().toString()))
     }
 
-    // When the device reports a level, step it with an absolute SET_VOLUME (reliable, accumulates via
-    // the optimistic overlay). When it doesn't, fall back to the device's native step command so keys
-    // still work on a device that accepts volume commands without reporting a level.
-    override fun volumeUp() {
-        val level = volume.value
-        if (level != null) setVolume(level + VOLUME_STEP)
-        else generalCommand(GeneralCommandType.VOLUME_UP, emptyMap())
-    }
-
-    override fun volumeDown() {
-        val level = volume.value
-        if (level != null) setVolume(level - VOLUME_STEP)
-        else generalCommand(GeneralCommandType.VOLUME_DOWN, emptyMap())
-    }
+    // Step the device with its native VOLUME_UP/VOLUME_DOWN commands so a key press behaves exactly
+    // like a press on the device's own remote — the device steps on its own scale and reports the new
+    // level back. (The absolute SET_VOLUME path is reserved for the slider's [setVolume].)
+    override fun volumeUp() = generalCommand(GeneralCommandType.VOLUME_UP, emptyMap())
+    override fun volumeDown() = generalCommand(GeneralCommandType.VOLUME_DOWN, emptyMap())
 
     override fun refresh() {
         scope.launch { runCatching { resync() } }

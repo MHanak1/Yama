@@ -1,6 +1,9 @@
 package net.mhanak.yama.views
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -14,15 +17,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.DetailPlayActions
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.FavoriteButton
 import net.mhanak.yama.components.ListView
 import net.mhanak.yama.components.RegisterDetailTint
 import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.model.Track
+import net.mhanak.yama.media.sources.FavoritableKind
 
 @Composable
 fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any) -> Unit = {}, modifier: Modifier = Modifier, contentPadding: PaddingValues = PaddingValues()) {
@@ -45,8 +51,15 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
         contentPadding = contentPadding,
     ) {
         item {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                FavoriteButton(kind = FavoritableKind.Playlist, itemId = playlistId, initial = playlist?.favorite)
             }
         }
 
@@ -59,7 +72,7 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                     genres = playlist.genres.ifEmpty { null },
                     playActions = {
                         DetailPlayActions(
-                            player = appContainer.playback.active,
+                            player = appContainer.playback.viewed,
                             // Cap at 100 tracks, in playlist order; shuffling randomises the picked set.
                             fetchTracks = { shuffled -> (if (shuffled) tracks.shuffled() else tracks).take(100) },
                         )
@@ -73,7 +86,7 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                 track = track,
                 tracks = tracks,
                 index = index,
-                player = appContainer.playback.active,
+                player = appContainer.playback.viewed,
             )
         }
     }
