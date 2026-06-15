@@ -44,7 +44,9 @@ class LocalPlayer(
                 state = engineStatus.state,
                 isPlaying = engineStatus.isPlaying,
                 positionMs = engineStatus.positionMs,
-                durationMs = engineStatus.durationMs,
+                durationMs = engineStatus.durationMs.takeIf { it > 0 }
+                    ?: trackList.getOrNull(engineStatus.queueIndex)?.durationTicks?.let { it / 10_000 }
+                    ?: 0L,
                 repeat = engineStatus.repeat,
                 shuffle = engineStatus.shuffle,
                 volume = vol,

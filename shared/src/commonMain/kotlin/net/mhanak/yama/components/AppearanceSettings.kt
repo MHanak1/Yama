@@ -1,13 +1,20 @@
 package net.mhanak.yama.components
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
@@ -19,8 +26,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.util.AlbumTintMode
@@ -31,126 +38,163 @@ import net.mhanak.yama.util.supportsDynamicColor
 @Composable
 fun AppearanceSettings(modifier: Modifier = Modifier) {
     val appContainer = LocalAppContainer.current
-    Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("Theme", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp))
-        val themeModes = listOf(ThemeMode.Light, ThemeMode.System, ThemeMode.Dark)
-        val themeLabels = mapOf(ThemeMode.Light to "Light", ThemeMode.System to "Auto", ThemeMode.Dark to "Dark")
-        SegmentedButtonRow(
-            options = themeModes,
-            selectedOption = appContainer.themeMode,
-            onOptionSelected = { appContainer.themeMode = it },
-            modifier = Modifier.fillMaxWidth(),
-        ) { mode -> Text(themeLabels[mode] ?: mode.name) }
+    Column(modifier = modifier) {
+
+        // ── Theme ─────────────────────────────────────────────────────
+        SettingsSectionHeader("Theme")
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            val themeModes = listOf(ThemeMode.Light, ThemeMode.System, ThemeMode.Dark)
+            val themeLabels = mapOf(ThemeMode.Light to "Light", ThemeMode.System to "Auto", ThemeMode.Dark to "Dark")
+            SegmentedButtonRow(
+                options = themeModes,
+                selectedOption = appContainer.themeMode,
+                onOptionSelected = { appContainer.themeMode = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) { mode -> Text(themeLabels[mode] ?: mode.name) }
+        }
 
         // System dynamic palette ("Material You"). Hidden where the platform can't provide one
         // (desktop, Android < 12), in which case the app always uses the generated seed scheme.
         val dynamicSupported = supportsDynamicColor()
         if (dynamicSupported) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) {
-                Text("Use Material You", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = appContainer.useMaterialYou,
-                    onCheckedChange = { appContainer.useMaterialYou = it },
-                )
-            }
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+            ListItem(
+                headlineContent = { Text("Use Material You") },
+                supportingContent = { Text("Follow your system's dynamic colour palette") },
+                trailingContent = { Switch(checked = appContainer.useMaterialYou, onCheckedChange = null) },
+                modifier = Modifier.clickable { appContainer.useMaterialYou = !appContainer.useMaterialYou },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
         }
 
         // Seed colour drives the generated scheme; only relevant when the system palette isn't in use.
         if (!dynamicSupported || !appContainer.useMaterialYou) {
-            Text("Accent colour", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-            SeedColorPicker(
-                color = appContainer.seedColor,
-                onColorChange = { appContainer.seedColor = it },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    "Accent colour",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                SeedColorPicker(
+                    color = appContainer.seedColor,
+                    onColorChange = { appContainer.seedColor = it },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
-        Text(
-            "Tint UI with album colours",
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-        )
-        var tintExpanded by remember { mutableStateOf(false) }
-        ExposedDropdownMenuBox(
-            expanded = tintExpanded,
-            onExpandedChange = { tintExpanded = it },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            OutlinedTextField(
-                value = appContainer.albumTintMode.label,
-                onValueChange = {},
-                readOnly = true,
-                singleLine = true,
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tintExpanded) },
-                modifier = Modifier
-                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    .fillMaxWidth(),
+        // ── Album art ─────────────────────────────────────────────────
+        SettingsSectionHeader("Album art")
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                "Tint UI with album colours",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
-            ExposedDropdownMenu(
+            var tintExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
                 expanded = tintExpanded,
-                onDismissRequest = { tintExpanded = false },
+                onExpandedChange = { tintExpanded = it },
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                AlbumTintMode.entries.forEach { mode ->
-                    DropdownMenuItem(
-                        text = { Text(mode.label) },
-                        onClick = {
-                            appContainer.albumTintMode = mode
-                            tintExpanded = false
-                        },
-                    )
+                OutlinedTextField(
+                    value = appContainer.albumTintMode.label,
+                    onValueChange = {},
+                    readOnly = true,
+                    singleLine = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tintExpanded) },
+                    modifier = Modifier
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth(),
+                )
+                ExposedDropdownMenu(
+                    expanded = tintExpanded,
+                    onDismissRequest = { tintExpanded = false },
+                ) {
+                    AlbumTintMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(mode.label) },
+                            onClick = {
+                                appContainer.albumTintMode = mode
+                                tintExpanded = false
+                            },
+                        )
+                    }
                 }
             }
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("Blur", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Switch(
-                checked = appContainer.blurEnabled,
-                onCheckedChange = { appContainer.blurEnabled = it },
-            )
-        }
+
+        // ── Display ───────────────────────────────────────────────────
+        SettingsSectionHeader("Display")
+        ListItem(
+            headlineContent = { Text("Blur effects") },
+            supportingContent = { Text("Frosted glass on UI panels") },
+            trailingContent = { Switch(checked = appContainer.blurEnabled, onCheckedChange = null) },
+            modifier = Modifier.clickable { appContainer.blurEnabled = !appContainer.blurEnabled },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
         if (appContainer.blurEnabled) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Opacity", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "${(appContainer.uiOpacity * 100).toInt()}%",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Slider(
+            SliderItem(
+                label = "Opacity",
+                displayValue = "${(appContainer.uiOpacity * 100).toInt()}%",
                 value = appContainer.uiOpacity,
                 onValueChange = { appContainer.uiOpacity = it },
                 steps = 9,
-                valueRange = 0.0f..1.0f,
-                modifier = Modifier.fillMaxWidth(),
+                valueRange = 0f..1f,
             )
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Text("UI scale", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "${(appContainer.uiScale * 100).toInt()}%",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Slider(
+        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+        SliderItem(
+            label = "UI scale",
+            displayValue = "${(appContainer.uiScale * 100).toInt()}%",
             value = appContainer.uiScale,
             onValueChange = { appContainer.uiScale = it },
             // 50%–150% in 10% steps.
             steps = 9,
             valueRange = 0.5f..1.5f,
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun SettingsSectionHeader(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun SliderItem(
+    label: String,
+    displayValue: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    steps: Int,
+    valueRange: ClosedFloatingPointRange<Float>,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                displayValue,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            steps = steps,
+            valueRange = valueRange,
             modifier = Modifier.fillMaxWidth(),
         )
     }

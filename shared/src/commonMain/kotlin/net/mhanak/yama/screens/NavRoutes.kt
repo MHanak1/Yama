@@ -28,3 +28,12 @@ data class ArtistTracksRoute(val artistId: String)
 
 @Serializable
 data class GenreTracksRoute(val genreId: String)
+
+@Serializable
+object AppearanceSettingsRoute
+
+@Serializable
+object PlaybackSettingsRoute
+
+@Serializable
+object LocalLibrarySettingsRoute

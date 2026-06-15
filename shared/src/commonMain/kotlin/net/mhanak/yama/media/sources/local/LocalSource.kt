@@ -94,13 +94,16 @@ class LocalSource(
         scope.launch { runCatching { refresh() } }
     }
 
-    override suspend fun refresh() {
+    override suspend fun refresh() = refresh(forceAll = false)
+
+    private suspend fun refresh(forceAll: Boolean) {
         _refreshError.value = null
         _isRefreshing.value = true
         try {
+            if (forceAll) artworkDir.listFiles()?.forEach { it.delete() }
             artworkDir.mkdirs()
             val files = scanAudioFiles(_folders.value)
-            val existingByPath = store.all(SOURCE_KEY).associateBy { it.path }
+            val existingByPath = if (forceAll) emptyMap() else store.all(SOURCE_KEY).associateBy { it.path }
             // albumId -> resolved artwork file:// URI for this pass, so every track of an album shares
             // one extracted cover and we extract it at most once.
             val albumArt = HashMap<String, String>()
@@ -341,7 +344,12 @@ class LocalSource(
 
     /** Manual rescan, wired to the settings "rescan" action and pull-to-refresh. */
     fun rescan() {
-        scope.launch { runCatching { refresh() } }
+        scope.launch { runCatching { refresh(forceAll = false) } }
+    }
+
+    /** Full rebuild: wipes the artwork cache and re-reads every file's tags from scratch. */
+    fun fullRescan() {
+        scope.launch { runCatching { refresh(forceAll = true) } }
     }
 
     /** Re-apply the "skip tracks without metadata" filter from the full index, with no rescan. Wired

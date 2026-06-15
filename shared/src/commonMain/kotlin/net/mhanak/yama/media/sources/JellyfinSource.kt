@@ -615,6 +615,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
             append("?DeviceId=").append(deviceId)
             if (userId != null) append("&UserId=").append(userId)
             append("&Container=").append(containers)
+            append("&AudioCodec=aac,mp3,opus")
             append("&EnableRedirection=true")
             if (maxBitrate != null) append("&MaxStreamingBitrate=").append(maxBitrate)
             append("&api_key=").append(token)

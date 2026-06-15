@@ -88,11 +88,14 @@ import net.mhanak.yama.components.PaginatedTrackList
 import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.views.AlbumDetailView
+import net.mhanak.yama.views.AppearanceSettingsView
 import net.mhanak.yama.views.ArtistDetailView
 import net.mhanak.yama.views.GenreDetailView
 import net.mhanak.yama.views.HomeView
 import net.mhanak.yama.views.LibraryTab
 import net.mhanak.yama.views.LibraryView
+import net.mhanak.yama.views.LocalLibrarySettingsView
+import net.mhanak.yama.views.PlaybackSettingsView
 import net.mhanak.yama.views.PlaylistDetailView
 import net.mhanak.yama.views.SettingsView
 
@@ -165,7 +168,10 @@ fun MainScreen() {
     val destination = navBackStackEntry?.destination
 
     val onHome = destination?.hasRoute<HomeRoute>() == true
-    val onSettings = destination?.hasRoute<SettingsRoute>() == true
+    val onSettings = destination?.hasRoute<SettingsRoute>() == true ||
+        destination?.hasRoute<AppearanceSettingsRoute>() == true ||
+        destination?.hasRoute<PlaybackSettingsRoute>() == true ||
+        destination?.hasRoute<LocalLibrarySettingsRoute>() == true
 
     // The active player is Compose-observable so a future switch to a remote player rebinds the UI.
     val player = appContainer.playback.viewed
@@ -362,7 +368,29 @@ fun MainScreen() {
                 )
             }
             composable<SettingsRoute> {
-                SettingsView(onMenuClick = onMenuClick, bottomContentPadding = bottomInset)
+                SettingsView(
+                    onMenuClick = onMenuClick,
+                    bottomContentPadding = bottomInset,
+                    onNavigate = { navController.navigate(it) { launchSingleTop = true } },
+                )
+            }
+            detailComposable<AppearanceSettingsRoute> {
+                AppearanceSettingsView(
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<PlaybackSettingsRoute> {
+                PlaybackSettingsView(
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<LocalLibrarySettingsRoute> {
+                LocalLibrarySettingsView(
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
             }
             detailComposable<AlbumDetailRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<AlbumDetailRoute>()

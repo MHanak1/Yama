@@ -1,18 +1,25 @@
 package net.mhanak.yama.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -22,6 +29,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
@@ -40,64 +48,68 @@ fun LocalLibrarySettings(modifier: Modifier = Modifier) {
 
     val pickFolder = rememberDirectoryPicker { path -> if (path != null) localSource.addFolder(path) }
 
-    Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Skip tracks without metadata", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "Hide local files that have no readable title tag",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = appContainer.skipTracksWithoutMetadata,
-                onCheckedChange = { appContainer.skipTracksWithoutMetadata = it },
-            )
-        }
+    Column(modifier = modifier) {
+        ListItem(
+            headlineContent = { Text("Skip tracks without metadata") },
+            supportingContent = { Text("Hide local files that have no readable title tag") },
+            trailingContent = {
+                Switch(checked = appContainer.skipTracksWithoutMetadata, onCheckedChange = null)
+            },
+            modifier = Modifier.clickable {
+                appContainer.skipTracksWithoutMetadata = !appContainer.skipTracksWithoutMetadata
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
 
         if (supportsDirectoryPicker) {
-            if (folders.isEmpty()) {
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
-                    "No folders added yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    "Watched folders",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                 )
-            }
-            folders.forEach { folder ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                ) {
+                if (folders.isEmpty()) {
                     Text(
-                        folder,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        "No folders added yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp),
                     )
-                    IconButton(onClick = { localSource.removeFolder(folder) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Remove folder")
+                }
+                folders.forEach { folder ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    ) {
+                        Text(
+                            folder,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { localSource.removeFolder(folder) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remove folder")
+                        }
                     }
                 }
             }
         } else {
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
             Text(
                 "Music is indexed automatically from this device's media library.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             if (supportsDirectoryPicker) {
                 OutlinedButton(onClick = pickFolder) {
@@ -106,13 +118,17 @@ fun LocalLibrarySettings(modifier: Modifier = Modifier) {
                 }
             }
             OutlinedButton(onClick = { localSource.rescan() }, enabled = !isRefreshing) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp).padding(end = 8.dp))
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
-                }
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
                 Text("Rescan")
             }
+            OutlinedButton(onClick = { localSource.fullRescan() }, enabled = !isRefreshing) {
+                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                Text("Full rescan")
+            }
+            if (isRefreshing) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            }
         }
+        Spacer(Modifier.height(8.dp))
     }
 }
