@@ -298,6 +298,7 @@ fun PlayerControls(
                     FavoriteButton(
                         kind = FavoritableKind.Track,
                         itemId = status.current?.id,
+                        initial = status.current?.favorite,
                         modifier = loopUp.size(48.dp * scale),
                         iconSize = 24.dp * scale,
                     )

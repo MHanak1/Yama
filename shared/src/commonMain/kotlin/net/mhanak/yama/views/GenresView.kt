@@ -28,6 +28,7 @@ fun GenresView(
     val genres by source.genres.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+    val reachable by source.isReachable.collectAsState()
 
     val filtered = remember(genres, query, favoritesOnly) {
         genres.filter {
@@ -38,6 +39,7 @@ fun GenresView(
 
     when {
         genres.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
+        genres.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         genres.isEmpty() && refreshError != null ->
             LibraryError(refreshError!!.message ?: "Failed to load genres", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->

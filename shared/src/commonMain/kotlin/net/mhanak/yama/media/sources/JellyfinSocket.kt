@@ -69,44 +69,52 @@ class JellyfinSocket(private val source: JellyfinSource) {
 
     // Whether the WebSocket *reports* itself connected. Not trustworthy on its own: a network drop
     // (phone off wifi/data) leaves the socket half-open — no FIN/RST arrives, so this stays true while
-    // no data actually flows. Used only to gate the watchdog's recovery probe; the UI uses [connected].
+    // no data actually flows. Used to gate the watchdog's recovery probe and as one input to [connected].
     private val _socketUp = MutableStateFlow(false)
 
-    // Liveness as the UI should see it: the socket is up *and* we've had fresh session data recently
-    // (a push, or a successful REST resync). This is what flips false on a real outage — including the
-    // half-open case [_socketUp] misses — so the "reconnecting" indicator actually appears. Recomputed
-    // by the watchdog and on every contact event.
+    // Liveness as the UI should see it (and what gates library graying via isReachable): the socket is
+    // up *and* the link hasn't been confirmed dead by a failed recovery probe. Deliberately NOT a bare
+    // staleness timer — the server only pushes a SessionsMessage when a session *changes*, so an idle
+    // client (nothing playing) routinely goes many seconds with no push even though the server is
+    // perfectly reachable. Timing out on that gap would drop [connected] (graying the whole library)
+    // until the watchdog's probe restored it a moment later — a periodic flicker. So only a down socket
+    // or an actually-failed probe flips this false; the watchdog's REST probe is the real outage signal.
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
-    // When we last had fresh session data (a SessionsMessage push or a successful resync). The server
-    // pushes frequently while truly connected, so a long gap means the link is dead even if the socket
-    // still claims Connected. Touched from several coroutines on the IO dispatcher, so volatile.
+    // When we last had fresh session data (a SessionsMessage push or a successful resync). Drives the
+    // watchdog's "have we gone quiet?" probe trigger and the wake-time staleness check in
+    // [isLinkHealthy]. Touched from several coroutines on the IO dispatcher, so volatile.
     @Volatile
     private var lastSessionsPush = TimeSource.Monotonic.markNow()
+
+    // Set when a recovery probe (REST resync) actually fails — the one signal besides a down socket that
+    // marks the link dead. Cleared on any fresh contact (a push or a successful probe). This replaces a
+    // purely time-based staleness flip so a quiet-but-reachable server stays live instead of flickering.
+    @Volatile
+    private var probeFailed = false
 
     // Guards against piling up REST probes while one is still in flight (a failing call on a dead
     // network can hang until its connect timeout).
     @Volatile
     private var probing = false
 
-    // Liveness = socket up AND last contact recent. Call after any event that changes either input.
+    // Liveness = socket up AND not confirmed dead by a failed probe. Call after any event that changes
+    // either input.
     private fun recomputeLiveness() {
-        _connected.value = _socketUp.value &&
-            lastSessionsPush.elapsedNow().inWholeMilliseconds < LIVE_STALE_MS
+        _connected.value = _socketUp.value && !probeFailed
     }
 
     /**
-     * Recompute [connected] on the spot and report it. The liveness watchdog is frozen while the app
-     * is backgrounded (Android), so [connected] can read a stale `true` right after the device wakes
-     * even though nothing has flowed for far longer than [LIVE_STALE_MS] (the socket sits half-open,
-     * awaiting OkHttp's timeout). Forcing a recompute first gives the caller — the device-wake
-     * reconnect — an up-to-date answer instead of that stale snapshot.
+     * Whether the live link looks healthy *right now*, for the device-wake reconnect decision. Unlike
+     * [connected] this is a bare staleness check on purpose: the watchdog is frozen while the app is
+     * backgrounded (Android), so a socket left half-open during the freeze still reports up and has no
+     * failed probe recorded — [connected] would read a stale `true`. A long gap since the last contact
+     * is the only clue available synchronously that the socket may be dead, so the wake handler rebuilds
+     * on it. (A false positive here only costs a needless reconnect of a working — if idle — socket.)
      */
-    fun isLinkHealthy(): Boolean {
-        recomputeLiveness()
-        return _connected.value
-    }
+    fun isLinkHealthy(): Boolean =
+        _socketUp.value && lastSessionsPush.elapsedNow().inWholeMilliseconds < LIVE_STALE_MS
 
     fun bind(api: ApiClient) {
         unbind()
@@ -137,6 +145,7 @@ class JellyfinSocket(private val source: JellyfinSource) {
             ws.subscribe<SessionsMessage>().collect {
                 _sessions.value = it.data.orEmpty()
                 lastSessionsPush = TimeSource.Monotonic.markNow()
+                probeFailed = false
                 recomputeLiveness()
             }
         }
@@ -161,18 +170,17 @@ class JellyfinSocket(private val source: JellyfinSource) {
         }
 
         // Liveness watchdog. A network drop leaves the socket half-open — it still claims Connected
-        // while no data flows — so we can't trust the socket state alone. Each tick we recompute
-        // liveness from the staleness clock *first* (so [connected] flips false at ~LIVE_STALE_MS even
-        // if a probe below hangs on the dead network's connect timeout), then, if we've heard nothing
-        // for STALE_PUSH_THRESHOLD_MS, fire a REST resync probe that doubles as the recovery path. A
-        // successful probe refreshes the clock, so a quiet-but-reachable server stays live; a failing
-        // one leaves it stale and the next recompute keeps the indicator up. The probe runs detached
-        // (so a hung call never stalls the cadence) and is single-flighted and gated to a nominally-up
-        // socket so a clean offline period doesn't pile up REST calls.
+        // while no data flows — so we can't trust the socket state alone. But we also can't treat a mere
+        // gap between pushes as an outage: the server only pushes on session changes, so an idle client
+        // is quiet for long stretches while perfectly reachable. So instead of timing out on silence, we
+        // *probe*: if we've heard nothing for STALE_PUSH_THRESHOLD_MS, fire a REST resync that doubles as
+        // the recovery path. A success keeps us live (quiet-but-reachable); only a failure flips
+        // [connected] false (see resyncSessions). The probe runs detached (a hung call never stalls the
+        // cadence), is single-flighted, and is gated to a nominally-up socket so a clean offline period
+        // doesn't pile up REST calls.
         s.launch {
             while (true) {
                 delay(WATCHDOG_INTERVAL_MS)
-                recomputeLiveness()
                 if (_socketUp.value && !probing &&
                     lastSessionsPush.elapsedNow().inWholeMilliseconds >= STALE_PUSH_THRESHOLD_MS
                 ) {
@@ -190,6 +198,7 @@ class JellyfinSocket(private val source: JellyfinSource) {
         refreshJob = null
         _sessions.value = emptyList()
         _socketUp.value = false
+        probeFailed = false
         _connected.value = false
     }
 
@@ -210,11 +219,18 @@ class JellyfinSocket(private val source: JellyfinSource) {
             .onSuccess {
                 _sessions.value = it
                 // A successful REST pull is fresh contact: refresh the staleness clock (so the watchdog
-                // backs off and liveness holds) and recompute, since reachable-via-REST counts as live.
+                // backs off), clear any prior probe failure, and recompute — reachable-via-REST is live.
                 lastSessionsPush = TimeSource.Monotonic.markNow()
+                probeFailed = false
                 recomputeLiveness()
             }
-            .onFailure { println("[Yama] resyncSessions failed: $it") }
+            .onFailure {
+                println("[Yama] resyncSessions failed: $it")
+                // A failed recovery probe is the signal that the link is actually down (the socket may
+                // still claim up while half-open); flip [connected] false so the UI reflects the outage.
+                probeFailed = true
+                recomputeLiveness()
+            }
     }
 
     /** Toggle whether this device responds to remote control; re-advertises capabilities. */
@@ -297,13 +313,14 @@ class JellyfinSocket(private val source: JellyfinSource) {
     private companion object {
         const val LIBRARY_DEBOUNCE_MS = 1_500L
 
-        // How often the liveness watchdog probes / re-evaluates.
+        // How often the liveness watchdog re-evaluates whether to probe.
         const val WATCHDOG_INTERVAL_MS = 3_000L
-        // No fresh contact for this long (while nominally connected) triggers an active REST probe —
-        // the server pushes frequently, so this is well clear of normal cadence.
+        // No fresh contact for this long (while the socket claims up) triggers an active REST probe. The
+        // probe — not this gap alone — decides liveness: success keeps us live (covers idle quiet
+        // periods, when the server has no session changes to push), only failure flips [connected] false.
         const val STALE_PUSH_THRESHOLD_MS = 6_000L
-        // No fresh contact for this long flips [connected] false (UI shows "reconnecting"). Equal to the
-        // probe threshold: a tick at/after this both probes and, if the probe fails, marks the link down.
+        // How long since last contact counts as "stale" for the device-wake check ([isLinkHealthy]),
+        // which rebuilds a likely-half-open socket on wake. Not used for the live [connected] flag.
         const val LIVE_STALE_MS = 6_000L
 
         // The remote-control commands this device understands, advertised so controllers (e.g. the

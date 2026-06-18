@@ -6,6 +6,15 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.sqldelight)
+}
+
+sqldelight {
+    databases {
+        create("YamaDatabase") {
+            packageName.set("net.mhanak.yama.db")
+        }
+    }
 }
 
 kotlin {
@@ -39,6 +48,8 @@ kotlin {
             implementation("androidx.media3:media3-exoplayer:1.5.1")
             implementation("androidx.media3:media3-session:1.5.1")
             implementation("com.vanniktech:blurhash:0.3.0")
+            implementation(libs.sqldelight.androidDriver)
+            implementation(libs.androidx.work.runtime)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -63,6 +74,9 @@ kotlin {
             implementation(libs.kmpalette.core)
             implementation(libs.materialKolor)
             implementation(libs.reorderable)
+
+            implementation(libs.sqldelight.runtime)
+            implementation(libs.sqldelight.coroutines)
         }
         jvmMain.dependencies {
             implementation("ch.qos.logback:logback-classic:1.5.6")
@@ -79,6 +93,7 @@ kotlin {
             // MprisService silently no-ops (the start() guard catches the missing-transport error).
             implementation("com.github.hypfvieh:dbus-java-core:5.1.0")
             implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.0")
+            implementation(libs.sqldelight.sqliteDriver)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

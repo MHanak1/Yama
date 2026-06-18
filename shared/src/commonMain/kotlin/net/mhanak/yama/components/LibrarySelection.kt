@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -80,17 +81,21 @@ val LocalLibrarySelection = compositionLocalOf<LibrarySelectionState?> { null }
 
 /**
  * The floating controls shown over the library while a multi-selection is active. A large primary
- * [Shuffle] button with smaller [PlayArrow] and favourite buttons stacked above it, all glassy and
- * each captioned with a label to its left — shuffle plays the selected items' tracks in random order,
- * play keeps them in the order the items were picked, and the heart toggles all selected items'
- * favourite state. The heart is [Icons.Filled.Favorite] when every selected item is already favourited
- * and [Icons.Outlined.FavoriteBorder] otherwise; it's hidden when the source can't favourite this kind.
+ * [Shuffle] button with smaller [PlayArrow], favourite, and download buttons stacked above it, all
+ * glassy and each captioned with a label to its left — shuffle plays the selected items' tracks in
+ * random order, play keeps them in the order the items were picked, the heart toggles all selected
+ * items' favourite state, and download enqueues every selected container for offline use. The heart is
+ * [Icons.Filled.Favorite] when every selected item is already favourited and
+ * [Icons.Outlined.FavoriteBorder] otherwise; it's hidden when the source can't favourite this kind, and
+ * the download button is hidden when the source doesn't persist downloads.
  */
 @Composable
 fun LibrarySelectionButtons(
     visible: Boolean,
     allFavorite: Boolean,
     favoritesSupported: Boolean,
+    downloadsSupported: Boolean,
+    onDownload: () -> Unit,
     onToggleFavorite: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
@@ -106,6 +111,17 @@ fun LibrarySelectionButtons(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (downloadsSupported) {
+                LabeledAction(label = "Download") {
+                    GlassFilledIconButton(onClick = onDownload, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            Icons.Outlined.Download,
+                            contentDescription = "Download selected",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
+            }
             if (favoritesSupported) {
                 LabeledAction(label = if (allFavorite) "Unfavourite" else "Favourite") {
                     GlassFilledIconButton(onClick = onToggleFavorite, modifier = Modifier.size(48.dp)) {

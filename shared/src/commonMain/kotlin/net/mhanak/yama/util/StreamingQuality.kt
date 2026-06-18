@@ -1,5 +1,8 @@
 package net.mhanak.yama.util
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class StreamingQuality(val label: String, val maxBitrateBps: Int?) {
     Original("Original", null),
     High("High (320 kbps)", 320_000),

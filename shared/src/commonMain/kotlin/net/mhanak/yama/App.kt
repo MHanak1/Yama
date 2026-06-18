@@ -16,9 +16,11 @@ import androidx.compose.ui.unit.Density
 import dev.chrisbanes.haze.rememberHazeState
 import net.mhanak.yama.components.AppColorTheme
 import net.mhanak.yama.components.DetailTint
+import net.mhanak.yama.components.LocalAvailability
 import net.mhanak.yama.components.LocalDetailTint
 import net.mhanak.yama.components.LocalHazeState
 import net.mhanak.yama.components.LocalUiOpacity
+import net.mhanak.yama.components.rememberAvailability
 import net.mhanak.yama.components.RequestLocalAudioPermission
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.screens.LoginScreen
@@ -57,6 +59,7 @@ fun App() {
         LocalUiOpacity provides appContainer.uiOpacity,
         LocalDensity provides scaledDensity,
         LocalDetailTint provides detailTint,
+        LocalAvailability provides rememberAvailability(appContainer),
     ) {
         AppTheme(darkTheme = darkTheme) {
             // Recolour the whole app to the open detail screen's item (overriding the player) or, at the

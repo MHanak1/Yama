@@ -37,3 +37,18 @@ object PlaybackSettingsRoute
 
 @Serializable
 object LocalLibrarySettingsRoute
+
+/** Top-level screen: downloads home — a managed list of downloaded albums. */
+@Serializable
+object DownloadedMusicRoute
+
+/** A single downloaded album's management view. */
+@Serializable
+data class DownloadedAlbumRoute(val albumId: String)
+
+/** A flat list of downloaded tracks, with an in-view toggle to also show the recent-tracks cache. */
+@Serializable
+object DownloadedTracksRoute
+
+@Serializable
+object DownloadsSettingsRoute

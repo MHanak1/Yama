@@ -29,8 +29,11 @@ import net.mhanak.yama.components.AsyncImageListCard
 import net.mhanak.yama.components.CardImage
 import net.mhanak.yama.components.DetailPlayActions
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.DownloadButton
+import net.mhanak.yama.components.DownloadableKind
 import net.mhanak.yama.components.FavoriteButton
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.LocalAvailability
 import net.mhanak.yama.components.RegisterDetailTint
 import net.mhanak.yama.components.SegmentedButtonRow
 import net.mhanak.yama.components.TrackListCard
@@ -105,8 +108,19 @@ fun CollectionDetailView(
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-                if (kind != null) {
-                    FavoriteButton(kind = kind, itemId = itemId, initial = initialFavorite)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val downloadKind = when (kind) {
+                        FavoritableKind.Artist -> DownloadableKind.Artist
+                        FavoritableKind.Genre -> DownloadableKind.Genre
+                        FavoritableKind.Playlist -> DownloadableKind.Playlist
+                        else -> null
+                    }
+                    if (downloadKind != null && itemId != null) {
+                        DownloadButton(kind = downloadKind, id = itemId)
+                    }
+                    if (kind != null) {
+                        FavoriteButton(kind = kind, itemId = itemId, initial = initialFavorite)
+                    }
                 }
             }
         }
@@ -119,6 +133,12 @@ fun CollectionDetailView(
                     name = name,
                     genres = genres,
                     playActions = {
+                        // Playable if downloaded (per kind) or the source is reachable.
+                        val playable = when (kind) {
+                            FavoritableKind.Artist -> LocalAvailability.current.artist(itemId ?: "")
+                            FavoritableKind.Genre -> LocalAvailability.current.genre(itemId ?: "")
+                            else -> LocalAvailability.current.reachable
+                        }
                         DetailPlayActions(
                             player = appContainer.playback.viewed,
                             // Collections can be huge, so cap at 100 tracks; shuffling pulls a random
@@ -126,6 +146,7 @@ fun CollectionDetailView(
                             fetchTracks = { shuffled ->
                                 fetchTopTracks(100, if (shuffled) TrackSortOrder.Random else sortOrder)
                             },
+                            enabled = playable,
                         )
                     },
                 )

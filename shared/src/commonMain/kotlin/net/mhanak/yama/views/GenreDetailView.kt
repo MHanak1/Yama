@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.download.TrackListKind
 import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.screens.GenreTracksRoute
 
@@ -32,7 +33,9 @@ fun GenreDetailView(
         onNavigate = onNavigate,
         onViewAllTracks = { onNavigate(GenreTracksRoute(genreId)) },
         fetchTopTracks = { limit, sortBy ->
-            appContainer.activeMusicSource.getTracksForGenre(genreId, limit, 0, sortBy)
+            appContainer.tracksFor(TrackListKind.Genre, genreId) {
+                appContainer.activeMusicSource.getTracksForGenre(genreId, limit, 0, sortBy)
+            }
         },
         fetchAlbums = { appContainer.activeMusicSource.getAlbumsForGenre(genreId) },
         modifier = modifier,

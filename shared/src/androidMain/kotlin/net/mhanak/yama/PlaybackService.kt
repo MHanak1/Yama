@@ -6,6 +6,8 @@ import android.os.Looper
 import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.AudioAttributes
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -53,7 +55,15 @@ class PlaybackService : MediaSessionService() {
                 .build()
                 .apply { setSmallIcon(R.drawable.ic_notification_waveform) },
         )
+        // Container-less downloads from Jellyfin's transcoder (raw ADTS AAC, MP3) carry no seek table,
+        // so by default ExoPlayer reports them unseekable and snaps every seekTo() to position 0.
+        // Enabling constant-bitrate seeking lets the extractors extrapolate a seek position from the
+        // bitrate, making the slider work on downloaded files (online/local containers seek natively).
+        val extractorsFactory = DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setConstantBitrateSeekingAlwaysEnabled(true)
         val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractorsFactory))
             // Request audio focus and pause on focus loss / when headphones are unplugged.
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)
@@ -68,6 +78,14 @@ class PlaybackService : MediaSessionService() {
             // Tapping the media notification launches the app and asks it to open the full player.
             .apply { sessionActivityIntent()?.let { setSessionActivity(it) } }
             .build()
+        // Register the session with the service explicitly. MediaSessionService doesn't auto-add the
+        // session you build — normally it's added when a MediaController connects (triggering
+        // onGetSession). The engine drives the ExoPlayer in-process and never connects a controller, so
+        // without this the notification controller never connects, MediaNotificationManager's
+        // shouldRunInForeground() stays false, and no media notification / foreground promotion ever
+        // happens. Adding it here makes Media3 manage the notification + foreground for whatever
+        // session.player currently is — the ExoPlayer or the swapped-in remote bridge.
+        mediaSession?.let { addSession(it) }
         observeActivePlayer()
     }
 

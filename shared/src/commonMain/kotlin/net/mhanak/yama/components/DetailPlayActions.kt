@@ -32,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
@@ -57,13 +58,19 @@ fun DetailPlayActions(
     player: Player,
     fetchTracks: suspend (shuffled: Boolean) -> List<Track>,
     modifier: Modifier = Modifier,
+    // Disabled (dimmed, taps ignored) when the collection is neither downloaded nor reachable.
+    enabled: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
+    // Drop tracks that can't be played right now (not downloaded while offline) so a partially-downloaded
+    // album/artist plays only what's available rather than failing on the missing ones.
+    val availability = LocalAvailability.current
     // Fetch the tracks for the chosen mode, then hand them to the player. Deferred to a coroutine
     // because the collection views fetch their full track set on demand rather than holding it.
     fun act(shuffled: Boolean, enqueue: Player.(List<Track>) -> Unit) {
+        if (!enabled) return
         scope.launch {
-            val tracks = fetchTracks(shuffled)
+            val tracks = fetchTracks(shuffled).filter { availability.track(it.id) }
             if (tracks.isNotEmpty()) player.enqueue(tracks)
         }
     }
@@ -71,6 +78,7 @@ fun DetailPlayActions(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.5f)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

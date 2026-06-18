@@ -30,8 +30,10 @@ import kotlin.math.roundToInt
  * Android engine: drives the [ExoPlayer] hosted by [PlaybackService] directly (in-process, no IPC
  * hop via `MediaController`). Subscribes to [PlaybackService.exoPlayerFlow] to get the player as
  * soon as the service starts; commands issued before that are buffered and replayed. A plain
- * [Context.bindService] call (with [Context.BIND_AUTO_CREATE]) starts the service and keeps it alive
- * for the engine's lifetime so Media3 can promote it to foreground when playback starts.
+ * [Context.bindService] call (with [Context.BIND_AUTO_CREATE]) creates the service and keeps it alive
+ * for the engine's lifetime. The foreground promotion / media notification is handled by Media3
+ * itself once the session is registered (see `PlaybackService.addSession`): it self-starts the
+ * foreground service when playback begins.
  *
  * Driving the ExoPlayer directly ensures [status] always reflects true local decode state — never the
  * [net.mhanak.yama.media.playback.RemoteMediaPlayer] bridge that [PlaybackService] swaps into the

@@ -18,8 +18,9 @@ fun TracksView(
     PaginatedTrackList(
         loadPage = { offset, limit, sortBy ->
             // The list is paginated/lazy-loaded, so the search term goes to the backend rather than
-            // filtering an already-loaded set the way the grid tabs do.
-            appContainer.activeMusicSource.getAllTracks(limit, offset, sortBy, favoritesOnly, searchTerm = query)
+            // filtering an already-loaded set the way the grid tabs do. Falls back to the downloads
+            // index when offline so already-downloaded tracks remain browsable.
+            appContainer.getAllTracks(limit, offset, sortBy, favoritesOnly, searchTerm = query)
         },
         modifier = modifier,
         contentPadding = contentPadding,

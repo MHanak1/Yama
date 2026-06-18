@@ -27,6 +27,7 @@ fun PlaylistsView(
     val playlists by source.playlists.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+    val reachable by source.isReachable.collectAsState()
 
     val filtered = remember(playlists, query, favoritesOnly) {
         playlists.filter {
@@ -37,6 +38,7 @@ fun PlaylistsView(
 
     when {
         playlists.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
+        playlists.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         playlists.isEmpty() && refreshError != null ->
             LibraryError(refreshError!!.message ?: "Failed to load playlists", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->

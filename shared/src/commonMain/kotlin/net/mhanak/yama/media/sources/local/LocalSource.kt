@@ -22,6 +22,7 @@ import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.util.AppPreferences
+import net.mhanak.yama.util.StreamingQuality
 import java.io.File
 import java.security.MessageDigest
 
@@ -253,26 +254,32 @@ class LocalSource(
         _genres.value = genres
     }
 
-    override suspend fun getTracksForAlbum(albumId: String): List<Track> =
-        rows.filter { it.albumId == albumId }
+    override suspend fun getTracksForAlbum(albumId: String): List<Track> {
+        val favs = trackFavorites()
+        return rows.filter { it.albumId == albumId }
             .sortedWith(compareBy({ it.discNumber ?: 0 }, { it.trackNumber ?: 0 }, { it.title.lowercase() }))
-            .map { it.toTrack() }
+            .map { it.toTrack(favs) }
+    }
 
-    override suspend fun getTracksForArtist(artistId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> =
-        rows.filter { artistId in it.artistIds || it.albumArtistId == artistId }
-            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack() }
+    override suspend fun getTracksForArtist(artistId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
+        val favs = trackFavorites()
+        return rows.filter { artistId in it.artistIds || it.albumArtistId == artistId }
+            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack(favs) }
+    }
 
-    override suspend fun getTracksForGenre(genreId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> =
-        rows.filter { genreId in it.genreIds }
-            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack() }
+    override suspend fun getTracksForGenre(genreId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
+        val favs = trackFavorites()
+        return rows.filter { genreId in it.genreIds }
+            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack(favs) }
+    }
 
     override suspend fun getAllTracks(limit: Int, offset: Int, sortBy: TrackSortOrder, favoritesOnly: Boolean, searchTerm: String?): List<Track> {
-        val favs = if (favoritesOnly) AppPreferences.localFavorites(FavoritableKind.Track.name) else null
+        val favs = trackFavorites()
         val term = searchTerm?.takeIf { it.isNotBlank() }
         return rows
-            .let { all -> if (favs != null) all.filter { it.id in favs } else all }
+            .let { all -> if (favoritesOnly) all.filter { it.id in favs } else all }
             .let { all -> if (term != null) all.filter { it.title.contains(term, ignoreCase = true) } else all }
-            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack() }
+            .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack(favs) }
     }
 
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> = emptyList()
@@ -291,7 +298,8 @@ class LocalSource(
     override suspend fun getTracksByIds(ids: List<String>): List<Track> =
         ids.mapNotNull { id -> store.get(id)?.toTrack() }
 
-    override suspend fun getStreamUrl(trackId: String): String {
+    // Local files are served as-is; there's no transcoding, so [quality] is ignored.
+    override suspend fun getStreamUrl(trackId: String, quality: StreamingQuality?): String {
         val row = store.get(trackId) ?: error("Unknown track $trackId")
         // Desktop stores absolute file paths (→ file:// URI); Android stores content:// URIs already
         // playable by ExoPlayer, which we pass through unchanged.
@@ -358,7 +366,11 @@ class LocalSource(
         deriveAndEmit(store.all(SOURCE_KEY))
     }
 
-    private fun StoredTrack.toTrack() = Track(
+    // Favourites live in preferences (the index stays favourite-agnostic); snapshot once per query
+    // rather than re-parsing the preference string for every row.
+    private fun trackFavorites(): Set<String> = AppPreferences.localFavorites(FavoritableKind.Track.name)
+
+    private fun StoredTrack.toTrack(favorites: Set<String> = trackFavorites()) = Track(
         id = id,
         name = title,
         albumId = albumId,
@@ -370,7 +382,21 @@ class LocalSource(
         trackNumber = trackNumber,
         discNumber = discNumber,
         imageUrl = artworkPath,
+        favorite = id in favorites,
+        playCount = playCount,
     )
+
+    /**
+     * Record a completed play of [trackId]: bump the row's play count and last-played time so offline
+     * sort-by-plays / sort-by-recently-played reflect it. Updates the store and the in-memory mirror so
+     * browse queries see it without a rescan.
+     */
+    fun recordPlay(trackId: String) {
+        val row = store.get(SOURCE_KEY, trackId) ?: return
+        val updated = row.copy(playCount = row.playCount + 1, lastPlayedAt = System.currentTimeMillis())
+        store.put(updated)
+        rows = rows.map { if (it.id == trackId) updated else it }
+    }
 
     companion object {
         const val SOURCE_KEY = "local"
@@ -378,12 +404,14 @@ class LocalSource(
         private const val UNKNOWN_ARTIST = "Unknown Artist"
         private const val VARIOUS_ARTISTS = "Various Artists"
 
-        /** Build a [LocalSource] with the default JSON-backed store + artwork cache under the app data dir. */
-        fun create(): LocalSource {
+        /** Build a [LocalSource] over [store] (the shared SQL index) with an artwork cache under the app
+         *  data dir. The store is supplied by [net.mhanak.yama.AppContainer] so the local scan and
+         *  downloads share one database, partitioned by `sourceKey`. */
+        fun create(store: LocalLibraryStore): LocalSource {
             // Path.toString() + File(String) avoids Path.toFile() (API 26+) for parity with minSdk 24.
             val dataDir = File(getAppDataDir().toString())
             return LocalSource(
-                store = FileLibraryStore(File(dataDir, "local_library.json")),
+                store = store,
                 artworkDir = File(dataDir, "local_artwork"),
             )
         }
@@ -394,8 +422,9 @@ private fun List<StoredTrack>.sortedForBrowse(sortBy: TrackSortOrder): List<Stor
     TrackSortOrder.Alphabetical -> sortedBy { it.title.lowercase() }
     TrackSortOrder.ReleaseDate -> sortedWith(compareByDescending<StoredTrack> { it.year ?: 0 }.thenBy { it.title.lowercase() })
     TrackSortOrder.RecentlyAdded -> sortedByDescending { it.lastModified }
-    // Play counts / last-played aren't tracked for local files yet — fall back to alphabetical.
-    TrackSortOrder.PlayCount, TrackSortOrder.RecentlyPlayed -> sortedBy { it.title.lowercase() }
+    // Play count + last-played are tracked on the row (bumped on each completed play via recordPlay).
+    TrackSortOrder.PlayCount -> sortedWith(compareByDescending<StoredTrack> { it.playCount }.thenBy { it.title.lowercase() })
+    TrackSortOrder.RecentlyPlayed -> sortedByDescending { it.lastPlayedAt ?: 0L }
     TrackSortOrder.Random -> shuffled()
 }
 

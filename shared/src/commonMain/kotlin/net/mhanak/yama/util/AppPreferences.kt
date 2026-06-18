@@ -112,6 +112,45 @@ object AppPreferences {
         get() = StreamingQuality.entries.getOrElse(settings.getInt("streaming_quality", StreamingQuality.Original.ordinal)) { StreamingQuality.Original }
         set(value) { settings.putInt("streaming_quality", value.ordinal) }
 
+    // --- Downloads & offline (see DOWNLOADS_PLAN.md) ---
+
+    // Default quality for downloads (independent of streaming quality): the quality a plain tap on the
+    // download button fetches at. Long-pressing the button picks a different one for that download.
+    var downloadQuality: StreamingQuality
+        get() = StreamingQuality.entries.getOrElse(settings.getInt("download_quality", StreamingQuality.Original.ordinal)) { StreamingQuality.Original }
+        set(value) { settings.putInt("download_quality", value.ordinal) }
+
+    // Only run background downloads on an unmetered (Wi-Fi/Ethernet) network. Off by default; ignored
+    // on platforms with no metered concept (desktop). Only applies to the background queue — an
+    // explicit download with background downloads off runs immediately regardless.
+    var downloadOverWifiOnly: Boolean
+        get() = settings.getBoolean("download_wifi_only", false)
+        set(value) { settings.putBoolean("download_wifi_only", value) }
+
+    // Queue downloads on a single background queue (respecting Wi-Fi-only) rather than starting each
+    // immediately. On by default.
+    var backgroundDownloads: Boolean
+        get() = settings.getBoolean("background_downloads", true)
+        set(value) { settings.putBoolean("background_downloads", value) }
+
+    // Automatically keep recently-played tracks offline (Retention.Cached), trimmed by an LRU size
+    // budget. Off by default — opt in to spend disk on a recent-tracks cache.
+    var cacheRecentTracks: Boolean
+        get() = settings.getBoolean("cache_recent_tracks", false)
+        set(value) { settings.putBoolean("cache_recent_tracks", value) }
+
+    // Size budget (MB) for the recent-tracks cache; cached (not pinned) rows are evicted oldest-first
+    // past this. Pinned downloads never count against it.
+    var cacheSizeBudgetMb: Int
+        get() = settings.getInt("cache_size_budget_mb", 1024)
+        set(value) { settings.putInt("cache_size_budget_mb", value) }
+
+    // Record completed plays that happen offline and flush them to the backend on reconnect. On by
+    // default; the scrobble outbox always backs online reporting regardless of this flag.
+    var recordOfflinePlays: Boolean
+        get() = settings.getBoolean("record_offline_plays", true)
+        set(value) { settings.putBoolean("record_offline_plays", value) }
+
     // Hide local files with no embedded metadata (no readable title) from the library. On by default;
     // the index still stores them, so toggling this off brings them back without a rescan.
     var skipTracksWithoutMetadata: Boolean

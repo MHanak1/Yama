@@ -28,6 +28,7 @@ fun AlbumsView(
     val albums by source.albums.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+    val reachable by source.isReachable.collectAsState()
 
     val filtered = remember(albums, query, favoritesOnly) {
         albums.filter {
@@ -40,6 +41,7 @@ fun AlbumsView(
 
     when {
         albums.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
+        albums.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         albums.isEmpty() && refreshError != null ->
             LibraryError(refreshError!!.message ?: "Failed to load albums", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->

@@ -49,6 +49,9 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             isDebuggable = false
             isMinifyEnabled = false
+            // Dependencies that publish only debug/release variants with explicit build-type attributes
+            // (e.g. SQLDelight's android-driver) have no `profile` variant — fall back to their release one.
+            matchingFallbacks += "release"
         }
     }
     compileOptions {

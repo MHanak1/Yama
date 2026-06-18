@@ -28,6 +28,7 @@ fun ArtistsView(
     val artists by source.artists.collectAsState()
     val isRefreshing by source.isRefreshing.collectAsState()
     val refreshError by source.refreshError.collectAsState()
+    val reachable by source.isReachable.collectAsState()
 
     val filtered = remember(artists, query, favoritesOnly) {
         artists.filter {
@@ -38,6 +39,7 @@ fun ArtistsView(
 
     when {
         artists.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
+        artists.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         artists.isEmpty() && refreshError != null ->
             LibraryError(refreshError!!.message ?: "Failed to load artists", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->

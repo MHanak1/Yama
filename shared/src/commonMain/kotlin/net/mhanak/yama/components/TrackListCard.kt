@@ -13,16 +13,20 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.LowPriority
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Queue
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -40,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -95,18 +100,43 @@ fun TrackListCard(
     var menuExpanded by remember { mutableStateOf(false) }
     // Where to anchor the menu: the cursor for right-clicks, top-start for long-presses.
     var menuOffset by remember { mutableStateOf(DpOffset.Zero) }
+    var showQualityDialog by remember { mutableStateOf(false) }
 
-    val playThis = { player.playNow(listOf(track)) }
-    val playFromHere = { player.playNow(tracks, index) }
-    val playNext = { player.playNext(listOf(track)) }
-    val addToQueue = { player.addToQueue(listOf(track)) }
-
-    val source = LocalAppContainer.current.activeMusicSource
-    val favoritesSupported = remember(source) { source.supportsFavorites(FavoritableKind.Track) }
-    var isFavorite by remember(source, track.id) { mutableStateOf(false) }
-    if (favoritesSupported) {
-        LaunchedEffect(source, track.id) { isFavorite = source.isFavorite(FavoritableKind.Track, track.id) }
+    val appContainer = LocalAppContainer.current
+    val source = appContainer.activeMusicSource
+    // Gray + gate playback when the track is neither downloaded nor reachable (offline, no copy). The
+    // row stays visible/openable; only its play affordances are disabled.
+    val availability = LocalAvailability.current
+    val playable = availability.track(track.id)
+    // Non-null when the active source persists downloads (Jellyfin); enables the Download menu action.
+    val downloadKey = source.downloadSourceKey()
+    // Pinned = explicitly downloaded; shows the OfflinePin badge. `pinnedTrackIds` excludes auto-cached.
+    val isPinned = downloadKey != null && track.id in availability.pinnedTrackIds
+    // Cached = auto-played recently but not explicitly downloaded; subtle indicator only.
+    val isCached = downloadKey != null && !isPinned && track.id in availability.trackIds
+    val downloadStale = remember(isPinned, downloadKey, track.id) {
+        isPinned && downloadKey != null && appContainer.downloads.row(downloadKey, track.id)?.stale == true
     }
+
+    val playThis = { if (playable) player.playNow(listOf(track)); Unit }
+    // "Play from here" starts the whole list at this row — but when offline only the downloaded tracks
+    // are playable, so drop the rest and adjust the start index to this track's position among them.
+    val playFromHere = {
+        if (playable) {
+            val filtered = tracks.filter { availability.track(it.id) }
+            val newIndex = tracks.take(index).count { availability.track(it.id) }
+            player.playNow(filtered, newIndex)
+        }
+        Unit
+    }
+    val playNext = { if (playable) player.playNext(listOf(track)); Unit }
+    val addToQueue = { if (playable) player.addToQueue(listOf(track)); Unit }
+
+    val favoritesSupported = remember(source) { source.supportsFavorites(FavoritableKind.Track) }
+    // Favourite state now rides on the track model (no per-row fetch); re-seed when the model's value
+    // changes (e.g. after a refresh) while keeping optimistic taps responsive.
+    var isFavorite by remember(source, track.id) { mutableStateOf(track.favorite) }
+    LaunchedEffect(track.favorite) { isFavorite = track.favorite }
 
     val density = LocalDensity.current
     val triggerPx = with(density) { SwipeTriggerDistance.toPx() }
@@ -115,7 +145,7 @@ fun TrackListCard(
     val toggleFavorite = {
         val next = !isFavorite
         isFavorite = next
-        scope.launch { source.setFavorite(FavoritableKind.Track, track.id, next) }
+        appContainer.setFavorite(FavoritableKind.Track, track.id, next)
         Unit
     }
     // Plain state updated synchronously while dragging, so onDragEnd reads the true offset (a launched
@@ -146,8 +176,9 @@ fun TrackListCard(
             },
             modifier = Modifier
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
+                .alpha(if (playable) 1f else 0.5f)
                 .then(
-                    if (disableGestures) Modifier
+                    if (disableGestures || !playable) Modifier
                     else Modifier.pointerInput(Unit) {
                         detectHorizontalDragGestures(
                             onDragStart = { settleJob?.cancel() },
@@ -188,14 +219,34 @@ fun TrackListCard(
                 image = image,
                 title = track.name,
                 subtitle = subtitle,
-                endContent = if (favoritesSupported) {{
-                    IconButton(onClick = toggleFavorite, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = if (isFavorite) "Remove favourite" else "Add favourite",
-                            tint = if (isFavorite) MaterialTheme.colorScheme.primary
-                                   else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                endContent = if (favoritesSupported || isPinned || isCached) {{
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isPinned) {
+                            Icon(
+                                if (downloadStale) Icons.Filled.DownloadForOffline else Icons.Filled.OfflinePin,
+                                contentDescription = if (downloadStale) "Downloaded (update available)" else "Downloaded",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        } else if (isCached) {
+                            // Subtle indicator: same icon but small and muted so it doesn't imply an explicit download.
+                            Icon(
+                                Icons.Outlined.OfflinePin,
+                                contentDescription = "Cached",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        if (favoritesSupported) {
+                            IconButton(onClick = toggleFavorite, modifier = Modifier.size(36.dp)) {
+                                Icon(
+                                    if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                    contentDescription = if (isFavorite) "Remove favourite" else "Add favourite",
+                                    tint = if (isFavorite) MaterialTheme.colorScheme.primary
+                                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }} else null,
             )
@@ -216,7 +267,40 @@ fun TrackListCard(
                     if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 ) { menuExpanded = false; toggleFavorite() }
             }
+            if (downloadKey != null) {
+                if (isCached) {
+                    // Cached entry: offer to explicitly download (pin) it; no "Change quality" offered.
+                    TrackMenuItem("Download", Icons.Filled.Download) {
+                        menuExpanded = false
+                        appContainer.downloadManager.enqueueTracks(listOf(track))
+                    }
+                } else {
+                    TrackMenuItem(
+                        if (isPinned) "Remove download" else "Download",
+                        if (isPinned) Icons.Filled.Delete else Icons.Filled.Download,
+                    ) {
+                        menuExpanded = false
+                        if (isPinned) appContainer.downloadManager.removeDownload(downloadKey, track.id)
+                        else appContainer.downloadManager.enqueueTracks(listOf(track))
+                    }
+                    if (isPinned) {
+                        TrackMenuItem("Change quality…", Icons.Filled.HighQuality) {
+                            menuExpanded = false
+                            showQualityDialog = true
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    if (showQualityDialog && downloadKey != null) {
+        QualityPickerDialog(
+            title = "Change quality…",
+            current = appContainer.downloads.row(downloadKey, track.id)?.quality,
+            onDismiss = { showQualityDialog = false },
+            onPick = { quality -> appContainer.downloadManager.redownload(listOf(track), quality) },
+        )
     }
 }
 

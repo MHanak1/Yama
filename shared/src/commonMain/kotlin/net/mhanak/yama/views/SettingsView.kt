@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.screens.AppearanceSettingsRoute
+import net.mhanak.yama.screens.DownloadsSettingsRoute
 import net.mhanak.yama.screens.LocalLibrarySettingsRoute
 import net.mhanak.yama.screens.PlaybackSettingsRoute
 
@@ -89,6 +91,15 @@ fun SettingsView(
                     title = "Playback",
                     subtitle = "Volume, quality & remote control",
                     onClick = { onNavigate(PlaybackSettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingsCategoryCard(
+                    icon = Icons.Default.Download,
+                    iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    iconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    title = "Downloads",
+                    subtitle = "Offline tracks, cache & Wi-Fi-only",
+                    onClick = { onNavigate(DownloadsSettingsRoute) },
                 )
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(

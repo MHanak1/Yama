@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -26,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.views.LibraryTab
 
@@ -68,6 +73,8 @@ fun AppNavRail(
     onHomeClick: () -> Unit,
     onTabClick: (LibraryTab) -> Unit,
     onSettingsClick: () -> Unit,
+    downloadsSelected: Boolean = false,
+    onDownloadsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     // The "Now playing" entry is shown only while something is playing. On TV this is the entry point
     // to the full-screen player (the rail doesn't dock a panel there).
@@ -142,6 +149,17 @@ fun AppNavRail(
             )
         }
 
+        val activeDownloads by LocalAppContainer.current.downloadManager.downloads.collectAsState()
+        RailItem(
+            selected = downloadsSelected,
+            onClick = onDownloadsClick,
+            icon = Icons.Default.Download,
+            label = "Downloads",
+            expanded = expanded,
+            badgeCount = activeDownloads.count { it.state.isInFlight },
+            focusRequester = if (downloadsSelected) selectedItemFocus else null,
+        )
+
         RailItem(
             selected = settingsSelected,
             onClick = onSettingsClick,
@@ -160,6 +178,7 @@ private fun RailItem(
     icon: ImageVector,
     label: String,
     expanded: Boolean,
+    badgeCount: Int = 0,
     focusRequester: FocusRequester? = null,
 ) {
     val containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
@@ -179,7 +198,13 @@ private fun RailItem(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {
-            Icon(icon, contentDescription = label)
+            if (badgeCount > 0) {
+                BadgedBox(badge = { Badge { Text("$badgeCount") } }) {
+                    Icon(icon, contentDescription = label)
+                }
+            } else {
+                Icon(icon, contentDescription = label)
+            }
             if (expanded) {
                 Spacer(Modifier.width(16.dp))
                 // softWrap = false keeps the label on one line so it reveals by clipping as the

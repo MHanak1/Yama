@@ -12,12 +12,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.FavoritableKind
 
@@ -28,9 +26,10 @@ import net.mhanak.yama.media.sources.FavoritableKind
  * shuffle/repeat toggles). It renders nothing when the active source can't favourite this kind, or
  * when [itemId] is null, so the control disappears on backends without a favourites concept.
  *
- * State is fetched once per [itemId] and updated optimistically on tap (the network write is fire-
- * and-forget, re-synced on the next fetch); pass [initial] from a caller that already knows the
- * value to skip the fetch.
+ * State is seeded from [initial] — which callers now read straight off the item model (`favorite`) —
+ * and updated optimistically on tap; the write goes through [net.mhanak.yama.AppContainer.setFavorite],
+ * which persists it locally (so it shows offline) and flushes it to the backend. Only when no [initial]
+ * is supplied does it fall back to fetching the state for [itemId].
  */
 @Composable
 fun FavoriteButton(
@@ -40,23 +39,24 @@ fun FavoriteButton(
     iconSize: Dp = 24.dp,
     initial: Boolean? = null,
 ) {
-    val source = LocalAppContainer.current.activeMusicSource
+    val appContainer = LocalAppContainer.current
+    val source = appContainer.activeMusicSource
     val supported = remember(source, kind) { source.supportsFavorites(kind) }
     if (!supported || itemId == null) return
 
-    val scope = rememberCoroutineScope()
     var favorite by remember(source, itemId) { mutableStateOf(initial ?: false) }
 
-    // Pull the current state when the item (or source) changes, unless the caller seeded it.
-    LaunchedEffect(source, kind, itemId) {
-        if (initial == null) favorite = source.isFavorite(kind, itemId)
+    // Seed from the caller-supplied value (now carried on the model), only falling back to a fetch when
+    // none was passed.
+    LaunchedEffect(source, kind, itemId, initial) {
+        favorite = initial ?: source.isFavorite(kind, itemId)
     }
 
     IconButton(
         onClick = {
             val next = !favorite
-            favorite = next // optimistic — the write is best-effort and re-synced on the next fetch.
-            scope.launch { source.setFavorite(kind, itemId, next) }
+            favorite = next // optimistic — the write persists locally and is flushed to the backend.
+            appContainer.setFavorite(kind, itemId, next)
         },
         modifier = modifier,
     ) {

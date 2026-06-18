@@ -31,6 +31,18 @@ data class Track(
     val trackNumber: Int?,
     val discNumber: Int?,
     val imageUrl: String? = null,
+    // Stable IDs for the track's artists/genres, so a downloaded row can fan out to artist/genre
+    // availability (otherwise those grids gray offline even with the album downloaded). Default empty
+    // for sources that don't supply them.
+    val artistIds: List<String> = emptyList(),
+    val albumArtistId: String? = null,
+    val genres: List<String> = emptyList(),
+    val genreIds: List<String> = emptyList(),
+    // The user's favourite ("liked") state and play count, carried on the model so the UI never has to
+    // fetch them per row. Populated from the source's user data (Jellyfin) or the offline row
+    // (downloads/local). Defaulted for sources that don't supply them.
+    val favorite: Boolean = false,
+    val playCount: Int = 0,
 )
 
 data class Playlist(

@@ -23,6 +23,7 @@ import net.mhanak.yama.media.model.Genre
 import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.LyricsCue
 import net.mhanak.yama.media.model.LyricsLine
+import net.mhanak.yama.media.download.CatalogSnapshot
 import net.mhanak.yama.media.model.MusicLibrary
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
@@ -33,6 +34,7 @@ import net.mhanak.yama.media.playback.RemoteTarget
 import net.mhanak.yama.session.JellyfinSession
 import net.mhanak.yama.session.JellyfinSessionRepository
 import net.mhanak.yama.util.AppPreferences
+import net.mhanak.yama.util.StreamingQuality
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.artistsApi
@@ -118,6 +120,22 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
     // The live socket's connection state — false while it's down or reconnecting, during which a
     // controlled device's mirrored state is frozen.
     override val connected: StateFlow<Boolean> get() = socket.connected
+
+    // "Can we stream from origin right now" — the live link's health, surfaced as a flow so the UI can
+    // gray undownloaded items the moment it drops. Same signal as [connected]; named for the downloads
+    // contract (see [MusicSource.isReachable]).
+    override val isReachable: StateFlow<Boolean> get() = socket.connected
+
+    /** Partition key for this session's downloads — stable per server+user so two accounts on the same
+     * device (or the same account on two servers) never share download rows or files. */
+    override fun downloadSourceKey(): String? {
+        val s = sessions.find { it.id == currentSessionId } ?: return null
+        val token = MessageDigest.getInstance("SHA-256")
+            .digest("${s.serverUrl}|${s.userId}".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+            .take(16)
+        return "jellyfin:$token"
+    }
 
     /**
      * Whether the live socket link is healthy *right now*, recomputed on the spot rather than read
@@ -409,126 +427,147 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
 
     override suspend fun getTracksForAlbum(albumId: String): List<Track> {
         val currentApi = api ?: return emptyList()
-        return currentApi.itemsApi.getItems(
-            parentId = JellyfinUUID.fromString(albumId),
-            includeItemTypes = listOf(BaseItemKind.AUDIO),
-            sortBy = listOf(ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER, ItemSortBy.NAME),
-            sortOrder = listOf(SortOrder.ASCENDING),
-            limit = 1_000,
-        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        return runCatching {
+            currentApi.itemsApi.getItems(
+                parentId = JellyfinUUID.fromString(albumId),
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                sortBy = listOf(ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER, ItemSortBy.NAME),
+                sortOrder = listOf(SortOrder.ASCENDING),
+                fields = listOf(ItemFields.GENRES),
+                limit = 1_000,
+            ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getTracksForArtist(artistId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
         val currentApi = api ?: return emptyList()
-        return currentApi.itemsApi.getItems(
-            artistIds = listOf(JellyfinUUID.fromString(artistId)),
-            includeItemTypes = listOf(BaseItemKind.AUDIO),
-            recursive = true,
-            sortBy = sortBy.toJellyfinSortBy(),
-            sortOrder = listOf(sortBy.toSortOrder()),
-            limit = limit,
-            startIndex = offset,
-        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        return runCatching {
+            currentApi.itemsApi.getItems(
+                artistIds = listOf(JellyfinUUID.fromString(artistId)),
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                recursive = true,
+                sortBy = sortBy.toJellyfinSortBy(),
+                sortOrder = listOf(sortBy.toSortOrder()),
+                fields = listOf(ItemFields.GENRES),
+                limit = limit,
+                startIndex = offset,
+            ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getTracksForGenre(genreId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
         val currentApi = api ?: return emptyList()
-        return currentApi.itemsApi.getItems(
-            genreIds = listOf(JellyfinUUID.fromString(genreId)),
-            includeItemTypes = listOf(BaseItemKind.AUDIO),
-            recursive = true,
-            sortBy = sortBy.toJellyfinSortBy(),
-            sortOrder = listOf(sortBy.toSortOrder()),
-            limit = limit,
-            startIndex = offset,
-        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        return runCatching {
+            currentApi.itemsApi.getItems(
+                genreIds = listOf(JellyfinUUID.fromString(genreId)),
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                recursive = true,
+                sortBy = sortBy.toJellyfinSortBy(),
+                sortOrder = listOf(sortBy.toSortOrder()),
+                fields = listOf(ItemFields.GENRES),
+                limit = limit,
+                startIndex = offset,
+            ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getAllTracks(limit: Int, offset: Int, sortBy: TrackSortOrder, favoritesOnly: Boolean, searchTerm: String?): List<Track> {
         val currentApi = api ?: return emptyList()
-        return currentApi.itemsApi.getItems(
-            includeItemTypes = listOf(BaseItemKind.AUDIO),
-            recursive = true,
-            sortBy = sortBy.toJellyfinSortBy(),
-            sortOrder = listOf(sortBy.toSortOrder()),
-            // null leaves favourites unfiltered; true restricts to liked tracks.
-            isFavorite = if (favoritesOnly) true else null,
-            // null/blank searches everything; the backend matches the term against track names.
-            searchTerm = searchTerm?.takeIf { it.isNotBlank() },
-            limit = limit,
-            startIndex = offset,
-        ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        return runCatching {
+            currentApi.itemsApi.getItems(
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                recursive = true,
+                sortBy = sortBy.toJellyfinSortBy(),
+                sortOrder = listOf(sortBy.toSortOrder()),
+                // null leaves favourites unfiltered; true restricts to liked tracks.
+                isFavorite = if (favoritesOnly) true else null,
+                // null/blank searches everything; the backend matches the term against track names.
+                searchTerm = searchTerm?.takeIf { it.isNotBlank() },
+                fields = listOf(ItemFields.GENRES),
+                limit = limit,
+                startIndex = offset,
+            ).content.items?.map { currentApi.toTrack(it) } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getAlbumsForArtist(artistId: String): List<Album> {
         val currentApi = api ?: return emptyList()
-        return currentApi.itemsApi.getItems(
-            artistIds = listOf(JellyfinUUID.fromString(artistId)),
-            includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
-            recursive = true,
-            sortBy = listOf(ItemSortBy.PRODUCTION_YEAR),
-            sortOrder = listOf(SortOrder.DESCENDING),
-            fields = listOf(ItemFields.CHILD_COUNT),
-            limit = 1_000,
-        ).content.items?.map { item ->
-            Album(
-                id = item.id.toString(),
-                name = item.name ?: "",
-                albumArtist = item.albumArtist,
-                year = item.productionYear,
-                songCount = item.childCount,
-                imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
-                imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY)),
-                genres = item.genres ?: emptyList(),
-            )
-        } ?: emptyList()
+        return runCatching {
+            currentApi.itemsApi.getItems(
+                artistIds = listOf(JellyfinUUID.fromString(artistId)),
+                includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                recursive = true,
+                sortBy = listOf(ItemSortBy.PRODUCTION_YEAR),
+                sortOrder = listOf(SortOrder.DESCENDING),
+                fields = listOf(ItemFields.CHILD_COUNT),
+                limit = 1_000,
+            ).content.items?.map { item ->
+                Album(
+                    id = item.id.toString(),
+                    name = item.name ?: "",
+                    albumArtist = item.albumArtist,
+                    year = item.productionYear,
+                    songCount = item.childCount,
+                    imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
+                    imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY)),
+                    genres = item.genres ?: emptyList(),
+                )
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getAlbumsForGenre(genreId: String): List<Album> {
         val currentApi = api ?: return emptyList()
-        return currentApi.itemsApi.getItems(
-            genreIds = listOf(JellyfinUUID.fromString(genreId)),
-            includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
-            recursive = true,
-            sortBy = listOf(ItemSortBy.NAME),
-            sortOrder = listOf(SortOrder.ASCENDING),
-            fields = listOf(ItemFields.CHILD_COUNT),
-            limit = 1_000,
-        ).content.items?.map { item ->
-            Album(
-                id = item.id.toString(),
-                name = item.name ?: "",
-                albumArtist = item.albumArtist,
-                year = item.productionYear,
-                songCount = item.childCount,
-                imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
-                imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY)),
-                genres = item.genres ?: emptyList(),
-            )
-        } ?: emptyList()
+        return runCatching {
+            currentApi.itemsApi.getItems(
+                genreIds = listOf(JellyfinUUID.fromString(genreId)),
+                includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                recursive = true,
+                sortBy = listOf(ItemSortBy.NAME),
+                sortOrder = listOf(SortOrder.ASCENDING),
+                fields = listOf(ItemFields.CHILD_COUNT),
+                limit = 1_000,
+            ).content.items?.map { item ->
+                Album(
+                    id = item.id.toString(),
+                    name = item.name ?: "",
+                    albumArtist = item.albumArtist,
+                    year = item.productionYear,
+                    songCount = item.childCount,
+                    imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
+                    imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY)),
+                    genres = item.genres ?: emptyList(),
+                )
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> {
         val currentApi = api ?: return emptyList()
-        return currentApi.playlistsApi.getPlaylistItems(
-            playlistId = JellyfinUUID.fromString(playlistId),
-            limit = 1_000,
-        ).content.items
-            ?.filter { it.type == BaseItemKind.AUDIO }
-            ?.map { currentApi.toTrack(it) } ?: emptyList()
+        return runCatching {
+            currentApi.playlistsApi.getPlaylistItems(
+                playlistId = JellyfinUUID.fromString(playlistId),
+                limit = 1_000,
+            ).content.items
+                ?.filter { it.type == BaseItemKind.AUDIO }
+                ?.map { currentApi.toTrack(it) } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun getTracksByIds(ids: List<String>): List<Track> {
         val currentApi = api ?: return emptyList()
         if (ids.isEmpty()) return emptyList()
-        val items = currentApi.itemsApi.getItems(
-            ids = ids.map { JellyfinUUID.fromString(it) },
-            includeItemTypes = listOf(BaseItemKind.AUDIO),
-            limit = ids.size,
-        ).content.items ?: return emptyList()
-        // getItems doesn't preserve the requested order, so re-order by the id list.
-        val byId = items.associateBy { it.id.toString() }
-        return ids.mapNotNull { id -> byId[id]?.let { currentApi.toTrack(it) } }
+        return runCatching {
+            val items = currentApi.itemsApi.getItems(
+                ids = ids.map { JellyfinUUID.fromString(it) },
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                fields = listOf(ItemFields.GENRES),
+                limit = ids.size,
+            ).content.items ?: return emptyList()
+            // getItems doesn't preserve the requested order, so re-order by the id list.
+            val byId = items.associateBy { it.id.toString() }
+            ids.mapNotNull { id -> byId[id]?.let { currentApi.toTrack(it) } }
+        }.getOrDefault(emptyList())
     }
 
     override suspend fun reportPlaybackStarted(
@@ -596,7 +635,24 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         }
     }
 
-    override suspend fun getStreamUrl(trackId: String): String {
+    override suspend fun reportPlayed(trackId: String, playedAtEpochMs: Long, positionMs: Long): Boolean {
+        val currentApi = api ?: return false
+        // Mark the item played with its (backdated) DatePlayed — the server increments the play count
+        // and records the timestamp. Jellyfin's LocalDateTime is UTC-naive, so convert from epoch in UTC.
+        val datePlayed = java.time.LocalDateTime.ofInstant(
+            java.time.Instant.ofEpochMilli(playedAtEpochMs), java.time.ZoneOffset.UTC,
+        )
+        return runCatching {
+            currentApi.playStateApi.markPlayedItem(
+                itemId = JellyfinUUID.fromString(trackId),
+                userId = currentUserId(),
+                datePlayed = datePlayed,
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    override suspend fun getStreamUrl(trackId: String, quality: StreamingQuality?): String {
         val currentApi = api ?: error("Not connected to a server")
         val session = sessions.find { it.id == currentSessionId }
         val baseUrl = (currentApi.baseUrl ?: session?.serverUrl)?.trimEnd('/')
@@ -609,7 +665,10 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         val deviceId = session?.sessionDeviceId ?: getDeviceId()
         val userId = session?.userId
         val containers = "opus,webm,mp3,aac,m4a,flac,webma,wav,ogg"
-        val maxBitrate = AppPreferences.streamingQuality.maxBitrateBps
+        // An explicit [quality] (a download's fixed quality) wins; otherwise the live global default.
+        // Original carries a null cap, so passing it deliberately means "no cap" rather than falling
+        // back to the global setting.
+        val maxBitrate = (quality ?: AppPreferences.streamingQuality).maxBitrateBps
         return buildString {
             append(baseUrl).append("/Audio/").append(trackId).append("/universal")
             append("?DeviceId=").append(deviceId)
@@ -626,6 +685,50 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         val currentApi = api ?: return null
         // For audio items Jellyfin serves the embedded/album primary art at this path.
         return currentApi.imageApi.getItemImageUrl(JellyfinUUID.fromString(trackId), ImageType.PRIMARY)
+    }
+
+    override suspend fun getContentVersion(trackId: String): String? {
+        val currentApi = api ?: return null
+        // The etag is the server's per-item change token (returned on item DTOs by default); a moved
+        // etag means the file/metadata changed, so a downloaded copy is stale. Fall back to the
+        // created-date when the server omits an etag (this SDK's BaseItemDto exposes no last-saved field).
+        return runCatching {
+            val item = currentApi.userLibraryApi.getItem(
+                itemId = JellyfinUUID.fromString(trackId),
+                userId = currentUserId(),
+            ).content
+            item.etag ?: item.dateCreated?.toString()
+        }.getOrNull()
+    }
+
+    override suspend fun fetchTrackSnapshots(ids: List<String>): Map<String, MusicSource.TrackSnapshot> {
+        val currentApi = api ?: return emptyMap()
+        val userId = currentUserId()
+        val result = mutableMapOf<String, MusicSource.TrackSnapshot>()
+        // Jellyfin's getItems accepts a comma-separated ID list; 200 per call keeps URLs short and
+        // response bodies manageable. With 400 downloaded tracks this is 2 requests instead of 400.
+        // userId is required to get per-user data (isFavorite, playCount) in the response — without
+        // it the /Items endpoint omits UserData. ETAG is an opt-in field, not returned by default.
+        ids.chunked(200).forEach { chunk ->
+            runCatching {
+                currentApi.itemsApi.getItems(
+                    userId = userId,
+                    ids = chunk.map { JellyfinUUID.fromString(it) },
+                    includeItemTypes = listOf(BaseItemKind.AUDIO),
+                    fields = listOf(ItemFields.ETAG),
+                    limit = chunk.size,
+                ).content.items?.forEach { item ->
+                    result[item.id.toString()] = MusicSource.TrackSnapshot(
+                        contentVersion = item.etag ?: item.dateCreated?.toString(),
+                        // Null when the server omitted UserData; callers must not overwrite stored
+                        // values in that case (a null isFavorite ≠ "not favourite").
+                        favorite = item.userData?.isFavorite,
+                        playCount = item.userData?.playCount,
+                    )
+                }
+            }
+        }
+        return result
     }
 
     override suspend fun getLyrics(trackId: String): Lyrics {
@@ -696,6 +799,19 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                 _playlists.value = _playlists.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
             FavoritableKind.Track -> Unit // tracks aren't held in a cached browse list
         }
+    }
+
+    /**
+     * Seed the browse flows from the on-disk catalog snapshot. Only fills a flow that's still empty,
+     * so a refresh that already landed (the SWR online case) is never clobbered by stale disk data —
+     * the snapshot only fills the gap while offline / before the first successful refresh.
+     */
+    override fun hydrateCatalog(snapshot: CatalogSnapshot) {
+        if (_albums.value.isEmpty()) _albums.value = snapshot.albums
+        if (_artists.value.isEmpty()) _artists.value = snapshot.artists
+        if (_albumArtists.value.isEmpty()) _albumArtists.value = snapshot.albumArtists
+        if (_genres.value.isEmpty()) _genres.value = snapshot.genres
+        if (_playlists.value.isEmpty()) _playlists.value = snapshot.playlists
     }
 
     private fun clearLibrary() {
@@ -863,6 +979,16 @@ internal fun ApiClient.toTrack(item: org.jellyfin.sdk.model.api.BaseItemDto) = T
     discNumber = item.parentIndexNumber,
     // Audio items inherit album art; fall back to the item's own image when there is no album.
     imageUrl = imageApi.getItemImageUrl(item.albumId ?: item.id, ImageType.PRIMARY),
+    // ID-bearing variants (returned by default for audio; genres need ItemFields.GENRES). These let a
+    // downloaded track's row fan out to artist/genre availability.
+    artistIds = item.artistItems?.map { it.id.toString() } ?: emptyList(),
+    albumArtistId = item.albumArtists?.firstOrNull()?.id?.toString(),
+    genres = item.genres ?: emptyList(),
+    genreIds = item.genreItems?.map { it.id.toString() } ?: emptyList(),
+    // User data rides along on the item, so favourite/play-count come for free with the track query —
+    // no separate per-track fetch (the old FavoriteButton/TrackListCard isFavorite call).
+    favorite = item.userData?.isFavorite == true,
+    playCount = item.userData?.playCount ?: 0,
 )
 
 private fun List<Track>.toQueueItems(): List<QueueItem> =

@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -110,6 +111,9 @@ fun GridCard(
     title: String? = null,
     subtitle: String? = null,
     selectable: GridSelection? = null,
+    // Dimmed when the item is neither downloaded nor reachable. Navigation stays enabled (you can open
+    // a grayed album to download from it) — only the visual is dimmed.
+    dimmed: Boolean = false,
 ) {
     val selected = selectable?.selected == true
     // The grid recycles card slots, so keep the shift-click gesture (keyed on Unit, never relaunched)
@@ -140,7 +144,7 @@ fun GridCard(
         Modifier.combinedClickable(onClick = onClick)
     }
     ElevatedCard(
-        modifier = clickModifier,
+        modifier = clickModifier.alpha(if (dimmed) 0.5f else 1f),
     ) {
         Column(
             modifier = Modifier
@@ -220,6 +224,11 @@ fun AsyncImageGridCard(
         )
     } else null
 
+    // Dim items that aren't downloaded and aren't currently reachable (per kind). Only known for the
+    // kinds the availability snapshot fans out (Album/Artist/Genre); playlists never dim here.
+    val dimmed = if (selectableKind != null && selectionId != null)
+        !LocalAvailability.current.isPlayable(selectableKind, selectionId) else false
+
     GridCard(
         onClick = onClick,
         image = {
@@ -228,5 +237,6 @@ fun AsyncImageGridCard(
         title = title,
         subtitle = subtitle,
         selectable = gridSelection,
+        dimmed = dimmed,
     )
 }

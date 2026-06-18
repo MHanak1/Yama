@@ -24,7 +24,7 @@ import yama.shared.generated.resources.artist
 import yama.shared.generated.resources.folder
 import yama.shared.generated.resources.library_music
 
-enum class LibraryReferenceType { Album, Artist, Genre, Playlist }
+enum class LibraryReferenceType { Album, Artist, AlbumArtist, Genre, Playlist }
 
 /**
  * A reference to a library item shown by name (e.g. an album's artist, a track's genres). The component
@@ -48,6 +48,7 @@ fun LibraryReference(
     val source = LocalAppContainer.current.activeMusicSource
     val albums by source.albums.collectAsState()
     val artists by source.artists.collectAsState()
+    val albumArtists by source.albumArtists.collectAsState()
     val genres by source.genres.collectAsState()
     val playlists by source.playlists.collectAsState()
 
@@ -55,6 +56,7 @@ fun LibraryReference(
     val route: Any? = when (type) {
         LibraryReferenceType.Album -> albums.find { it.name == label }?.let { AlbumDetailRoute(it.id) }
         LibraryReferenceType.Artist -> artists.find { it.name == label }?.let { ArtistDetailRoute(it.id) }
+        LibraryReferenceType.AlbumArtist -> albumArtists.find { it.name == label }?.let { ArtistDetailRoute(it.id) }
         LibraryReferenceType.Genre -> genres.find { it.name == label }?.let { GenreDetailRoute(it.id) }
         LibraryReferenceType.Playlist -> playlists.find { it.name == label }?.let { PlaylistDetailRoute(it.id) }
     }
@@ -72,6 +74,7 @@ fun LibraryReference(
     val icon = when (type) {
         LibraryReferenceType.Album -> painterResource(Res.drawable.album)
         LibraryReferenceType.Artist -> painterResource(Res.drawable.artist)
+        LibraryReferenceType.AlbumArtist -> painterResource(Res.drawable.artist)
         LibraryReferenceType.Genre -> painterResource(Res.drawable.folder)
         LibraryReferenceType.Playlist -> painterResource(Res.drawable.library_music)
     }

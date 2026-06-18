@@ -23,11 +23,15 @@ import androidx.compose.ui.Modifier
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.DetailPlayActions
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.DownloadButton
+import net.mhanak.yama.components.DownloadableKind
 import net.mhanak.yama.components.FavoriteButton
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.LocalAvailability
 import net.mhanak.yama.components.RegisterDetailTint
 import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
+import net.mhanak.yama.media.download.TrackListKind
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.FavoritableKind
 
@@ -45,8 +49,13 @@ fun AlbumDetailView(
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
     LaunchedEffect(albumId) {
-        tracks = appContainer.activeMusicSource.getTracksForAlbum(albumId)
+        tracks = appContainer.tracksFor(TrackListKind.Album, albumId) {
+            appContainer.activeMusicSource.getTracksForAlbum(albumId)
+        }
     }
+
+    // The album is playable if it's downloaded or the source is reachable; gate Play/Shuffle on it.
+    val albumPlayable = LocalAvailability.current.album(albumId)
 
     // Recolour the whole app to this album and paint its artwork as the app background (see AppColorTheme).
     RegisterDetailTint(imageUrl = album?.imageUrl, cacheKey = album?.id)
@@ -66,7 +75,10 @@ fun AlbumDetailView(
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-                FavoriteButton(kind = FavoritableKind.Album, itemId = albumId, initial = album?.favorite)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DownloadButton(kind = DownloadableKind.Album, id = albumId)
+                    FavoriteButton(kind = FavoritableKind.Album, itemId = albumId, initial = album?.favorite)
+                }
             }
         }
 
@@ -76,13 +88,14 @@ fun AlbumDetailView(
                     onNavigate = onNavigate,
                     imageUrl = album.imageUrl,
                     name = album.name,
-                    artist = album.albumArtist,
+                    albumArtist = album.albumArtist,
                     genres = album.genres.ifEmpty { null },
                     year = album.year,
                     playActions = {
                         DetailPlayActions(
                             player = appContainer.playback.viewed,
                             fetchTracks = { shuffled -> if (shuffled) tracks.shuffled() else tracks },
+                            enabled = albumPlayable,
                         )
                     },
                 )

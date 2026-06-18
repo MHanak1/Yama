@@ -22,11 +22,15 @@ import androidx.compose.ui.Modifier
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.DetailPlayActions
 import net.mhanak.yama.components.DetailViewHeader
+import net.mhanak.yama.components.DownloadButton
+import net.mhanak.yama.components.DownloadableKind
 import net.mhanak.yama.components.FavoriteButton
 import net.mhanak.yama.components.ListView
+import net.mhanak.yama.components.LocalAvailability
 import net.mhanak.yama.components.RegisterDetailTint
 import net.mhanak.yama.components.TrackListCard
 import net.mhanak.yama.components.glassSource
+import net.mhanak.yama.media.download.TrackListKind
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.FavoritableKind
 
@@ -38,8 +42,12 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
     LaunchedEffect(playlistId) {
-        tracks = appContainer.activeMusicSource.getTracksForPlaylist(playlistId)
+        tracks = appContainer.tracksFor(TrackListKind.Playlist, playlistId) {
+            appContainer.activeMusicSource.getTracksForPlaylist(playlistId)
+        }
     }
+
+    val playlistPlayable = LocalAvailability.current.playlist(playlistId)
 
     // Recolour the whole app to this playlist and paint its artwork as the app background (see AppColorTheme).
     RegisterDetailTint(imageUrl = playlist?.imageUrl, cacheKey = playlist?.id)
@@ -59,7 +67,10 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-                FavoriteButton(kind = FavoritableKind.Playlist, itemId = playlistId, initial = playlist?.favorite)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DownloadButton(kind = DownloadableKind.Playlist, id = playlistId)
+                    FavoriteButton(kind = FavoritableKind.Playlist, itemId = playlistId, initial = playlist?.favorite)
+                }
             }
         }
 
@@ -75,6 +86,7 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                             player = appContainer.playback.viewed,
                             // Cap at 100 tracks, in playlist order; shuffling randomises the picked set.
                             fetchTracks = { shuffled -> (if (shuffled) tracks.shuffled() else tracks).take(100) },
+                            enabled = playlistPlayable,
                         )
                     },
                 )

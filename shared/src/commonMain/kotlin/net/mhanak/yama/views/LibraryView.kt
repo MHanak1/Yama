@@ -68,6 +68,7 @@ import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.components.ErrorCard
 import net.mhanak.yama.components.LibrarySelectionButtons
+import net.mhanak.yama.components.playableTracks
 import net.mhanak.yama.components.LibrarySelectionState
 import net.mhanak.yama.components.LocalHasPullToRefreshIndicator
 import net.mhanak.yama.components.LocalLibrarySelection
@@ -153,7 +154,8 @@ fun LibraryView(
 
     fun playSelection(shuffled: Boolean) {
         scope.launch {
-            val tracks = gatherSelectedTracks(shuffled)
+            // Only enqueue what can actually be played right now (offline drops undownloaded tracks).
+            val tracks = playableTracks(appContainer, gatherSelectedTracks(shuffled))
             if (tracks.isNotEmpty()) appContainer.playback.viewed.playNow(tracks)
             selection.clear()
         }
@@ -177,8 +179,23 @@ fun LibraryView(
         val target = !allSelectedFavorite
         val ids = selection.selectedIds.toList()
         allSelectedFavorite = target // optimistic; the writes are best-effort and re-read on next change.
-        val source = appContainer.activeMusicSource
-        scope.launch { ids.forEach { source.setFavorite(kind, it, target) } }
+        ids.forEach { appContainer.setFavorite(kind, it, target) }
+    }
+
+    // Batch-download the selection: fan each selected container out to the download manager at the
+    // default download quality. Only offered when the active source persists downloads (Jellyfin).
+    val downloadsSupported = appContainer.activeMusicSource.downloadSourceKey() != null
+    fun downloadSelection() {
+        val kind = selection.kind ?: return
+        val manager = appContainer.downloadManager
+        selection.selectedIds.forEach { id ->
+            when (kind) {
+                SelectableKind.Album -> manager.enqueueAlbum(id)
+                SelectableKind.Artist -> manager.enqueueArtist(id)
+                SelectableKind.Genre -> manager.enqueueGenre(id)
+            }
+        }
+        selection.clear()
     }
 
     fun navigateTo(tab: LibraryTab) {
@@ -324,6 +341,8 @@ fun LibraryView(
             visible = selection.isActive,
             allFavorite = allSelectedFavorite,
             favoritesSupported = selectionFavoritesSupported,
+            downloadsSupported = downloadsSupported,
+            onDownload = { downloadSelection() },
             onToggleFavorite = { toggleSelectionFavorite() },
             onPlay = { playSelection(shuffled = false) },
             onShuffle = { playSelection(shuffled = true) },
@@ -394,6 +413,24 @@ internal fun LibraryError(message: String, contentPadding: PaddingValues, modifi
         contentAlignment = Alignment.Center,
     ) {
         ErrorCard(message = message)
+    }
+}
+
+/**
+ * Shown by a library grid when the source is unreachable and we have no cached content to show — an
+ * expected offline state, not an error (a connection error is only surfaced while [reachable]).
+ */
+@Composable
+internal fun LibraryOffline(contentPadding: PaddingValues, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(contentPadding).padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "You're offline. Downloaded music is available; reconnect to see your full library.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -27,12 +27,18 @@ class PlaybackReporter(
     private val localStatus: StateFlow<PlayerStatus>,
     private val isLocalActive: () -> Boolean,
     private val source: () -> MusicSource,
+    // Invoked once per track when it has been played past the scrobble threshold, with the track and the
+    // position reached. Backs the offline scrobble outbox; default no-op keeps the reporter standalone.
+    private val onCompletedPlay: (Track, Long) -> Unit = { _, _ -> },
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun start() {
         scope.launch {
             var currentTrack: Track? = null
+            // Whether the current track has already crossed the "counts as a play" threshold (so the
+            // completed-play callback fires at most once per track).
+            var playedRecorded = false
             var lastPositionMs = 0L
             var lastPaused: Boolean? = null
             var lastVolume: Float? = null
@@ -62,9 +68,18 @@ class PlaybackReporter(
                     lastShuffle = null
                     lastQueueIds = null
                     lastSeenPlaying = false
+                    playedRecorded = false
                     return@collect
                 }
                 track!!
+
+                // Offline-scrobble seam: once the track has been played past the threshold, record a
+                // completed play (the outbox persists it only when offline; online it's a no-op). Fires
+                // at most once per track.
+                if (!playedRecorded && track.id == currentTrack?.id && playedPastThreshold(status)) {
+                    playedRecorded = true
+                    onCompletedPlay(track, status.positionMs)
+                }
 
                 // A seek shows up only as a position that has moved further (in either direction) than
                 // the elapsed wall-clock time since we last saw it would explain. Compare against that
@@ -95,6 +110,7 @@ class PlaybackReporter(
                 if (track.id != currentTrack?.id) {
                     source().reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
                     currentTrack = track
+                    playedRecorded = false
                     lastProgress = TimeSource.Monotonic.markNow()
                 } else if (paused != lastPaused || volumeChanged || stateChanged || seeked ||
                     lastProgress.elapsedNow().inWholeMilliseconds >= PROGRESS_INTERVAL_MS
@@ -123,6 +139,16 @@ class PlaybackReporter(
         // deliberate scrub, so normal advance never trips it but a real seek does.
         const val SEEK_REPORT_THRESHOLD_MS = 1_500L
     }
+}
+
+// A track counts as "played" (scrobble-worthy) once it reaches half its length or this many ms,
+// whichever is smaller — the usual scrobble rule, with a fallback for unknown durations.
+private const val COMPLETED_PLAY_MS = 240_000L
+
+private fun playedPastThreshold(status: PlayerStatus): Boolean {
+    val duration = status.durationMs
+    val threshold = if (duration > 0) minOf(duration / 2, COMPLETED_PLAY_MS) else COMPLETED_PLAY_MS
+    return status.positionMs >= threshold
 }
 
 // Map the playback-layer repeat mode onto the source-layer command enum the reporting hooks take

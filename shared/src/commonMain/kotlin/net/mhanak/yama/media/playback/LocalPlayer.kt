@@ -15,11 +15,21 @@ import net.mhanak.yama.media.sources.MusicSource
 import kotlin.math.abs
 
 /**
+ * Resolves a track to its playable bytes + artwork, applying the downloads resolution ladder (local
+ * copy when fresh/offline, origin when online/stale). Implemented by the download repository and set
+ * on [LocalPlayer] by `AppContainer`; when absent, [LocalPlayer] resolves straight from the source.
+ */
+interface PlayableResolver {
+    suspend fun resolveStream(source: MusicSource, track: Track): String
+    suspend fun resolveArtwork(source: MusicSource, track: Track): String?
+}
+
+/**
  * Plays on this device. Owns the authoritative [Track] queue and drives a [MediaPlayerEngine]; the
  * engine only ever sees [PlayableMedia], so all domain knowledge stays here.
  *
- * Stream/artwork URLs are resolved lazily through [source] (for Jellyfin these are just built strings,
- * so resolution is cheap). [PlayerStatus] is derived by combining the engine's index-based
+ * Stream/artwork URLs are resolved lazily through [resolver] (the downloads ladder) or, when none is
+ * set, straight from [source]. [PlayerStatus] is derived by combining the engine's index-based
  * [EngineStatus] with the track list this class holds.
  */
 class LocalPlayer(
@@ -27,6 +37,10 @@ class LocalPlayer(
     private val source: () -> MusicSource,
 ) : Player {
     override val displayName: String = "This device"
+
+    /** Routes stream/artwork through the downloads layer. Set by `AppContainer` once the repository
+     *  exists; null falls back to resolving straight from the source (pre-downloads behaviour). */
+    var resolver: PlayableResolver? = null
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val tracks = MutableStateFlow<List<Track>>(emptyList())
@@ -55,13 +69,17 @@ class LocalPlayer(
 
     private suspend fun Track.toPlayable(): PlayableMedia {
         val src = source()
+        val r = resolver
         return PlayableMedia(
             id = id,
-            uri = src.getStreamUrl(id),
+            // The ladder prefers a downloaded copy when fresh/offline and the origin URL otherwise.
+            uri = r?.resolveStream(src, this) ?: src.getStreamUrl(id),
             title = name,
             artist = artists?.joinToString(", "),
             album = album,
-            artworkUri = imageUrl ?: src.getArtworkUrl(id),
+            // resolveArtwork applies the same ladder (local cover offline); fall back to the track's own
+            // remote art when there's no resolver / downloaded cover.
+            artworkUri = r?.resolveArtwork(src, this) ?: imageUrl ?: src.getArtworkUrl(id),
             // Jellyfin run-time ticks are 100-nanosecond units → milliseconds.
             durationMs = durationTicks?.let { it / 10_000 },
         )
@@ -205,6 +223,20 @@ class LocalPlayer(
 
     override fun setRepeat(mode: RepeatMode) = engine.setRepeat(mode)
     override fun setShuffle(enabled: Boolean) = engine.setShuffle(enabled)
+
+    /**
+     * Patch the favourite flag on any queued [Track] with [id]. The queue is the app's only long-lived
+     * holder of [Track] snapshots (everything else is re-fetched/re-derived per use), so a favourite
+     * toggle made elsewhere — album list, detail view — would otherwise leave `status.current.favorite`
+     * and the player/queue hearts stale until the queue is rebuilt. Called by `AppContainer.setFavorite`,
+     * the single toggle seam. Metadata only: engine playback is untouched; re-emitting the queue just
+     * refreshes the derived [PlayerStatus].
+     */
+    fun updateTrackFavorite(id: String, favorite: Boolean) {
+        val list = tracks.value
+        if (list.none { it.id == id && it.favorite != favorite }) return
+        tracks.value = list.map { if (it.id == id) it.copy(favorite = favorite) else it }
+    }
 
     // StateFlow is covariant, so the engine's non-null volume satisfies the nullable Player contract.
     override val volume: StateFlow<Float?> = engine.volume

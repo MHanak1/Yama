@@ -25,6 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -77,6 +78,7 @@ import net.mhanak.yama.components.PlatformUserInteractionEffect
 import net.mhanak.yama.components.PlayerIdleTimeoutMs
 import net.mhanak.yama.components.SourceSwitcher
 import net.mhanak.yama.components.isIdle
+import net.mhanak.yama.components.isInFlight
 import net.mhanak.yama.components.rememberIdleMonitor
 import net.mhanak.yama.components.resetIdleOn
 import net.mhanak.yama.components.player.FullPlayer
@@ -89,6 +91,10 @@ import net.mhanak.yama.components.glassSource
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.views.AlbumDetailView
 import net.mhanak.yama.views.AppearanceSettingsView
+import net.mhanak.yama.views.DownloadedAlbumView
+import net.mhanak.yama.views.DownloadedMusicView
+import net.mhanak.yama.views.DownloadedTracksView
+import net.mhanak.yama.views.DownloadsSettingsView
 import net.mhanak.yama.views.ArtistDetailView
 import net.mhanak.yama.views.GenreDetailView
 import net.mhanak.yama.views.HomeView
@@ -168,10 +174,14 @@ fun MainScreen() {
     val destination = navBackStackEntry?.destination
 
     val onHome = destination?.hasRoute<HomeRoute>() == true
+    val onDownloadedMusic = destination?.hasRoute<DownloadedMusicRoute>() == true ||
+        destination?.hasRoute<DownloadedAlbumRoute>() == true ||
+        destination?.hasRoute<DownloadedTracksRoute>() == true
     val onSettings = destination?.hasRoute<SettingsRoute>() == true ||
         destination?.hasRoute<AppearanceSettingsRoute>() == true ||
         destination?.hasRoute<PlaybackSettingsRoute>() == true ||
-        destination?.hasRoute<LocalLibrarySettingsRoute>() == true
+        destination?.hasRoute<LocalLibrarySettingsRoute>() == true ||
+        destination?.hasRoute<DownloadsSettingsRoute>() == true
 
     // The active player is Compose-observable so a future switch to a remote player rebinds the UI.
     val player = appContainer.playback.viewed
@@ -287,11 +297,13 @@ fun MainScreen() {
                 forceExpanded = forceExpanded,
                 homeSelected = onHome,
                 // Highlight the active library tab while browsing the library or a detail screen.
-                selectedTab = if (onHome || onSettings) null else selectedTab,
+                selectedTab = if (onHome || onSettings || onDownloadedMusic) null else selectedTab,
                 settingsSelected = onSettings,
+                downloadsSelected = onDownloadedMusic,
                 onHomeClick = { navController.navigateTopLevel(HomeRoute) },
                 onTabClick = onTabClick,
                 onSettingsClick = { navController.navigateTopLevel(SettingsRoute) },
+                onDownloadsClick = { navController.navigateTopLevel(DownloadedMusicRoute) },
                 nowPlayingVisible = playerStatus.current != null,
                 onNowPlayingClick = { scope.launch { playerExpansion.animateTo(1f) } },
             )
@@ -324,6 +336,21 @@ fun MainScreen() {
             SourceSwitcher(onRequestClose = onClose)
             HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             Spacer(Modifier.weight(1f))
+            val activeDownloads by appContainer.downloadManager.downloads.collectAsState()
+            val activeDownloadCount = activeDownloads.count { it.state.isInFlight }
+            NavigationDrawerItem(
+                label = { Text("Downloads") },
+                icon = { Icon(Icons.Default.Download, contentDescription = null) },
+                badge = if (activeDownloadCount > 0) {
+                    { Text("$activeDownloadCount") }
+                } else null,
+                selected = onDownloadedMusic,
+                onClick = {
+                    onClose()
+                    navController.navigateTopLevel(DownloadedMusicRoute)
+                },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
             NavigationDrawerItem(
                 label = { Text("Settings") },
                 icon = { Icon(Icons.Default.Settings, contentDescription = null) },
@@ -374,6 +401,29 @@ fun MainScreen() {
                     onNavigate = { navController.navigate(it) { launchSingleTop = true } },
                 )
             }
+            composable<DownloadedMusicRoute> {
+                DownloadedMusicView(
+                    onAlbumClick = { albumId -> navController.navigate(DownloadedAlbumRoute(albumId)) { launchSingleTop = true } },
+                    onTracksClick = { navController.navigate(DownloadedTracksRoute) { launchSingleTop = true } },
+                    onSettingsClick = { navController.navigate(DownloadsSettingsRoute) { launchSingleTop = true } },
+                    onMenuClick = onMenuClick,
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<DownloadedAlbumRoute> { backStackEntry ->
+                val route = backStackEntry.toRoute<DownloadedAlbumRoute>()
+                DownloadedAlbumView(
+                    albumId = route.albumId,
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<DownloadedTracksRoute> {
+                DownloadedTracksView(
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
+            }
             detailComposable<AppearanceSettingsRoute> {
                 AppearanceSettingsView(
                     onBack = { navController.popBackStack() },
@@ -388,6 +438,12 @@ fun MainScreen() {
             }
             detailComposable<LocalLibrarySettingsRoute> {
                 LocalLibrarySettingsView(
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<DownloadsSettingsRoute> {
+                DownloadsSettingsView(
                     onBack = { navController.popBackStack() },
                     bottomContentPadding = bottomInset,
                 )
@@ -410,9 +466,8 @@ fun MainScreen() {
             }
             detailComposable<ArtistTracksRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<ArtistTracksRoute>()
-                val src = appContainer.activeMusicSource
                 PaginatedTrackList(
-                    loadPage = { offset, limit, sortBy -> src.getTracksForArtist(route.artistId, limit, offset, sortBy) },
+                    loadPage = { offset, limit, sortBy -> appContainer.getTracksForArtist(route.artistId, limit, offset, sortBy) },
                     defaultSort = TrackSortOrder.PlayCount,
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize().glassSource(zIndex = 1f).statusBarsPadding(),
@@ -421,9 +476,8 @@ fun MainScreen() {
             }
             detailComposable<GenreTracksRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<GenreTracksRoute>()
-                val src = appContainer.activeMusicSource
                 PaginatedTrackList(
-                    loadPage = { offset, limit, sortBy -> src.getTracksForGenre(route.genreId, limit, offset, sortBy) },
+                    loadPage = { offset, limit, sortBy -> appContainer.getTracksForGenre(route.genreId, limit, offset, sortBy) },
                     defaultSort = TrackSortOrder.PlayCount,
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize().glassSource(zIndex = 1f).statusBarsPadding(),

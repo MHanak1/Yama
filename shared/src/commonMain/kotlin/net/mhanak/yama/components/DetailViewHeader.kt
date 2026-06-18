@@ -35,6 +35,7 @@ fun DetailViewHeader(
     imageUrl: String?,
     name: String,
     artist: String? = null,
+    albumArtist: String? = null,
     album: String? = null,
     genres: List<String>? = null,
     year: Int? = null,
@@ -70,6 +71,7 @@ fun DetailViewHeader(
                     onNavigate = onNavigate,
                     name = name,
                     artist = artist,
+                    albumArtist = albumArtist,
                     album = album,
                     genres = genres,
                     year = year,
@@ -90,6 +92,7 @@ fun DetailViewHeader(
                     onNavigate = onNavigate,
                     name = name,
                     artist = artist,
+                    albumArtist = albumArtist,
                     album = album,
                     genres = genres,
                     year = year,
@@ -113,6 +116,7 @@ private fun DetailInfo(
     onNavigate: (Any) -> Unit,
     name: String,
     artist: String?,
+    albumArtist: String?,
     album: String?,
     genres: List<String>?,
     year: Int?,
@@ -131,6 +135,14 @@ private fun DetailInfo(
             LibraryReference(
                 label = artist,
                 type = LibraryReferenceType.Artist,
+                onNavigate = onNavigate,
+            )
+        }
+
+        if (albumArtist != null) {
+            LibraryReference(
+                label = albumArtist,
+                type = LibraryReferenceType.AlbumArtist,
                 onNavigate = onNavigate,
             )
         }
