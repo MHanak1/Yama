@@ -1,0 +1,44 @@
+package net.mhanak.yama.ui.views.detail
+
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.download.TrackListKind
+import net.mhanak.yama.media.sources.FavoritableKind
+import net.mhanak.yama.ui.screens.GenreTracksRoute
+
+@Composable
+fun GenreDetailView(
+    genreId: String,
+    onBack: () -> Unit,
+    onNavigate: (Any) -> Unit = {},
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+) {
+    val appContainer = LocalAppContainer.current
+    val genres by appContainer.activeMusicSource.genres.collectAsState()
+    val genre = genres.find { it.id == genreId }
+
+    CollectionDetailView(
+        name = genre?.name,
+        imageUrl = genre?.imageUrl,
+        cacheKey = genreId,
+        kind = FavoritableKind.Genre,
+        itemId = genreId,
+        initialFavorite = genre?.favorite,
+        onBack = onBack,
+        onNavigate = onNavigate,
+        onViewAllTracks = { onNavigate(GenreTracksRoute(genreId)) },
+        fetchTopTracks = { limit, sortBy ->
+            appContainer.catalog.tracksFor(TrackListKind.Genre, genreId) {
+                appContainer.activeMusicSource.getTracksForGenre(genreId, limit, 0, sortBy)
+            }
+        },
+        fetchAlbums = { appContainer.activeMusicSource.getAlbumsForGenre(genreId) },
+        modifier = modifier,
+        contentPadding = contentPadding,
+    )
+}

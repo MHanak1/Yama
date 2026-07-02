@@ -2,6 +2,8 @@ package net.mhanak.yama.util
 
 import com.russhwolf.settings.Settings
 import net.mhanak.yama.defaultUseDeviceVolume
+import net.mhanak.yama.ui.theme.ThemeMode
+import net.mhanak.yama.ui.theme.AlbumTintMode
 
 // commonMain
 object AppPreferences {

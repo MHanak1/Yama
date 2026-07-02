@@ -1,0 +1,161 @@
+package net.mhanak.yama.ui.views.settings
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.screens.AppearanceSettingsRoute
+import net.mhanak.yama.ui.screens.DownloadsSettingsRoute
+import net.mhanak.yama.ui.screens.LocalLibrarySettingsRoute
+import net.mhanak.yama.ui.screens.PlaybackSettingsRoute
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsView(
+    onMenuClick: (() -> Unit)?,
+    onNavigate: (Any) -> Unit,
+    modifier: Modifier = Modifier,
+    bottomContentPadding: Dp = 0.dp,
+) {
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    if (onMenuClick != null) {
+                        IconButton(onClick = onMenuClick) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                SettingsCategoryCard(
+                    icon = Icons.Default.Palette,
+                    iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    iconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    title = "Appearance",
+                    subtitle = "Theme, colours, blur & album art",
+                    onClick = { onNavigate(AppearanceSettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingsCategoryCard(
+                    icon = Icons.Default.MusicNote,
+                    iconContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    iconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    title = "Playback",
+                    subtitle = "Volume, quality & remote control",
+                    onClick = { onNavigate(PlaybackSettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingsCategoryCard(
+                    icon = Icons.Default.Download,
+                    iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    iconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    title = "Downloads",
+                    subtitle = "Offline tracks, cache & Wi-Fi-only",
+                    onClick = { onNavigate(DownloadsSettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingsCategoryCard(
+                    icon = Icons.Default.FolderOpen,
+                    iconContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    iconContentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    title = "Local Library",
+                    subtitle = "Music folders & scan settings",
+                    onClick = { onNavigate(LocalLibrarySettingsRoute) },
+                )
+            }
+            Spacer(Modifier.height(bottomContentPadding))
+        }
+    }
+}
+
+@Composable
+private fun SettingsCategoryCard(
+    icon: ImageVector,
+    iconContainerColor: Color,
+    iconContentColor: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    ElevatedCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        ListItem(
+            leadingContent = {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(iconContainerColor),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = iconContentColor,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            },
+            headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
+            supportingContent = { Text(subtitle) },
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+    }
+}

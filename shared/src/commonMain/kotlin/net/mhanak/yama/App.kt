@@ -14,20 +14,20 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import dev.chrisbanes.haze.rememberHazeState
-import net.mhanak.yama.components.AppColorTheme
-import net.mhanak.yama.components.DetailTint
-import net.mhanak.yama.components.LocalAvailability
-import net.mhanak.yama.components.LocalDetailTint
-import net.mhanak.yama.components.LocalHazeState
-import net.mhanak.yama.components.LocalTrackUserData
-import net.mhanak.yama.components.LocalUiOpacity
-import net.mhanak.yama.components.rememberAvailability
-import net.mhanak.yama.components.RequestLocalAudioPermission
+import net.mhanak.yama.ui.theme.AppColorTheme
+import net.mhanak.yama.ui.theme.DetailTint
+import net.mhanak.yama.ui.components.state.LocalAvailability
+import net.mhanak.yama.ui.theme.LocalDetailTint
+import net.mhanak.yama.ui.theme.LocalHazeState
+import net.mhanak.yama.ui.components.state.LocalTrackUserData
+import net.mhanak.yama.ui.theme.LocalUiOpacity
+import net.mhanak.yama.ui.components.state.rememberAvailability
+import net.mhanak.yama.ui.platform.RequestLocalAudioPermission
 import net.mhanak.yama.media.sources.SourceType
-import net.mhanak.yama.screens.LoginScreen
-import net.mhanak.yama.screens.MainScreen
-import net.mhanak.yama.util.AppTheme
-import net.mhanak.yama.util.ThemeMode
+import net.mhanak.yama.ui.screens.LoginScreen
+import net.mhanak.yama.ui.screens.MainScreen
+import net.mhanak.yama.ui.theme.AppTheme
+import net.mhanak.yama.ui.theme.ThemeMode
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable

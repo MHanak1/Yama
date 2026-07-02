@@ -40,11 +40,11 @@ import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.media.sources.local.LocalSource
 import net.mhanak.yama.session.JellyfinSessionRepository
-import net.mhanak.yama.util.AlbumTintMode
+import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.SecureStorage
 import net.mhanak.yama.util.StreamingQuality
-import net.mhanak.yama.util.ThemeMode
+import net.mhanak.yama.ui.theme.ThemeMode
 import java.io.File
 
 val LocalAppContainer = compositionLocalOf<AppContainer> {
@@ -292,7 +292,7 @@ class AppContainer {
 
     /**
      * Called when the device wakes / the app returns to the foreground (Android only — see
-     * [net.mhanak.yama.components.PlatformDeviceWakeEffect]). A WebSocket left backgrounded can be
+     * [net.mhanak.yama.ui.platform.PlatformDeviceWakeEffect]). A WebSocket left backgrounded can be
      * silently half-open; rebuild the source's connection (and the active remote player bound to its
      * client) so remote control resyncs at once instead of after OkHttp's ~30s timeout.
      *
