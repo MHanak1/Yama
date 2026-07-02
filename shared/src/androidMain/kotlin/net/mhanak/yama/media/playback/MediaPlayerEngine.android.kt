@@ -9,8 +9,10 @@ import android.os.IBinder
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player as Media3Player
 import androidx.media3.exoplayer.ExoPlayer
+import net.mhanak.yama.util.logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +42,8 @@ import kotlin.math.roundToInt
  * [androidx.media3.session.MediaSession] while casting.
  */
 actual class MediaPlayerEngine actual constructor() {
+    private val log = logger("Playback")
+
     private val _status = MutableStateFlow(EngineStatus())
     actual val status: StateFlow<EngineStatus> = _status.asStateFlow()
 
@@ -63,6 +67,21 @@ actual class MediaPlayerEngine actual constructor() {
         override fun onEvents(p: Media3Player, events: Media3Player.Events) {
             pushStatus()
             (p as? ExoPlayer)?.let { pushVolume(it) }
+        }
+
+        // ExoPlayer errors silently collapse to STATE_IDLE without this override, making "play failed"
+        // indistinguishable from a normal stop. Log the error code + failing URI so failures are visible.
+        override fun onPlayerError(error: PlaybackException) {
+            val p = player
+            val uri = p?.currentMediaItem?.localConfiguration?.uri?.toString()
+                ?: p?.currentMediaItem?.mediaId
+                ?: "<unknown>"
+            val idx = p?.currentMediaItemIndex ?: -1
+            log.error(
+                "ExoPlayer error [${error.errorCodeName}/${error.errorCode}] " +
+                    "at index $idx uri=$uri: ${error.message}",
+                error,
+            )
         }
     }
 
@@ -237,8 +256,16 @@ actual class MediaPlayerEngine actual constructor() {
         val p = player ?: return
         val state = when {
             p.playbackState == Media3Player.STATE_BUFFERING -> PlaybackState.Buffering
-            p.playbackState == Media3Player.STATE_ENDED -> PlaybackState.Ended
-            p.playbackState == Media3Player.STATE_IDLE -> PlaybackState.Idle
+            p.playbackState == Media3Player.STATE_ENDED -> {
+                log.debug("Playback ended at index ${p.currentMediaItemIndex}")
+                PlaybackState.Ended
+            }
+            p.playbackState == Media3Player.STATE_IDLE -> {
+                // STATE_IDLE can mean either a normal stop or an error (onPlayerError fires first in the
+                // error case, so by here the cause is already logged if it was an error).
+                log.debug("Playback idle (index=${p.currentMediaItemIndex} hasError=${p.playerError != null})")
+                PlaybackState.Idle
+            }
             p.isPlaying -> PlaybackState.Playing
             else -> PlaybackState.Paused
         }

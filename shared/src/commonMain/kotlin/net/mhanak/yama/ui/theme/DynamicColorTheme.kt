@@ -191,7 +191,7 @@ fun AppColorTheme(tintMode: AlbumTintMode, content: @Composable () -> Unit) {
     val imageUrl: String?
     val cacheKey: String?
     when {
-        detailUrl != null && tintMode.tintsDetails -> { imageUrl = detailUrl; cacheKey = detail?.cacheKey }
+        detailUrl != null && tintMode.tintsDetails -> { imageUrl = detailUrl; cacheKey = detail.cacheKey }
         tintMode.tintsEverything -> { imageUrl = track?.imageUrl; cacheKey = track?.albumId ?: track?.id }
         else -> { imageUrl = null; cacheKey = null }
     }

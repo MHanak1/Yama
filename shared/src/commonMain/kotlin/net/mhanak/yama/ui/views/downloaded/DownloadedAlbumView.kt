@@ -94,7 +94,7 @@ fun DownloadedAlbumView(
             if (album?.artist?.isNotBlank() == true) {
                 item {
                     Text(
-                        album.artist!!,
+                        album.artist,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

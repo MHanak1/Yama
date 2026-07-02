@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.util.logger
 import kotlin.math.abs
 
 /**
@@ -37,6 +38,8 @@ class LocalPlayer(
     private val source: () -> MusicSource,
 ) : Player {
     override val displayName: String = "This device"
+
+    private val log = logger("Playback")
 
     /** Routes stream/artwork through the downloads layer. Set by `AppContainer` once the repository
      *  exists; null falls back to resolving straight from the source (pre-downloads behaviour). */
@@ -88,10 +91,14 @@ class LocalPlayer(
     override fun playNow(tracks: List<Track>, startIndex: Int, startPositionMs: Long) {
         queueJob?.cancel()
         queueJob = scope.launch {
-            val items = tracks.map { it.toPlayable() }
-            this@LocalPlayer.tracks.value = tracks
-            engine.setQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
-            if (startPositionMs > 0) engine.seekTo(startPositionMs)
+            try {
+                val items = tracks.map { it.toPlayable() }
+                this@LocalPlayer.tracks.value = tracks
+                engine.setQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
+                if (startPositionMs > 0) engine.seekTo(startPositionMs)
+            } catch (t: Throwable) {
+                log.error("playNow: failed to resolve stream for '${tracks.getOrNull(startIndex)?.name}'", t)
+            }
         }
     }
 
@@ -99,10 +106,14 @@ class LocalPlayer(
     fun loadQueue(tracks: List<Track>, startIndex: Int, startPositionMs: Long = 0) {
         queueJob?.cancel()
         queueJob = scope.launch {
-            val items = tracks.map { it.toPlayable() }
-            this@LocalPlayer.tracks.value = tracks
-            engine.loadQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
-            if (startPositionMs > 0) engine.seekTo(startPositionMs)
+            try {
+                val items = tracks.map { it.toPlayable() }
+                this@LocalPlayer.tracks.value = tracks
+                engine.loadQueue(items, startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
+                if (startPositionMs > 0) engine.seekTo(startPositionMs)
+            } catch (t: Throwable) {
+                log.error("loadQueue: failed to resolve stream for '${tracks.getOrNull(startIndex)?.name}'", t)
+            }
         }
     }
 
@@ -177,19 +188,27 @@ class LocalPlayer(
 
     override fun playNext(tracks: List<Track>) {
         scope.launch {
-            val items = tracks.map { it.toPlayable() }
-            val insertAt = (status.value.queueIndex + 1).coerceIn(0, this@LocalPlayer.tracks.value.size)
-            this@LocalPlayer.tracks.value =
-                this@LocalPlayer.tracks.value.toMutableList().apply { addAll(insertAt, tracks) }
-            engine.addNext(items)
+            try {
+                val items = tracks.map { it.toPlayable() }
+                val insertAt = (status.value.queueIndex + 1).coerceIn(0, this@LocalPlayer.tracks.value.size)
+                this@LocalPlayer.tracks.value =
+                    this@LocalPlayer.tracks.value.toMutableList().apply { addAll(insertAt, tracks) }
+                engine.addNext(items)
+            } catch (t: Throwable) {
+                log.error("playNext: failed to resolve stream for ${tracks.size} track(s)", t)
+            }
         }
     }
 
     override fun addToQueue(tracks: List<Track>) {
         scope.launch {
-            val items = tracks.map { it.toPlayable() }
-            this@LocalPlayer.tracks.value = this@LocalPlayer.tracks.value + tracks
-            engine.addToQueue(items)
+            try {
+                val items = tracks.map { it.toPlayable() }
+                this@LocalPlayer.tracks.value = this@LocalPlayer.tracks.value + tracks
+                engine.addToQueue(items)
+            } catch (t: Throwable) {
+                log.error("addToQueue: failed to resolve stream for ${tracks.size} track(s)", t)
+            }
         }
     }
 

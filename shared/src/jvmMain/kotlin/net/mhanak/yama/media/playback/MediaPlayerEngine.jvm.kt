@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import net.mhanak.yama.util.logger
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.component.AudioPlayerComponent
 
@@ -27,6 +28,8 @@ import uk.co.caprica.vlcj.player.component.AudioPlayerComponent
  * Linux / bundled on Windows.
  */
 actual class MediaPlayerEngine actual constructor() {
+    private val log = logger("Playback")
+
     private val _status = MutableStateFlow(EngineStatus())
     actual val status: StateFlow<EngineStatus> = _status.asStateFlow()
 
@@ -62,10 +65,14 @@ actual class MediaPlayerEngine actual constructor() {
                 override fun playing(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Playing, true)
                 override fun paused(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Paused, false)
                 override fun stopped(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Paused, false)
-                override fun error(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Idle, false)
+                override fun error(mediaPlayer: MediaPlayer) {
+                    val uri = if (index in queue.indices) queue[index].uri else "<none>"
+                    log.error("vlcj playback error at index $index uri=$uri")
+                    pushState(PlaybackState.Idle, false)
+                }
             }
         }.getOrElse {
-            System.err.println("libvlc unavailable — desktop playback disabled: ${it.message}")
+            log.warn("libvlc unavailable — desktop playback disabled", it)
             null
         }
     }
@@ -83,8 +90,8 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     private fun playIndex(i: Int) {
-        val p = player ?: return
-        if (i !in queue.indices) return
+        val p = player ?: run { log.warn("playIndex($i) dropped — libvlc engine unavailable"); return }
+        if (i !in queue.indices) { log.warn("playIndex($i) out of bounds (queue size=${queue.size})"); return }
         index = i
         mediaLoaded = true
         p.media().play(queue[i].uri)
@@ -173,7 +180,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun play() {
-        val p = player ?: return
+        val p = player ?: run { log.warn("play() dropped — libvlc engine unavailable"); return }
         when {
             // Queue was restored via loadQueue but media never started — begin playing now.
             !mediaLoaded && queue.isNotEmpty() -> playIndex(if (index >= 0) index else 0)
@@ -187,7 +194,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun pause() {
-        val p = player ?: return
+        val p = player ?: run { log.warn("pause() dropped — libvlc engine unavailable"); return }
         p.controls().setPause(true)
         // libvlc delivers its paused() event with a noticeable lag, so the play/pause button and
         // progress bar would otherwise keep showing "playing" until it arrives. Push the paused state

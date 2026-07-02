@@ -1,0 +1,15 @@
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -- %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Raw WebSocket message payloads from Jellyfin sessions polling are enormous (8k+ lines).
+         Suppress to WARN; connection-level events (open/close/error) still surface. -->
+    <logger name="org.jellyfin.sdk.api.okhttp" level="WARN"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

@@ -9,6 +9,7 @@ import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.PlaybackReporting
 import net.mhanak.yama.media.sources.RemoteCommand
+import net.mhanak.yama.util.logger
 import kotlin.time.TimeSource
 
 /**
@@ -33,6 +34,7 @@ class PlaybackReporter(
     private val onCompletedPlay: (Track, Long) -> Unit = { _, _ -> },
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val log = logger("Playback")
 
     fun start() {
         scope.launch {
@@ -61,7 +63,13 @@ class PlaybackReporter(
                 // reports its own playback (and localStatus may briefly mirror it — see the class doc).
                 val isActive = isLocalActive() && track != null && status.state in ACTIVE_STATES
                 if (!isActive) {
-                    currentTrack?.let { (source() as? PlaybackReporting)?.reportPlaybackStopped(it, lastPositionMs) }
+                    currentTrack?.let { t ->
+                        try {
+                            (source() as? PlaybackReporting)?.reportPlaybackStopped(t, lastPositionMs)
+                        } catch (e: Throwable) {
+                            log.warn("reportPlaybackStopped failed for '${t.name}'", e)
+                        }
+                    }
                     currentTrack = null
                     lastPaused = null
                     lastVolume = null
@@ -72,7 +80,6 @@ class PlaybackReporter(
                     playedRecorded = false
                     return@collect
                 }
-                track!!
 
                 // Offline-scrobble seam: once the track has been played past the threshold, record a
                 // completed play (the outbox persists it only when offline; online it's a no-op). Fires
@@ -100,8 +107,9 @@ class PlaybackReporter(
                 val queueIds = status.queue.map { it.id }
                 // Report a volume change promptly (not just on the 5s tick) so a controller driving this
                 // device sees the new level quickly.
-                val volumeChanged = lastVolume != null && status.volume != null &&
-                    kotlin.math.abs(status.volume!! - lastVolume!!) >= VOLUME_REPORT_DELTA
+                val lv = lastVolume; val sv = status.volume
+                val volumeChanged = lv != null && sv != null &&
+                    kotlin.math.abs(sv - lv) >= VOLUME_REPORT_DELTA
                 // Same rationale for repeat/shuffle/queue edits: a controller mirrors these from our
                 // reports, so push one immediately rather than waiting up to PROGRESS_INTERVAL_MS.
                 val stateChanged = (lastRepeat != null && repeat != lastRepeat) ||
@@ -109,14 +117,22 @@ class PlaybackReporter(
                     (lastQueueIds != null && queueIds != lastQueueIds)
 
                 if (track.id != currentTrack?.id) {
-                    (source() as? PlaybackReporting)?.reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
+                    try {
+                        (source() as? PlaybackReporting)?.reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
+                    } catch (e: Throwable) {
+                        log.warn("reportPlaybackStarted failed for '${track.name}'", e)
+                    }
                     currentTrack = track
                     playedRecorded = false
                     lastProgress = TimeSource.Monotonic.markNow()
                 } else if (paused != lastPaused || volumeChanged || stateChanged || seeked ||
                     lastProgress.elapsedNow().inWholeMilliseconds >= PROGRESS_INTERVAL_MS
                 ) {
-                    (source() as? PlaybackReporting)?.reportPlaybackProgress(track, status.positionMs, paused, status.queue, status.volume, repeat, status.shuffle)
+                    try {
+                        (source() as? PlaybackReporting)?.reportPlaybackProgress(track, status.positionMs, paused, status.queue, status.volume, repeat, status.shuffle)
+                    } catch (e: Throwable) {
+                        log.warn("reportPlaybackProgress failed for '${track.name}'", e)
+                    }
                     lastProgress = TimeSource.Monotonic.markNow()
                 } else {
                     return@collect

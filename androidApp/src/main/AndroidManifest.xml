@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- TV: app runs on both handset and Android TV / Fire TV. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Downloads: check whether the active network is unmetered for the "Wi-Fi only" download gate. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -55,7 +59,8 @@
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
-            tools:node="merge" />
+            tools:node="merge"
+            tools:ignore="MissingClass" />
 
         <!-- On-demand WorkManager init: MyApplication implements Configuration.Provider (to cap download
              concurrency via a fixed executor), so the default WorkManager initializer must be removed.
@@ -64,7 +69,8 @@
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
-            tools:node="merge">
+            tools:node="merge"
+            tools:ignore="MissingClass">
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"

@@ -7,6 +7,9 @@ import java.util.concurrent.Executors
 
 class MyApplication : Application(), Configuration.Provider {
     override fun onCreate() {
+        // Must be set before SLF4J binds (first getLogger() call) — slf4j-simple reads these
+        // system properties once at initialization and never again.
+        System.setProperty("org.slf4j.simpleLogger.log.org.jellyfin.sdk.api.okhttp", "WARN")
         super.onCreate()
         appContext = this
     }

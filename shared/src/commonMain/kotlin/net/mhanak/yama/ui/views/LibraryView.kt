@@ -34,7 +34,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Speaker
@@ -92,7 +92,7 @@ enum class LibraryTab(val label: String, val icon: ImageVector, val favoritableK
     Artists("Artists", Icons.Default.Person, FavoritableKind.Artist),
     AlbumArtists("Album Artists", Icons.Default.People, FavoritableKind.Artist),
     Genres("Genres", Icons.Default.Category, FavoritableKind.Genre),
-    Playlists("Playlists", Icons.Default.QueueMusic, FavoritableKind.Playlist),
+    Playlists("Playlists", Icons.AutoMirrored.Filled.QueueMusic, FavoritableKind.Playlist),
     Tracks("Tracks", Icons.Default.MusicNote, FavoritableKind.Track),
 }
 

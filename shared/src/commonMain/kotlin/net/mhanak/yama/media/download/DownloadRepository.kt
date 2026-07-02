@@ -260,7 +260,7 @@ class DownloadRepository(
             // Stale but online → stream origin now, and re-fetch (pinned) / evict (cached) in the
             // background. Never delete-then-download: the file stays until a fresh copy lands.
             row != null && reachable -> {
-                onStaleOnline?.invoke(key!!, row)
+                onStaleOnline?.invoke(key, row)
                 source.getStreamUrl(track.id, row.quality)
             }
             // Stale and offline → keep the stale copy rather than going silent.

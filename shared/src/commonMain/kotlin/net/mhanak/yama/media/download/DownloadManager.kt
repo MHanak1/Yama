@@ -18,6 +18,7 @@ import net.mhanak.yama.media.sources.local.LocalLibraryStore
 import net.mhanak.yama.media.sources.local.Retention
 import net.mhanak.yama.media.sources.local.StoredTrack
 import net.mhanak.yama.util.StreamingQuality
+import net.mhanak.yama.util.logger
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 

@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Queue
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material3.CardDefaults
@@ -121,7 +120,8 @@ fun TrackListCard(
     // Cached = auto-played recently but not explicitly downloaded; subtle indicator only.
     val isCached = downloadKey != null && !isPinned && track.id in availability.trackIds
     val downloadStale = remember(isPinned, downloadKey, track.id) {
-        isPinned && downloadKey != null && appContainer.downloads.row(downloadKey, track.id)?.stale == true
+        if (!isPinned || downloadKey == null) false
+        else appContainer.downloads.row(downloadKey, track.id)?.stale == true
     }
 
     val playThis = { if (playable) player.playNow(listOf(track)); Unit }
@@ -265,7 +265,7 @@ fun TrackListCard(
             TrackMenuItem("Play", Icons.Filled.PlayArrow) { menuExpanded = false; playThis() }
             TrackMenuItem("Play from here", Icons.Filled.PlayCircle) { menuExpanded = false; playFromHere() }
             TrackMenuItem("Play next", Icons.Filled.Queue) { menuExpanded = false; playNext() }
-            TrackMenuItem("Add to queue", Icons.Filled.QueueMusic) { menuExpanded = false; addToQueue() }
+            TrackMenuItem("Add to queue", Icons.AutoMirrored.Filled.QueueMusic) { menuExpanded = false; addToQueue() }
             if (favoritesSupported) {
                 TrackMenuItem(
                     if (isFavorite) "Remove from favourites" else "Add to favourites",

@@ -5,6 +5,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import kotlin.coroutines.coroutineContext
 
@@ -70,7 +71,7 @@ internal object HttpDownloader {
     private fun openFollowingRedirects(url: String, maxHops: Int = 5): HttpURLConnection {
         var current = url
         repeat(maxHops) {
-            val conn = (URL(current).openConnection() as HttpURLConnection).apply {
+            val conn = (URI.create(current).toURL().openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
                 connectTimeout = 30_000
                 readTimeout = 30_000
@@ -82,7 +83,7 @@ internal object HttpDownloader {
                 conn.disconnect()
                 if (location.isNullOrBlank()) error("Redirect with no Location from $current")
                 // Resolve relative redirects against the current URL.
-                current = URL(URL(current), location).toString()
+                current = URI(current).resolve(location).toString()
                 return@repeat
             }
             if (code !in 200..299) {

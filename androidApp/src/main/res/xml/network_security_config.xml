@@ -5,7 +5,9 @@
     a release build to untrusted environments.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- tools:ignore: cleartext is intentional — Jellyfin servers on local networks are often HTTP-only. -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration"
+        xmlns:tools="http://schemas.android.com/tools">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
