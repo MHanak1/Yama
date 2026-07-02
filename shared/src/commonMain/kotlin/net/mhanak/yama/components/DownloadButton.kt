@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.media.download.DownloadJob
 import net.mhanak.yama.media.download.DownloadState
 import net.mhanak.yama.util.StreamingQuality
@@ -50,7 +51,7 @@ fun DownloadButton(
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
     // Source doesn't support downloads (e.g. local files, or not signed in) — nothing to offer.
-    val key = source.downloadSourceKey() ?: return
+    val key = (source as? OfflineCapable)?.downloadSourceKey() ?: return
 
     val availability = LocalAvailability.current
     // Use pinned-only sets: cached (auto-play) entries don't count as explicitly downloaded.

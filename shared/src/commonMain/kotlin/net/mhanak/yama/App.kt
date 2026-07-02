@@ -19,6 +19,7 @@ import net.mhanak.yama.components.DetailTint
 import net.mhanak.yama.components.LocalAvailability
 import net.mhanak.yama.components.LocalDetailTint
 import net.mhanak.yama.components.LocalHazeState
+import net.mhanak.yama.components.LocalTrackUserData
 import net.mhanak.yama.components.LocalUiOpacity
 import net.mhanak.yama.components.rememberAvailability
 import net.mhanak.yama.components.RequestLocalAudioPermission
@@ -60,6 +61,7 @@ fun App() {
         LocalDensity provides scaledDensity,
         LocalDetailTint provides detailTint,
         LocalAvailability provides rememberAvailability(appContainer),
+        LocalTrackUserData provides appContainer.userData,
     ) {
         AppTheme(darkTheme = darkTheme) {
             // Recolour the whole app to the open detail screen's item (overriding the player) or, at the

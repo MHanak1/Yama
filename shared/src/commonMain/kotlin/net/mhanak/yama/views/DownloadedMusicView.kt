@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.components.DownloadAlbumRow
 import net.mhanak.yama.components.downloadJobsSection
 import net.mhanak.yama.components.isInFlight
@@ -79,7 +80,7 @@ fun DownloadedMusicView(
 ) {
     val appContainer = LocalAppContainer.current
     val manager = appContainer.downloadManager
-    val sourceKey = appContainer.activeMusicSource.downloadSourceKey()
+    val sourceKey = (appContainer.activeMusicSource as? OfflineCapable)?.downloadSourceKey()
     val availableTrackIds by appContainer.downloads.availableTrackIds.collectAsState()
     val jobs by manager.downloads.collectAsState()
 

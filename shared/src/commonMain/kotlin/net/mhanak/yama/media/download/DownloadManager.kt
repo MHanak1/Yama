@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.media.sources.local.LocalLibraryStore
 import net.mhanak.yama.media.sources.local.Retention
 import net.mhanak.yama.media.sources.local.StoredTrack
@@ -99,7 +100,7 @@ class DownloadManager(
 
     fun enqueueTracks(tracks: List<Track>, quality: StreamingQuality? = null) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         val q = quality ?: defaultQuality()
         val pending = tracks.filter { addJob(it) }
         if (pending.isEmpty()) return
@@ -153,7 +154,7 @@ class DownloadManager(
      *  tracks are skipped so "re-download at X" doesn't pull a whole album the user never saved. */
     private fun redownloadContainer(quality: StreamingQuality, fetch: suspend (MusicSource, String) -> List<Track>) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         scope.launch {
             val tracks = runCatching { fetch(src, key) }.getOrDefault(emptyList())
                 .filter { store.get(key, it.id) != null }
@@ -166,7 +167,7 @@ class DownloadManager(
      *  [quality] is skipped — picking the current quality is a no-op. */
     fun redownload(tracks: List<Track>, quality: StreamingQuality) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         // Nothing to do for a copy already at this quality (covers "Change quality" → current quality).
         val changed = tracks.filter { store.get(key, it.id)?.quality != quality }
         val pending = changed.filter { addJob(it) }
@@ -184,7 +185,7 @@ class DownloadManager(
      */
     fun onTrackPlayed(track: Track, cache: Boolean) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         val existing = store.get(key, track.id)
         if (existing != null) {
             scope.launch { store.put(existing.copy(lastPlayedAt = System.currentTimeMillis())) }
@@ -201,7 +202,7 @@ class DownloadManager(
      */
     suspend fun cacheUpcoming(track: Track) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         enqueueCachedTrack(track, key)?.join()
     }
 
@@ -224,7 +225,7 @@ class DownloadManager(
      *  under the configured size budget. Runs after each auto-cache and when the budget changes. */
     fun trimCache() {
         scope.launch {
-            val key = source().downloadSourceKey() ?: return@launch
+            val key = (source() as? OfflineCapable)?.downloadSourceKey() ?: return@launch
             val budgetBytes = cacheBudgetMb().toLong() * 1024 * 1024
             val cached = store.all(key).filter { it.retention == Retention.Cached }
             var total = cached.sumOf { fileSize(it.path) }
@@ -327,7 +328,7 @@ class DownloadManager(
      *  action). Stale rows keep serving their old file until the fresh copy lands. */
     fun redownloadStale() {
         scope.launch {
-            val key = source().downloadSourceKey() ?: return@launch
+            val key = (source() as? OfflineCapable)?.downloadSourceKey() ?: return@launch
             store.all(key).filter { it.stale }
                 .groupBy { it.quality }
                 .forEach { (quality, rows) -> redownload(rows.map { it.toTrack() }, quality ?: defaultQuality()) }
@@ -367,7 +368,7 @@ class DownloadManager(
         val src = source()
         // The active source/session changed while this sat in the queue — its partition no longer
         // matches, so the download would land in the wrong place. Drop it.
-        if (src.downloadSourceKey() != request.sourceKey) {
+        if ((src as? OfflineCapable)?.downloadSourceKey() != request.sourceKey) {
             markFailed(request.trackId, IllegalStateException("Source changed"))
             return
         }
@@ -407,7 +408,7 @@ class DownloadManager(
         fetch: suspend (MusicSource, String) -> List<Track>,
     ) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         scope.launch {
             val tracks = runCatching { fetch(src, key) }.getOrDefault(emptyList())
             if (tracks.isNotEmpty()) enqueueTracks(tracks, quality)
@@ -450,7 +451,7 @@ class DownloadManager(
             ?.forEach { it.delete() }
 
         val artworkPath = track.albumId?.let { ensureAlbumArt(src, key, it, track) }
-        val version = runCatching { src.getContentVersion(track.id) }.getOrNull()
+        val version = runCatching { (src as? OfflineCapable)?.getContentVersion(track.id) }.getOrNull()
 
         store.put(track.toStoredTrack(
             sourceKey = key,

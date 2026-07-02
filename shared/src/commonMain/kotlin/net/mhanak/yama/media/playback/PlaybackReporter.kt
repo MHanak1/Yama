@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.PlaybackReporting
 import net.mhanak.yama.media.sources.RemoteCommand
 import kotlin.time.TimeSource
 
@@ -60,7 +61,7 @@ class PlaybackReporter(
                 // reports its own playback (and localStatus may briefly mirror it — see the class doc).
                 val isActive = isLocalActive() && track != null && status.state in ACTIVE_STATES
                 if (!isActive) {
-                    currentTrack?.let { source().reportPlaybackStopped(it, lastPositionMs) }
+                    currentTrack?.let { (source() as? PlaybackReporting)?.reportPlaybackStopped(it, lastPositionMs) }
                     currentTrack = null
                     lastPaused = null
                     lastVolume = null
@@ -108,14 +109,14 @@ class PlaybackReporter(
                     (lastQueueIds != null && queueIds != lastQueueIds)
 
                 if (track.id != currentTrack?.id) {
-                    source().reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
+                    (source() as? PlaybackReporting)?.reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
                     currentTrack = track
                     playedRecorded = false
                     lastProgress = TimeSource.Monotonic.markNow()
                 } else if (paused != lastPaused || volumeChanged || stateChanged || seeked ||
                     lastProgress.elapsedNow().inWholeMilliseconds >= PROGRESS_INTERVAL_MS
                 ) {
-                    source().reportPlaybackProgress(track, status.positionMs, paused, status.queue, status.volume, repeat, status.shuffle)
+                    (source() as? PlaybackReporting)?.reportPlaybackProgress(track, status.positionMs, paused, status.queue, status.volume, repeat, status.shuffle)
                     lastProgress = TimeSource.Monotonic.markNow()
                 } else {
                     return@collect

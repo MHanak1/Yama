@@ -1,0 +1,5 @@
+-- v1 -> v2: carry the user's favourite state and a local play tally on each offline row, so a
+-- downloaded/indexed track can show its liked state and be sorted by play count fully offline (the
+-- server stays authoritative when online; FavoriteOutbox/ScrobbleOutbox flush local changes back).
+ALTER TABLE trackRow ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE trackRow ADD COLUMN playCount INTEGER NOT NULL DEFAULT 0;

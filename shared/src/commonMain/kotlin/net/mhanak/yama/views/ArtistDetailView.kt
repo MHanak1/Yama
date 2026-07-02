@@ -34,7 +34,7 @@ fun ArtistDetailView(
         onNavigate = onNavigate,
         onViewAllTracks = { onNavigate(ArtistTracksRoute(artistId)) },
         fetchTopTracks = { limit, sortBy ->
-            appContainer.tracksFor(TrackListKind.Artist, artistId) {
+            appContainer.catalog.tracksFor(TrackListKind.Artist, artistId) {
                 appContainer.activeMusicSource.getTracksForArtist(artistId, limit, 0, sortBy)
             }
         },

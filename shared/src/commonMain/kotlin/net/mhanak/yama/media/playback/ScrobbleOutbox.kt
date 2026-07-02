@@ -11,6 +11,8 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.OfflineCapable
+import net.mhanak.yama.media.sources.PlaybackReporting
 import java.io.File
 
 /** A durable record of one completed play, persisted until the backend acknowledges it. */
@@ -51,7 +53,7 @@ class ScrobbleOutbox(
      */
     fun recordPlay(trackId: String, positionMs: Long) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         if (src.isReachable.value) return
         if (!recordOffline()) return
         val event = PlayedEvent(nextId(), key, trackId, System.currentTimeMillis(), positionMs)
@@ -69,13 +71,14 @@ class ScrobbleOutbox(
     fun flush() {
         scope.launch {
             val src = source()
-            val key = src.downloadSourceKey() ?: return@launch
+            val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return@launch
             if (!src.isReachable.value) return@launch
             val toFlush = mutex.withLock { read().filter { it.sourceKey == key } }
             if (toFlush.isEmpty()) return@launch
             val acked = mutableSetOf<String>()
             for (e in toFlush) {
-                val ok = runCatching { src.reportPlayed(e.trackId, e.playedAtEpochMs, e.positionMs) }
+                val reporter = src as? PlaybackReporting
+                val ok = reporter != null && runCatching { reporter.reportPlayed(e.trackId, e.playedAtEpochMs, e.positionMs) }
                     .getOrDefault(false)
                 if (ok) acked.add(e.id) else break // stop on the first failure; retry the rest later
             }

@@ -82,6 +82,8 @@ import net.mhanak.yama.components.player.PlaybackTargetSheet
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.sources.FavoritableKind
+import net.mhanak.yama.media.sources.FavoriteCapable
+import net.mhanak.yama.media.sources.OfflineCapable
 
 private const val TAB_ANIM_DURATION = 300
 
@@ -131,7 +133,7 @@ fun LibraryView(
     // Favourites filter — restricts the active tab to favourited items. Only shown when the source
     // can favourite this kind of item.
     var favoritesOnly by remember { mutableStateOf(false) }
-    val canFavoriteFilter = appContainer.activeMusicSource.supportsFavorites(activeTab.favoritableKind)
+    val canFavoriteFilter = (appContainer.activeMusicSource as? FavoriteCapable)?.supportsFavorites(activeTab.favoritableKind) == true
 
     // Multi-selection of albums/artists/genres for batch playback (see LibrarySelectionButtons). Cleared
     // when the tab changes so a selection never lingers over a different (or non-selectable) tab.
@@ -165,13 +167,15 @@ fun LibraryView(
     // (drives the heart's filled/outlined look) and whether the source can favourite this kind at all.
     val selectionFavKind = selection.kind?.toFavoritableKind()
     val selectionFavoritesSupported =
-        selectionFavKind != null && appContainer.activeMusicSource.supportsFavorites(selectionFavKind)
+        selectionFavKind != null && (appContainer.activeMusicSource as? FavoriteCapable)?.supportsFavorites(selectionFavKind) == true
     var allSelectedFavorite by remember { mutableStateOf(false) }
     LaunchedEffect(selection.selectedIds.toList(), selectionFavKind, appContainer.activeMusicSource) {
         val source = appContainer.activeMusicSource
         val ids = selection.selectedIds
+        val fav = source as? FavoriteCapable
         allSelectedFavorite =
-            selectionFavKind != null && ids.isNotEmpty() && ids.all { source.isFavorite(selectionFavKind, it) }
+            selectionFavKind != null && ids.isNotEmpty() && fav != null &&
+                ids.all { fav.isFavorite(selectionFavKind, it) }
     }
 
     fun toggleSelectionFavorite() {
@@ -179,12 +183,12 @@ fun LibraryView(
         val target = !allSelectedFavorite
         val ids = selection.selectedIds.toList()
         allSelectedFavorite = target // optimistic; the writes are best-effort and re-read on next change.
-        ids.forEach { appContainer.setFavorite(kind, it, target) }
+        ids.forEach { appContainer.favorites.setFavorite(kind, it, target) }
     }
 
     // Batch-download the selection: fan each selected container out to the download manager at the
     // default download quality. Only offered when the active source persists downloads (Jellyfin).
-    val downloadsSupported = appContainer.activeMusicSource.downloadSourceKey() != null
+    val downloadsSupported = (appContainer.activeMusicSource as? OfflineCapable)?.downloadSourceKey() != null
     fun downloadSelection() {
         val kind = selection.kind ?: return
         val manager = appContainer.downloadManager

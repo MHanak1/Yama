@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.PlayableResolver
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.media.sources.local.LocalLibraryStore
 import net.mhanak.yama.media.sources.local.Retention
 import net.mhanak.yama.media.sources.local.StoredTrack
@@ -108,7 +109,7 @@ class DownloadRepository(
      * opportunistically — e.g. after a library refresh or when reachability returns.
      */
     fun refreshStaleness(source: MusicSource) {
-        val key = source.downloadSourceKey() ?: return
+        val key = (source as? OfflineCapable)?.downloadSourceKey() ?: return
         if (!source.isReachable.value) return
         synchronized(stalenessChecked) { if (!stalenessChecked.add(key)) return }
         scope.launch {
@@ -117,7 +118,7 @@ class DownloadRepository(
             // One batch request (or a few chunks) instead of one request per downloaded track.
             // Also refreshes favorite and playCount so user-data stays in sync without extra passes.
             val snapshots = runCatching {
-                source.fetchTrackSnapshots(rows.map { it.id })
+                (source as? OfflineCapable)?.fetchTrackSnapshots(rows.map { it.id }) ?: emptyMap()
             }.getOrDefault(emptyMap())
             if (snapshots.isEmpty()) return@launch
 
@@ -250,7 +251,7 @@ class DownloadRepository(
     // --- Resolution ladder (PlayableResolver) ------------------------------------------------------
 
     override suspend fun resolveStream(source: MusicSource, track: Track): String {
-        val key = source.downloadSourceKey()
+        val key = (source as? OfflineCapable)?.downloadSourceKey()
         val row = key?.let { store.get(it, track.id) }
         val reachable = source.isReachable.value
         return when {
@@ -270,7 +271,7 @@ class DownloadRepository(
     }
 
     override suspend fun resolveArtwork(source: MusicSource, track: Track): String? {
-        val key = source.downloadSourceKey()
+        val key = (source as? OfflineCapable)?.downloadSourceKey()
         val row = key?.let { store.get(it, track.id) }
         // A downloaded cover is preferred whenever the copy is usable (fresh, or we're offline).
         if (row?.artworkPath != null && (!row.stale || !source.isReachable.value)) return row.artworkPath

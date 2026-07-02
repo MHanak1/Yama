@@ -467,7 +467,7 @@ fun MainScreen() {
             detailComposable<ArtistTracksRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<ArtistTracksRoute>()
                 PaginatedTrackList(
-                    loadPage = { offset, limit, sortBy -> appContainer.getTracksForArtist(route.artistId, limit, offset, sortBy) },
+                    loadPage = { offset, limit, sortBy -> appContainer.catalog.getTracksForArtist(route.artistId, limit, offset, sortBy) },
                     defaultSort = TrackSortOrder.PlayCount,
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize().glassSource(zIndex = 1f).statusBarsPadding(),
@@ -477,7 +477,7 @@ fun MainScreen() {
             detailComposable<GenreTracksRoute> { backStackEntry ->
                 val route = backStackEntry.toRoute<GenreTracksRoute>()
                 PaginatedTrackList(
-                    loadPage = { offset, limit, sortBy -> appContainer.getTracksForGenre(route.genreId, limit, offset, sortBy) },
+                    loadPage = { offset, limit, sortBy -> appContainer.catalog.getTracksForGenre(route.genreId, limit, offset, sortBy) },
                     defaultSort = TrackSortOrder.PlayCount,
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize().glassSource(zIndex = 1f).statusBarsPadding(),

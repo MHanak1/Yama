@@ -11,7 +11,9 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import net.mhanak.yama.media.sources.FavoritableKind
+import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.OfflineCapable
 import java.io.File
 
 /** A durable record of one favourite toggle made offline, persisted until the backend accepts it. */
@@ -51,7 +53,7 @@ class FavoriteOutbox(
      */
     fun record(kind: FavoritableKind, id: String, favorite: Boolean) {
         val src = source()
-        val key = src.downloadSourceKey() ?: return
+        val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         if (src.isReachable.value) return
         val change = FavoriteChange(key, kind.name, id, favorite)
         scope.launch {
@@ -69,7 +71,7 @@ class FavoriteOutbox(
     fun flush() {
         scope.launch {
             val src = source()
-            val key = src.downloadSourceKey() ?: return@launch
+            val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return@launch
             if (!src.isReachable.value) return@launch
             val toFlush = mutex.withLock { read().filter { it.sourceKey == key } }
             if (toFlush.isEmpty()) return@launch
@@ -77,7 +79,8 @@ class FavoriteOutbox(
             for (c in toFlush) {
                 val kind = runCatching { FavoritableKind.valueOf(c.kind) }.getOrNull()
                 if (kind == null) { acked.add(c); continue } // unknown kind — drop, can't replay
-                val ok = runCatching { src.setFavorite(kind, c.itemId, c.favorite); true }.getOrDefault(false)
+                val fav = src as? FavoriteCapable
+                val ok = fav != null && runCatching { fav.setFavorite(kind, c.itemId, c.favorite); true }.getOrDefault(false)
                 if (ok) acked.add(c) else break // stop on the first failure; retry the rest later
             }
             if (acked.isNotEmpty()) {

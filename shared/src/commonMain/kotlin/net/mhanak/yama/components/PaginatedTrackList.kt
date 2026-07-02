@@ -1,6 +1,7 @@
 package net.mhanak.yama.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,8 +11,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.first
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.components.ErrorBox
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.TrackSortOrder
 
@@ -60,6 +64,8 @@ fun PaginatedTrackList(
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var hasMore by remember { mutableStateOf(true) }
+    var fetchError by remember { mutableStateOf<Throwable?>(null) }
+    var retryKey by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
 
     // Reload from the top when the source is refreshed. A pull-to-refresh only re-runs
@@ -80,13 +86,20 @@ fun PaginatedTrackList(
     // user scrolls within 20 rows of the bottom. Keying on sortOrder means a sort change cancels
     // the in-progress load cleanly and restarts from the beginning — no stuck isLoading flag.
     // [source] restarts the load when the active source is swapped; [refreshGen] on a refresh.
-    LaunchedEffect(sortOrder, reloadKey, source, refreshGen) {
+    LaunchedEffect(sortOrder, reloadKey, source, refreshGen, retryKey) {
         tracks = emptyList()
         hasMore = true
+        fetchError = null
 
         while (hasMore) {
             isLoading = true
-            val page = loadPage(tracks.size, PAGE_SIZE, sortOrder)
+            val result = runCatching { loadPage(tracks.size, PAGE_SIZE, sortOrder) }
+            val page = result.getOrNull()
+            if (page == null) {
+                fetchError = result.exceptionOrNull()
+                isLoading = false
+                break
+            }
             tracks = tracks + page
             hasMore = page.size == PAGE_SIZE
             isLoading = false
@@ -159,6 +172,22 @@ fun PaginatedTrackList(
             item {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
+                }
+            }
+        }
+
+        val error = fetchError
+        if (error != null) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        error.message ?: "Couldn't load tracks",
+                        style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.secondary),
+                    )
+                    TextButton(onClick = { retryKey++ }) { Text("Retry") }
                 }
             }
         }

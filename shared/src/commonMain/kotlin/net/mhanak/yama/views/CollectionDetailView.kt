@@ -1,6 +1,8 @@
 package net.mhanak.yama.views
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,10 +13,12 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.components.ErrorBox
+import net.mhanak.yama.components.LoadState
 import net.mhanak.yama.components.AsyncImageListCard
 import net.mhanak.yama.components.CardImage
 import net.mhanak.yama.components.DetailPlayActions
@@ -77,12 +83,17 @@ fun CollectionDetailView(
 ) {
     val appContainer = LocalAppContainer.current
     var sortOrder by remember { mutableStateOf(TrackSortOrder.PlayCount) }
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var tracksState by remember { mutableStateOf<LoadState<List<Track>>>(LoadState.Loading) }
+    var retryKey by remember { mutableStateOf(0) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
 
-    LaunchedEffect(cacheKey, sortOrder) {
-        tracks = fetchTopTracks(5, sortOrder)
+    LaunchedEffect(cacheKey, sortOrder, retryKey) {
+        tracksState = LoadState.Loading
+        tracksState = runCatching { fetchTopTracks(5, sortOrder) }
+            .fold({ LoadState.Success(it) }, { LoadState.Failure(it) })
     }
+
+    val tracks = (tracksState as? LoadState.Success)?.value ?: emptyList()
 
     if (fetchAlbums != null) {
         LaunchedEffect(cacheKey) {
@@ -166,16 +177,35 @@ fun CollectionDetailView(
             ) { Text(it.label) }
         }
 
-        itemsIndexed(tracks) { index, track ->
-            val album = albums.find { it.id == track.albumId }
-            TrackListCard(
-                track = track,
-                tracks = tracks,
-                index = index,
-                player = appContainer.playback.viewed,
-                subtitle = track.album,
-                image = { CardImage(imageUrl = album?.imageUrl ?: track.imageUrl, imageHash = album?.imageHash) },
-            )
+        when (val state = tracksState) {
+            LoadState.Loading -> item {
+                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            is LoadState.Failure -> item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        state.throwable.message ?: "Couldn't load tracks",
+                        style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.secondary),
+                    )
+                    TextButton(onClick = { retryKey++ }) { Text("Retry") }
+                }
+            }
+            is LoadState.Success -> itemsIndexed(state.value) { index, track ->
+                val album = albums.find { it.id == track.albumId }
+                TrackListCard(
+                    track = track,
+                    tracks = state.value,
+                    index = index,
+                    player = appContainer.playback.viewed,
+                    subtitle = track.album,
+                    image = { CardImage(imageUrl = album?.imageUrl ?: track.imageUrl, imageHash = album?.imageHash) },
+                )
+            }
         }
 
         if (fetchAlbums != null) {

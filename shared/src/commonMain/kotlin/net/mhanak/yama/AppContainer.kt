@@ -12,20 +12,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import net.mhanak.yama.coordinators.CatalogReader
+import net.mhanak.yama.coordinators.FavoritesCoordinator
+import net.mhanak.yama.coordinators.OfflineSyncOrchestrator
+import net.mhanak.yama.coordinators.PlayCountRecorder
+import net.mhanak.yama.coordinators.QueuePersistence
 import net.mhanak.yama.media.download.CatalogCache
-import net.mhanak.yama.media.download.CatalogSnapshot
 import net.mhanak.yama.media.download.DownloadManager
 import net.mhanak.yama.media.download.DownloadRepository
-import net.mhanak.yama.media.download.TrackListKind
-import net.mhanak.yama.media.model.Track
+import net.mhanak.yama.media.model.InMemoryTrackUserDataStore
+import net.mhanak.yama.media.model.TrackUserDataStore
 import net.mhanak.yama.db.createYamaDatabase
 import net.mhanak.yama.media.sources.local.LocalLibraryStore
 import net.mhanak.yama.media.sources.local.SqlLibraryStore
@@ -34,13 +35,10 @@ import net.mhanak.yama.media.playback.PlaybackReporter
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.playback.FavoriteOutbox
 import net.mhanak.yama.media.playback.ScrobbleOutbox
-import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
-import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.media.sources.local.LocalSource
-import net.mhanak.yama.media.sources.local.StoredTrack
 import net.mhanak.yama.session.JellyfinSessionRepository
 import net.mhanak.yama.util.AlbumTintMode
 import net.mhanak.yama.util.AppPreferences
@@ -131,6 +129,62 @@ class AppContainer {
     val favoriteOutbox = FavoriteOutbox(
         file = File(getAppDataDir().toString(), "favorite_outbox.json"),
         source = { activeMusicSource },
+    )
+
+    // The single in-memory owner of every track's mutable user-data (favorite/playCount). Surfaces read
+    // through it (via LocalTrackUserData + rememberReconciled) and every toggle/play writes it once;
+    // catalogCache/libraryStore/favoriteOutbox/backend are subscribers of those writes, not parallel
+    // writers. Partition-scoped: cleared + reseeded on a source/partition switch in OfflineSyncOrchestrator.
+    val userData: TrackUserDataStore = InMemoryTrackUserDataStore()
+
+    // --- Stateful coordinators -------------------------------------------------------------------
+    // Each coordinator owns one domain concern. AppContainer constructs them in dependency order
+    // (favorites before offlineSync, which depends on it) and exposes them as public vals so the UI
+    // can reach them directly (appContainer.favorites.setFavorite(...) etc.).
+
+    /** Single seam for favourite toggles + per-session server-favourites refresh. */
+    val favorites = FavoritesCoordinator(
+        source = { activeMusicSource },
+        userData = userData,
+        catalogCache = catalogCache,
+        libraryStore = libraryStore,
+        favoriteOutbox = favoriteOutbox,
+    )
+
+    /** Bumps the play-count in the live [userData] store and persists to the offline row. */
+    val playCount = PlayCountRecorder(
+        source = { activeMusicSource },
+        userData = userData,
+        libraryStore = libraryStore,
+    )
+
+    /** Read-through track-list cache with offline fallback to the downloads index. */
+    val catalog = CatalogReader(
+        source = { activeMusicSource },
+        catalogCache = catalogCache,
+        downloads = downloads,
+        userData = userData,
+    )
+
+    /** Persists and restores the local player's queue across launches. */
+    val queue = QueuePersistence(
+        player = playback.local,
+        source = { activeMusicSource },
+    )
+
+    /**
+     * Wires the offline catalog + downloads to the active source: partition switch, snapshot
+     * persistence, and the reachable-edge pass (staleness + outbox flush + favourites refresh).
+     */
+    val offlineSync = OfflineSyncOrchestrator(
+        source = { activeMusicSource },
+        playback = playback,
+        downloads = downloads,
+        catalogCache = catalogCache,
+        userData = userData,
+        scrobbleOutbox = scrobbleOutbox,
+        favoriteOutbox = favoriteOutbox,
+        favorites = favorites,
     )
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -228,57 +282,57 @@ class AppContainer {
             playback.local.status, { true }, { activeMusicSource },
             onCompletedPlay = { track, positionMs ->
                 scrobbleOutbox.recordPlay(track.id, positionMs)
-                recordLocalPlay(track)
+                playCount.recordLocalPlay(track)
             },
         ).start()
         observeCastTargetAvailability()
-        persistQueueOnChange()
-        wireOfflineCatalog()
         observeRecentTrackCaching()
-        scope.launch(Dispatchers.IO) { restoreSavedQueue() }
+        scope.launch(Dispatchers.IO) { queue.restore() }
     }
 
     /**
-     * Toggle the favourite state for a library item — the single seam the UI calls instead of the source
-     * directly. It (1) persists the new state offline for tracks — in the catalog cache's favourite-track
-     * set (the offline source of truth, [CatalogCache.favoriteTrackIds]) and on the downloaded row if any
-     * — so the heart survives a restart and shows offline; (2) writes through the active source (which
-     * updates its cached browse lists and, when online, the backend); and (3) queues the change in
-     * [favoriteOutbox], which only persists it while offline and replays it on reconnect.
+     * Called when the device wakes / the app returns to the foreground (Android only — see
+     * [net.mhanak.yama.components.PlatformDeviceWakeEffect]). A WebSocket left backgrounded can be
+     * silently half-open; rebuild the source's connection (and the active remote player bound to its
+     * client) so remote control resyncs at once instead of after OkHttp's ~30s timeout.
+     *
+     * Both steps are **Jellyfin-specific** today: the connection rebuild works around the Jellyfin
+     * SDK's lack of a force-reconnect, and the player rebuild is only needed because
+     * [net.mhanak.yama.media.playback.JellyfinRemotePlayer] captures its client at construction. A
+     * future source may recover its live connection differently (or transparently) and not need
+     * either — generalise this (e.g. an optional `onDeviceWake` on the source/provider) when a second
+     * source actually arrives, rather than guessing the shape now.
      */
-    fun setFavorite(kind: FavoritableKind, id: String, favorite: Boolean) {
-        val src = activeMusicSource
-        scope.launch(Dispatchers.IO) {
-            if (kind == FavoritableKind.Track) {
-                src.downloadSourceKey()?.let { key ->
-                    // The offline source of truth for track hearts (shown wherever a track appears
-                    // offline, even in containers whose track lists were never cached).
-                    catalogCache.setTrackFavorite(key, id, favorite)
-                    libraryStore.get(key, id)?.let { libraryStore.put(it.copy(favorite = favorite)) }
+    fun onDeviceWake() {
+        if (!jellyfinSource.isAuthenticated) return
+        // The half-open socket this works around only matters when the live link is actually down (or
+        // stale and awaiting OkHttp's write timeout). If it's still healthy — a short sleep, or the OS
+        // never froze us — recreating the client would needlessly tear down a working WebSocket (and
+        // rebuild the remote player bound to it), so leave it be.
+        if (jellyfinSource.isLiveLinkHealthy()) return
+        jellyfinSource.reconnect()
+        playback.rebuildViewedRemotePlayer()
+    }
+
+    /**
+     * Drop back to local playback when the viewed "Play On" target disappears from the discovered list
+     * — whether it was never reachable (a remembered target restored on launch that's now offline) or it
+     * went away mid-session. Gated on a *non-empty* target list so we don't reset before targets have
+     * actually been fetched: an empty list can simply mean discovery hasn't produced results yet, and
+     * resetting then would undo a perfectly valid restore. Restoring local isn't a user choice, so it
+     * doesn't overwrite their remembered target.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeCastTargetAvailability() {
+        scope.launch(Dispatchers.Main) {
+            snapshotFlow { activeMusicSource }
+                .flatMapLatest { (it as? RemotePlaybackProvider)?.remoteTargets ?: flowOf(emptyList()) }
+                .collect { targets ->
+                    val target = playback.viewedTarget ?: return@collect
+                    if (targets.isNotEmpty() && targets.none { it.id == target.id }) {
+                        playback.selectTarget(null, remember = false)
+                    }
                 }
-                // The live queue holds frozen Track snapshots; patch it so the player/queue hearts
-                // reflect the toggle (the queue is the one long-lived Track holder; see updateTrackFavorite).
-                playback.local.updateTrackFavorite(id, favorite)
-            }
-            runCatching { src.setFavorite(kind, id, favorite) }
-            favoriteOutbox.record(kind, id, favorite)
-        }
-    }
-
-    /**
-     * Record a completed play locally so offline sort-by-plays / recently-played stay fresh: bump the
-     * play count on the active source's offline row (the local-files index for [LocalSource], the
-     * downloads partition otherwise). The server count stays authoritative online; offline plays reach
-     * the server via [scrobbleOutbox].
-     */
-    private fun recordLocalPlay(track: Track) {
-        when (val src = activeMusicSource) {
-            is LocalSource -> src.recordPlay(track.id)
-            else -> {
-                val key = src.downloadSourceKey() ?: return
-                val row = libraryStore.get(key, track.id) ?: return
-                libraryStore.put(row.copy(playCount = row.playCount + 1, lastPlayedAt = System.currentTimeMillis()))
-            }
         }
     }
 
@@ -317,285 +371,6 @@ class AppContainer {
                         }
                     }
                 }
-        }
-    }
-
-    /**
-     * Wire the offline catalog + downloads to the active source:
-     * - route the local player's stream/artwork resolution through the downloads ladder,
-     * - point availability at the active partition and hydrate its browse flows from the cached
-     *   snapshot (so the catalog shows instantly and survives going offline),
-     * - persist the source's browse flows on every emit (the disk tier of its SWR).
-     *
-     * Keyed on `(source, downloadSourceKey)` so a source switch *or* a Jellyfin session change (which
-     * leaves the source instance the same but changes the partition) both re-target everything.
-     */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun wireOfflineCatalog() {
-        playback.local.resolver = downloads
-        scope.launch(Dispatchers.Main) {
-            snapshotFlow { activeMusicSource to activeMusicSource.downloadSourceKey() }
-                .distinctUntilChanged()
-                .collect { (src, key) ->
-                    downloads.setActiveSourceKey(key)
-                    if (key != null) catalogCache.loadSnapshot(key)?.let { src.hydrateCatalog(it) }
-                }
-        }
-        scope.launch {
-            snapshotFlow { activeMusicSource to activeMusicSource.downloadSourceKey() }
-                .distinctUntilChanged()
-                .flatMapLatest { (src, key) ->
-                    if (key == null) flowOf<Pair<String, CatalogSnapshot>?>(null)
-                    else combine(src.albums, src.artists, src.albumArtists, src.genres, src.playlists) { a, ar, aa, g, p ->
-                        key to CatalogSnapshot(a, ar, aa, g, p)
-                    }
-                }
-                .collect { it?.let { (key, snap) -> if (!snap.isEmpty) catalogCache.saveSnapshot(key, snap) } }
-        }
-        // Once the active source is reachable, run the staleness version-check pass for its partition
-        // (background, at most once per source per session) so downloaded copies that changed upstream
-        // re-fetch (pinned) or evict (cached) via the resolution ladder, flush any offline scrobbles and
-        // favourite changes that accumulated while it was unreachable, and rebuild the offline
-        // favourite-track set from the backend so hearts are correct offline even for unopened containers.
-        scope.launch(Dispatchers.Main) {
-            snapshotFlow { activeMusicSource }
-                .flatMapLatest { src -> src.isReachable.map { reachable -> src to reachable } }
-                .collect { (src, reachable) ->
-                    if (reachable) {
-                        downloads.refreshStaleness(src)
-                        scrobbleOutbox.flush()
-                        favoriteOutbox.flush()
-                        refreshFavorites(src)
-                    }
-                }
-        }
-    }
-
-    /**
-     * Drop back to local playback when the viewed "Play On" target disappears from the discovered list
-     * — whether it was never reachable (a remembered target restored on launch that's now offline) or it
-     * went away mid-session. Gated on a *non-empty* target list so we don't reset before targets have
-     * actually been fetched: an empty list can simply mean discovery hasn't produced results yet, and
-     * resetting then would undo a perfectly valid restore. Restoring local isn't a user choice, so it
-     * doesn't overwrite their remembered target.
-     */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun observeCastTargetAvailability() {
-        scope.launch(Dispatchers.Main) {
-            snapshotFlow { activeMusicSource }
-                .flatMapLatest { (it as? RemotePlaybackProvider)?.remoteTargets ?: flowOf(emptyList()) }
-                .collect { targets ->
-                    val target = playback.viewedTarget ?: return@collect
-                    if (targets.isNotEmpty() && targets.none { it.id == target.id }) {
-                        playback.selectTarget(null, remember = false)
-                    }
-                }
-        }
-    }
-
-    /**
-     * Called when the device wakes / the app returns to the foreground (Android only — see
-     * [net.mhanak.yama.components.PlatformDeviceWakeEffect]). A WebSocket left backgrounded can be
-     * silently half-open; rebuild the source's connection (and the active remote player bound to its
-     * client) so remote control resyncs at once instead of after OkHttp's ~30s timeout.
-     *
-     * Both steps are **Jellyfin-specific** today: the connection rebuild works around the Jellyfin
-     * SDK's lack of a force-reconnect, and the player rebuild is only needed because
-     * [net.mhanak.yama.media.playback.JellyfinRemotePlayer] captures its client at construction. A
-     * future source may recover its live connection differently (or transparently) and not need
-     * either — generalise this (e.g. an optional `onDeviceWake` on the source/provider) when a second
-     * source actually arrives, rather than guessing the shape now.
-     */
-    fun onDeviceWake() {
-        if (!jellyfinSource.isAuthenticated) return
-        // The half-open socket this works around only matters when the live link is actually down (or
-        // stale and awaiting OkHttp's write timeout). If it's still healthy — a short sleep, or the OS
-        // never froze us — recreating the client would needlessly tear down a working WebSocket (and
-        // rebuild the remote player bound to it), so leave it be.
-        if (jellyfinSource.isLiveLinkHealthy()) return
-        jellyfinSource.reconnect()
-        playback.rebuildViewedRemotePlayer()
-    }
-
-    /**
-     * Fetch a container's track list with the catalog cache as a fallback tier: online, fetch from the
-     * source and write the result through to the cache (so a later offline visit works); offline, serve
-     * the cached list. A downloaded album already has its track list cached at download time, so its
-     * detail page works offline even if never visited online. Detail views call this instead of the
-     * source directly.
-     */
-    suspend fun tracksFor(kind: TrackListKind, containerId: String, fetch: suspend () -> List<Track>): List<Track> {
-        val key = activeMusicSource.downloadSourceKey()
-        if (activeMusicSource.isReachable.value) {
-            val fresh = runCatching { fetch() }.getOrDefault(emptyList())
-            if (fresh.isNotEmpty()) {
-                if (key != null) catalogCache.saveTrackList(key, kind, containerId, fresh)
-                return fresh
-            }
-        }
-        if (key != null) {
-            catalogCache.loadTrackList(key, kind, containerId)?.let { return applyTrackFavorites(it) }
-            offlineTracksFor(key, kind, containerId).takeIf { it.isNotEmpty() }?.let { return applyTrackFavorites(it) }
-        }
-        return runCatching { fetch() }.getOrDefault(emptyList())
-    }
-
-    /**
-     * Overlay the persisted offline favourite-track set ([CatalogCache.favoriteTrackIds]) onto [tracks]
-     * so a track's heart is correct wherever it appears offline — even if it was favourited after its
-     * container's track list was cached, on another device, or while offline. A no-op while online (the
-     * source's fresh per-track [Track.favorite] is authoritative then) and on sources with no offline
-     * partition. The set is kept current by [refreshFavorites] (a full server pass on reconnect) and by
-     * every [setFavorite] toggle.
-     */
-    private fun applyTrackFavorites(tracks: List<Track>): List<Track> {
-        if (activeMusicSource.isReachable.value) return tracks
-        val key = activeMusicSource.downloadSourceKey() ?: return tracks
-        val favs = catalogCache.favoriteTrackIds(key)
-        return tracks.map { if ((it.id in favs) == it.favorite) it else it.copy(favorite = it.id in favs) }
-    }
-
-    // Partitions whose favourite set has been refreshed from the server this session, so
-    // [refreshFavorites] runs its full pass at most once per source per launch (it pages the backend).
-    private val favoritesRefreshed = mutableSetOf<String>()
-
-    /**
-     * Rebuild the offline favourite-track set ([CatalogCache.favoriteTrackIds]) for a reachable source
-     * from the backend's complete list of favourite tracks, so hearts are correct offline even for
-     * containers never opened online (the second half of making track favourites work offline; the
-     * first is persisting each toggle in [setFavorite]). Runs at most once per partition per session.
-     *
-     * Pending offline toggles ([FavoriteOutbox]) are read first and merged on top of the server set, so
-     * a change not yet replayed isn't dropped by server data that doesn't reflect it yet (the outbox's
-     * concurrent [FavoriteOutbox.flush] may ack/clear entries while this runs).
-     */
-    private fun refreshFavorites(src: MusicSource) {
-        val key = src.downloadSourceKey() ?: return
-        if (!src.isReachable.value || !src.supportsFavorites(FavoritableKind.Track)) return
-        synchronized(favoritesRefreshed) { if (!favoritesRefreshed.add(key)) return }
-        scope.launch(Dispatchers.IO) {
-            val pending = favoriteOutbox.pendingTrackFavorites(key)
-            val serverFavs = runCatching { fetchAllFavoriteTrackIds(src) }.getOrNull()
-            if (serverFavs == null) {
-                synchronized(favoritesRefreshed) { favoritesRefreshed.remove(key) } // let a later reconnect retry
-                return@launch
-            }
-            val merged = serverFavs.toMutableSet()
-            for ((id, fav) in pending) if (fav) merged.add(id) else merged.remove(id)
-            catalogCache.replaceFavoriteTrackIds(key, merged)
-        }
-    }
-
-    /** Page the source's favourite tracks into a flat id set (favourites can be large; one page at a time). */
-    private suspend fun fetchAllFavoriteTrackIds(src: MusicSource): Set<String> {
-        val ids = HashSet<String>()
-        val pageSize = 500
-        var offset = 0
-        while (true) {
-            val page = src.getAllTracks(pageSize, offset, TrackSortOrder.Alphabetical, favoritesOnly = true)
-            if (page.isEmpty()) break
-            page.mapTo(ids) { it.id }
-            if (page.size < pageSize) break
-            offset += pageSize
-        }
-        return ids
-    }
-
-    /**
-     * All-tracks query with an offline fallback to the downloads index. Reachable → source; offline →
-     * downloaded tracks, sorted and paginated in memory. [favoritesOnly] is ignored offline (the
-     * downloads index has favourite flags but we don't filter on them here).
-     */
-    suspend fun getAllTracks(
-        limit: Int, offset: Int, sortBy: TrackSortOrder,
-        favoritesOnly: Boolean = false, searchTerm: String? = null,
-    ): List<Track> {
-        if (activeMusicSource.isReachable.value) {
-            return runCatching {
-                activeMusicSource.getAllTracks(limit, offset, sortBy, favoritesOnly, searchTerm)
-            }.getOrDefault(emptyList())
-        }
-        val key = activeMusicSource.downloadSourceKey() ?: return emptyList()
-        return applyTrackFavorites(offlineTracksFor(key, TrackListKind.All, null, limit, offset, sortBy, searchTerm))
-    }
-
-    /** Artist track list with an offline fallback to downloaded rows for that artist. */
-    suspend fun getTracksForArtist(artistId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
-        if (activeMusicSource.isReachable.value) {
-            return runCatching {
-                activeMusicSource.getTracksForArtist(artistId, limit, offset, sortBy)
-            }.getOrDefault(emptyList())
-        }
-        val key = activeMusicSource.downloadSourceKey() ?: return emptyList()
-        return applyTrackFavorites(offlineTracksFor(key, TrackListKind.Artist, artistId, limit, offset, sortBy))
-    }
-
-    /** Genre track list with an offline fallback to downloaded rows for that genre. */
-    suspend fun getTracksForGenre(genreId: String, limit: Int, offset: Int, sortBy: TrackSortOrder): List<Track> {
-        if (activeMusicSource.isReachable.value) {
-            return runCatching {
-                activeMusicSource.getTracksForGenre(genreId, limit, offset, sortBy)
-            }.getOrDefault(emptyList())
-        }
-        val key = activeMusicSource.downloadSourceKey() ?: return emptyList()
-        return applyTrackFavorites(offlineTracksFor(key, TrackListKind.Genre, genreId, limit, offset, sortBy))
-    }
-
-    /**
-     * Filter, sort, paginate and convert downloaded [StoredTrack] rows to [Track] for offline browsing.
-     * Sort fields that aren't on [Track] (year, downloadedAt, lastPlayedAt) are read from [StoredTrack]
-     * before conversion. Play count is tracked on the row (bumped on each completed play), so
-     * [TrackSortOrder.PlayCount] sorts by it offline too.
-     */
-    private fun offlineTracksFor(
-        sourceKey: String,
-        kind: TrackListKind,
-        containerId: String?,
-        limit: Int = Int.MAX_VALUE,
-        offset: Int = 0,
-        sortBy: TrackSortOrder = TrackSortOrder.Alphabetical,
-        searchTerm: String? = null,
-    ): List<Track> {
-        val rows = downloads.rawOfflineTracks(sourceKey, kind, containerId)
-        val filtered = if (searchTerm.isNullOrBlank()) rows
-        else rows.filter { it.title.contains(searchTerm, ignoreCase = true) }
-        val sorted = when (sortBy) {
-            TrackSortOrder.Alphabetical -> filtered.sortedBy { it.title.lowercase() }
-            TrackSortOrder.ReleaseDate -> filtered.sortedByDescending { it.year }
-            TrackSortOrder.PlayCount -> filtered.sortedWith(compareByDescending<StoredTrack> { it.playCount }.thenBy { it.title.lowercase() })
-            TrackSortOrder.RecentlyAdded -> filtered.sortedByDescending { it.downloadedAt ?: 0L }
-            TrackSortOrder.RecentlyPlayed -> filtered.sortedByDescending { it.lastPlayedAt ?: 0L }
-            TrackSortOrder.Random -> filtered.shuffled()
-        }
-        return sorted.drop(offset).take(limit).map { it.toTrack() }
-    }
-
-    private fun persistQueueOnChange() {
-        scope.launch {
-            playback.local.status
-                .map { Pair(it.queue.map { t -> t.id }, it.current?.id) }
-                .distinctUntilChanged()
-                .drop(1) // Skip the initial empty-queue state so it doesn't overwrite the saved queue before restoreSavedQueue reads it
-                .collect { (ids, currentId) ->
-                    val sourceType = activeMusicSource.type.name
-                    AppPreferences.setSavedQueueTrackIds(sourceType, ids)
-                    AppPreferences.setSavedQueueCurrentId(sourceType, currentId)
-                }
-        }
-    }
-
-    private suspend fun restoreSavedQueue() {
-        val sourceType = activeMusicSource.type.name
-        val ids = AppPreferences.savedQueueTrackIds(sourceType)
-        val currentId = AppPreferences.savedQueueCurrentId(sourceType)
-        if (ids.isEmpty()) return
-        runCatching {
-            val tracks = activeMusicSource.getTracksByIds(ids)
-            if (tracks.isEmpty()) return
-            val index = if (currentId != null) {
-                tracks.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
-            } else 0
-            withContext(Dispatchers.Main) { playback.local.loadQueue(tracks, index) }
         }
     }
 
@@ -643,22 +418,3 @@ class AppContainer {
         val shared: AppContainer by lazy { AppContainer() }
     }
 }
-
-private fun StoredTrack.toTrack() = Track(
-    id = id,
-    name = title,
-    albumId = albumId,
-    album = album,
-    artists = artists.ifEmpty { listOfNotNull(albumArtist) },
-    durationTicks = durationMs?.let { it * 10_000L },
-    trackNumber = trackNumber,
-    discNumber = discNumber,
-    // artworkPath is a bare absolute path; convert to a file:// URI so Coil can load it.
-    imageUrl = artworkPath?.let { if ("://" in it) it else File(it).toURI().toString() },
-    artistIds = artistIds,
-    albumArtistId = albumArtistId,
-    genres = genres,
-    genreIds = genreIds,
-    favorite = favorite,
-    playCount = playCount,
-)

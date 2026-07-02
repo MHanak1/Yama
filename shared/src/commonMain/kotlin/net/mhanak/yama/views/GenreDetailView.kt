@@ -33,7 +33,7 @@ fun GenreDetailView(
         onNavigate = onNavigate,
         onViewAllTracks = { onNavigate(GenreTracksRoute(genreId)) },
         fetchTopTracks = { limit, sortBy ->
-            appContainer.tracksFor(TrackListKind.Genre, genreId) {
+            appContainer.catalog.tracksFor(TrackListKind.Genre, genreId) {
                 appContainer.activeMusicSource.getTracksForGenre(genreId, limit, 0, sortBy)
             }
         },

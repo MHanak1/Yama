@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.components.DownloadTrackRow
 import net.mhanak.yama.media.sources.local.Retention
 
@@ -48,7 +49,7 @@ fun DownloadedTracksView(
 ) {
     val appContainer = LocalAppContainer.current
     val manager = appContainer.downloadManager
-    val sourceKey = appContainer.activeMusicSource.downloadSourceKey()
+    val sourceKey = (appContainer.activeMusicSource as? OfflineCapable)?.downloadSourceKey()
     val availableTrackIds by appContainer.downloads.availableTrackIds.collectAsState()
 
     var showCached by rememberSaveable { mutableStateOf(false) }

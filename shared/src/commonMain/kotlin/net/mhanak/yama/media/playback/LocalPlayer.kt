@@ -224,20 +224,6 @@ class LocalPlayer(
     override fun setRepeat(mode: RepeatMode) = engine.setRepeat(mode)
     override fun setShuffle(enabled: Boolean) = engine.setShuffle(enabled)
 
-    /**
-     * Patch the favourite flag on any queued [Track] with [id]. The queue is the app's only long-lived
-     * holder of [Track] snapshots (everything else is re-fetched/re-derived per use), so a favourite
-     * toggle made elsewhere — album list, detail view — would otherwise leave `status.current.favorite`
-     * and the player/queue hearts stale until the queue is rebuilt. Called by `AppContainer.setFavorite`,
-     * the single toggle seam. Metadata only: engine playback is untouched; re-emitting the queue just
-     * refreshes the derived [PlayerStatus].
-     */
-    fun updateTrackFavorite(id: String, favorite: Boolean) {
-        val list = tracks.value
-        if (list.none { it.id == id && it.favorite != favorite }) return
-        tracks.value = list.map { if (it.id == id) it.copy(favorite = favorite) else it }
-    }
-
     // StateFlow is covariant, so the engine's non-null volume satisfies the nullable Player contract.
     override val volume: StateFlow<Float?> = engine.volume
     override val volumeControllable: StateFlow<Boolean> = MutableStateFlow(true)

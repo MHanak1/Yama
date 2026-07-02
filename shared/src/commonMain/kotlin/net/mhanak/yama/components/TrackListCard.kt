@@ -64,6 +64,8 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.sources.FavoritableKind
+import net.mhanak.yama.media.sources.FavoriteCapable
+import net.mhanak.yama.media.sources.OfflineCapable
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -109,7 +111,7 @@ fun TrackListCard(
     val availability = LocalAvailability.current
     val playable = availability.track(track.id)
     // Non-null when the active source persists downloads (Jellyfin); enables the Download menu action.
-    val downloadKey = source.downloadSourceKey()
+    val downloadKey = (source as? OfflineCapable)?.downloadSourceKey()
     // Pinned = explicitly downloaded; shows the OfflinePin badge. `pinnedTrackIds` excludes auto-cached.
     val isPinned = downloadKey != null && track.id in availability.pinnedTrackIds
     // Cached = auto-played recently but not explicitly downloaded; subtle indicator only.
@@ -132,20 +134,19 @@ fun TrackListCard(
     val playNext = { if (playable) player.playNext(listOf(track)); Unit }
     val addToQueue = { if (playable) player.addToQueue(listOf(track)); Unit }
 
-    val favoritesSupported = remember(source) { source.supportsFavorites(FavoritableKind.Track) }
-    // Favourite state now rides on the track model (no per-row fetch); re-seed when the model's value
-    // changes (e.g. after a refresh) while keeping optimistic taps responsive.
-    var isFavorite by remember(source, track.id) { mutableStateOf(track.favorite) }
-    LaunchedEffect(track.favorite) { isFavorite = track.favorite }
+    val favoritesSupported = remember(source) { (source as? FavoriteCapable)?.supportsFavorites(FavoritableKind.Track) == true }
+    // Favourite state reads through the shared TrackUserDataStore (overlaying the model seed), so a
+    // toggle anywhere recomposes this row — no per-row mirror, no resync LaunchedEffect, no manual queue
+    // patching. The tap writes the store synchronously in setFavorite, so it stays optimistic.
+    val isFavorite = rememberTrackFavorite(track.id, fallback = track.favorite)
 
     val density = LocalDensity.current
     val triggerPx = with(density) { SwipeTriggerDistance.toPx() }
     val scope = rememberCoroutineScope()
 
     val toggleFavorite = {
-        val next = !isFavorite
-        isFavorite = next
-        appContainer.setFavorite(FavoritableKind.Track, track.id, next)
+        // Write-through only: setFavorite flips the store, which recomposes isFavorite above.
+        appContainer.favorites.setFavorite(FavoritableKind.Track, track.id, !isFavorite)
         Unit
     }
     // Plain state updated synchronously while dragging, so onDragEnd reads the true offset (a launched

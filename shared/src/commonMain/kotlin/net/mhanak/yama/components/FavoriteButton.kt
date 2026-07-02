@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.FavoritableKind
+import net.mhanak.yama.media.sources.FavoriteCapable
 
 /**
  * The reusable favourite control — drop it next to any [FavoritableKind] item (a track in the
@@ -27,7 +28,7 @@ import net.mhanak.yama.media.sources.FavoritableKind
  * when [itemId] is null, so the control disappears on backends without a favourites concept.
  *
  * State is seeded from [initial] — which callers now read straight off the item model (`favorite`) —
- * and updated optimistically on tap; the write goes through [net.mhanak.yama.AppContainer.setFavorite],
+ * and updated optimistically on tap; the write goes through [net.mhanak.yama.coordinators.FavoritesCoordinator.setFavorite],
  * which persists it locally (so it shows offline) and flushes it to the backend. Only when no [initial]
  * is supplied does it fall back to fetching the state for [itemId].
  */
@@ -41,25 +42,33 @@ fun FavoriteButton(
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
-    val supported = remember(source, kind) { source.supportsFavorites(kind) }
+    val supported = remember(source, kind) { (source as? FavoriteCapable)?.supportsFavorites(kind) == true }
     if (!supported || itemId == null) return
 
-    var favorite by remember(source, itemId) { mutableStateOf(initial ?: false) }
-
-    // Seed from the caller-supplied value (now carried on the model), only falling back to a fetch when
-    // none was passed.
-    LaunchedEffect(source, kind, itemId, initial) {
-        favorite = initial ?: source.isFavorite(kind, itemId)
+    // Track hearts read through the shared TrackUserDataStore — the single live truth across the player,
+    // lists and the queue — so the tap is optimistic (setFavorite flips the store, which recomposes
+    // this) without any local mirror or per-button fetch. Other kinds (album/artist/genre/playlist) keep
+    // their own optimistic local state seeded from the model, falling back to a fetch when no seed.
+    if (kind == FavoritableKind.Track) {
+        val favorite = rememberTrackFavorite(itemId, fallback = initial ?: false)
+        FavoriteIcon(favorite, iconSize, modifier) { appContainer.favorites.setFavorite(kind, itemId, !favorite) }
+        return
     }
 
-    IconButton(
-        onClick = {
-            val next = !favorite
-            favorite = next // optimistic — the write persists locally and is flushed to the backend.
-            appContainer.setFavorite(kind, itemId, next)
-        },
-        modifier = modifier,
-    ) {
+    var favorite by remember(source, itemId) { mutableStateOf(initial ?: false) }
+    LaunchedEffect(source, kind, itemId, initial) {
+        favorite = initial ?: (source as? FavoriteCapable)?.isFavorite(kind, itemId) ?: false
+    }
+    FavoriteIcon(favorite, iconSize, modifier) {
+        val next = !favorite
+        favorite = next // optimistic — the write persists locally and is flushed to the backend.
+        appContainer.favorites.setFavorite(kind, itemId, next)
+    }
+}
+
+@Composable
+private fun FavoriteIcon(favorite: Boolean, iconSize: Dp, modifier: Modifier, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = modifier) {
         Icon(
             if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
             contentDescription = if (favorite) "Remove favourite" else "Add favourite",

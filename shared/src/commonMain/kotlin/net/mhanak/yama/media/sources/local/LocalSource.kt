@@ -3,9 +3,6 @@ package net.mhanak.yama.media.sources.local
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,8 +15,10 @@ import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.FavoritableKind
+import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
+import net.mhanak.yama.media.sources.StaleWhileRevalidateSource
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.StreamingQuality
@@ -42,36 +41,15 @@ import java.security.MessageDigest
 class LocalSource(
     private val store: LocalLibraryStore,
     private val artworkDir: File,
-) : MusicSource {
+) : StaleWhileRevalidateSource(), FavoriteCapable {
     override val type: SourceType = SourceType.Local
 
     // No auth concept — the source is always usable. Kept as a var to satisfy the interface; nothing
     // flips it false.
     override var isAuthenticated: Boolean by mutableStateOf(true)
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    private val _albums = MutableStateFlow<List<Album>>(emptyList())
-    override val albums: StateFlow<List<Album>> = _albums.asStateFlow()
-
-    private val _artists = MutableStateFlow<List<Artist>>(emptyList())
-    override val artists: StateFlow<List<Artist>> = _artists.asStateFlow()
-
-    private val _albumArtists = MutableStateFlow<List<Artist>>(emptyList())
-    override val albumArtists: StateFlow<List<Artist>> = _albumArtists.asStateFlow()
-
     // Local files have no playlist concept in a first pass (.m3u parsing is a later seam).
-    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
-    override val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
-
-    private val _genres = MutableStateFlow<List<Genre>>(emptyList())
-    override val genres: StateFlow<List<Genre>> = _genres.asStateFlow()
-
-    private val _isRefreshing = MutableStateFlow(false)
-    override val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
-
-    private val _refreshError = MutableStateFlow<Throwable?>(null)
-    override val refreshError: StateFlow<Throwable?> = _refreshError.asStateFlow()
+    // _playlists is inherited from StaleWhileRevalidateSource; it stays empty for this source.
 
     // The watched root folders. Exposed so the settings UI can list/add/remove them and stay in sync.
     private val _folders = MutableStateFlow<List<String>>(emptyList())
@@ -97,37 +75,29 @@ class LocalSource(
 
     override suspend fun refresh() = refresh(forceAll = false)
 
-    private suspend fun refresh(forceAll: Boolean) {
-        _refreshError.value = null
-        _isRefreshing.value = true
-        try {
-            if (forceAll) artworkDir.listFiles()?.forEach { it.delete() }
-            artworkDir.mkdirs()
-            val files = scanAudioFiles(_folders.value)
-            val existingByPath = if (forceAll) emptyMap() else store.all(SOURCE_KEY).associateBy { it.path }
-            // albumId -> resolved artwork file:// URI for this pass, so every track of an album shares
-            // one extracted cover and we extract it at most once.
-            val albumArt = HashMap<String, String>()
+    private suspend fun refresh(forceAll: Boolean) = runRefresh {
+        if (forceAll) artworkDir.listFiles()?.forEach { it.delete() }
+        artworkDir.mkdirs()
+        val files = scanAudioFiles(_folders.value)
+        val existingByPath = if (forceAll) emptyMap() else store.all(SOURCE_KEY).associateBy { it.path }
+        // albumId -> resolved artwork file:// URI for this pass, so every track of an album shares
+        // one extracted cover and we extract it at most once.
+        val albumArt = HashMap<String, String>()
 
-            val result = ArrayList<StoredTrack>(files.size)
-            for (f in files) {
-                val prev = existingByPath[f.path]
-                if (prev != null && prev.lastModified == f.lastModified) {
-                    // Unchanged — reuse the row as-is (incremental skip) and seed the art cache.
-                    result += prev
-                    if (prev.albumId != null && prev.artworkPath != null) albumArt.putIfAbsent(prev.albumId, prev.artworkPath)
-                    continue
-                }
-                result += ingest(f, albumArt)
+        val result = ArrayList<StoredTrack>(files.size)
+        for (f in files) {
+            val prev = existingByPath[f.path]
+            if (prev != null && prev.lastModified == f.lastModified) {
+                // Unchanged — reuse the row as-is (incremental skip) and seed the art cache.
+                result += prev
+                if (prev.albumId != null && prev.artworkPath != null) albumArt.putIfAbsent(prev.albumId, prev.artworkPath)
+                continue
             }
-
-            store.replaceAll(SOURCE_KEY, result)
-            deriveAndEmit(result)
-        } catch (e: Exception) {
-            _refreshError.value = e
-        } finally {
-            _isRefreshing.value = false
+            result += ingest(f, albumArt)
         }
+
+        store.replaceAll(SOURCE_KEY, result)
+        deriveAndEmit(result)
     }
 
     /** Read one file's tags (falling back to the filename) and build its [StoredTrack] row. */

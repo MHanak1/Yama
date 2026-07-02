@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.sources.OfflineCapable
 
 /**
  * Settings for the offline/downloads layer (see DOWNLOADS_PLAN.md): the default download quality, the
@@ -38,7 +39,7 @@ fun DownloadsSettings(
     modifier: Modifier = Modifier,
 ) {
     val appContainer = LocalAppContainer.current
-    val downloadKey = appContainer.activeMusicSource.downloadSourceKey()
+    val downloadKey = (appContainer.activeMusicSource as? OfflineCapable)?.downloadSourceKey()
     var confirmClear by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
 
