@@ -33,9 +33,10 @@ import net.mhanak.yama.ui.theme.ThemeMode
 @Composable
 @Preview
 fun App() {
-    // Compose's focus save/restore is off by default in CMP 1.11. Turn it on (idempotent, set once)
-    // so `focusRestorer` actually remembers the focused item across navigation — without it the
-    // framework never saves the focused child, so returning to a screen can't restore D-pad focus.
+    // Compose's implicit focus save/restore is off by default in CMP 1.11. Content grids/lists now
+    // use explicit per-item FocusRequester registration (ContentFocusRegistry, TvFocus.kt) rather
+    // than focusRestorer, so this flag no longer drives content focus. Left in case other focusable
+    // widgets benefit from framework-level restoration.
     remember { ComposeUiFlags.isFocusRestorationEnabled = true }
     val appContainer = remember { AppContainer.shared }
     val hazeState = rememberHazeState()
@@ -62,6 +63,9 @@ fun App() {
         LocalDetailTint provides detailTint,
         LocalAvailability provides rememberAvailability(appContainer),
         LocalTrackUserData provides appContainer.userData,
+        // isTelevisionDevice() is the hardware reality; forceTvMode lets non-TV devices (desktop,
+        // phone with controller) opt into the TV layout and D-pad focus system.
+        LocalIsTvMode provides (isTelevisionDevice() || appContainer.forceTvMode),
     ) {
         AppTheme(darkTheme = darkTheme) {
             // Recolour the whole app to the open detail screen's item (overriding the player) or, at the

@@ -71,6 +71,7 @@ import net.mhanak.yama.ui.components.state.LocalAvailability
 import net.mhanak.yama.ui.components.state.rememberTrackFavorite
 import net.mhanak.yama.ui.theme.GlassElevatedCard
 import net.mhanak.yama.ui.components.input.QualityPickerDialog
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 
 /** Drag distance past which releasing fires the swipe action. */
 private val SwipeTriggerDistance = 64.dp
@@ -101,6 +102,9 @@ fun TrackListCard(
     // pager) so the row's drag doesn't preempt the container's.
     disableGestures: Boolean = false,
     image: (@Composable BoxScope.() -> Unit)? = null,
+    // TV D-pad: stable id for per-item FocusRequester registration. Defaults to the track id so
+    // callers inside a ListView don't need to pass it explicitly.
+    focusKey: String? = track.id,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     // Where to anchor the menu: the cursor for right-clicks, top-start for long-presses.
@@ -180,6 +184,9 @@ fun TrackListCard(
                 menuExpanded = true
             },
             modifier = Modifier
+                // contentFocusItem must precede combinedClickable (inside GlassElevatedCard) so the
+                // focusRequester resolves to the same focus-target node created by combinedClickable.
+                .contentFocusItem(focusKey)
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
                 .alpha(if (playable) 1f else 0.5f)
                 .then(

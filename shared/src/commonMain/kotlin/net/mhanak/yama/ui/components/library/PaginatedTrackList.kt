@@ -159,7 +159,7 @@ fun PaginatedTrackList(
             ) { Text(it.label) }
         }
 
-        itemsIndexed(tracks) { index, track ->
+        itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
             TrackListCard(
                 track = track,
                 tracks = if (addSingleToQueue) listOf(track) else tracks,

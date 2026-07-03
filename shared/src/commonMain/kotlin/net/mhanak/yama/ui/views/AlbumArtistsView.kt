@@ -49,7 +49,7 @@ fun AlbumArtistsView(
             contentPadding = contentPadding,
             prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
         ) {
-            items(filtered) { artist ->
+            items(filtered, key = { it.id }) { artist ->
                 AsyncImageGridCard(
                     title = artist.name,
                     imageUrl = artist.imageUrl,

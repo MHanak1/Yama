@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.LocalIsTvMode
+import net.mhanak.yama.ui.components.interaction.LocalActiveContentFocus
 import net.mhanak.yama.ui.components.state.ErrorCard
 import net.mhanak.yama.ui.components.settings.LibrarySelectionButtons
 import net.mhanak.yama.ui.components.state.playableTracks
@@ -122,6 +124,10 @@ fun LibraryView(
     val internalTab = LibraryTab.entries[pagerState.currentPage]
     val activeTab = externalTab ?: internalTab
     val isRefreshing by appContainer.activeMusicSource.isRefreshing.collectAsState()
+    // TV: when D-pad-down is pressed from the search bar, restore focus to the active content grid
+    // item directly rather than relying on moveFocus finding its way into the grid group.
+    val isTV = LocalIsTvMode.current
+    val activeContentFocus = LocalActiveContentFocus.current
 
     // Search filters the currently visible tab; threaded down into the tab content.
     var query by remember { mutableStateOf("") }
@@ -227,6 +233,12 @@ fun LibraryView(
                                     onQueryChange = { query = it },
                                     placeholder = "Search ${activeTab.label.lowercase()}",
                                     modifier = Modifier.fillMaxWidth(),
+                                    onFocusDown = if (isTV) {
+                                        {
+                                            val r = activeContentFocus?.registry
+                                            if (r != null) { r.requestRestore(); true } else false
+                                        }
+                                    } else null,
                                 )
                             },
                             modifier = Modifier.height(64.dp),

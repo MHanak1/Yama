@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.SourceType
+import net.mhanak.yama.media.sources.subsonic.SubsonicException
 import net.mhanak.yama.ui.components.state.Async
 import net.mhanak.yama.ui.components.state.ErrorCard
 import net.mhanak.yama.ui.components.settings.LocalLibrarySettings
@@ -159,7 +160,7 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
                                 text = { Text(sourceType.displayName) },
                                 leadingIcon = { SourceIcon(sourceType) },
                                 onClick = { selectedIndex = index; sourceMenuExpanded = false },
-                                enabled = sourceType == SourceType.Jellyfin || sourceType == SourceType.Local,
+                                enabled = sourceType == SourceType.Jellyfin || sourceType == SourceType.Subsonic || sourceType == SourceType.Local,
                             )
                         }
                     }
@@ -171,7 +172,7 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
             AnimatedContent(selectedIndex) { targetState ->
                 when (targetState) {
                     0 -> JellyfinMain()
-                    1 -> {}
+                    1 -> SubsonicMain()
                     2 -> LocalFilesMain(onDismiss)
                 }
             }
@@ -315,7 +316,8 @@ private sealed class QcUiState {
 
 @Composable
 fun JellyfinLogin(address: String, api: ApiClient) {
-    val jellyfinSource = LocalAppContainer.current.jellyfinSource
+    val appContainer = LocalAppContainer.current
+    val jellyfinSource = appContainer.jellyfinSource
     val scope = rememberCoroutineScope()
 
     val usernameState = rememberTextFieldState()
@@ -334,6 +336,7 @@ fun JellyfinLogin(address: String, api: ApiClient) {
                 delay(5_000)
                 if (jellyfinSource.pollQuickConnect()) {
                     jellyfinSource.completeQuickConnect()
+                    appContainer.selectSource(jellyfinSource)
                     break
                 }
             }
@@ -426,6 +429,7 @@ fun JellyfinLogin(address: String, api: ApiClient) {
                                 username = usernameState.text.toString(),
                                 password = passwordState.text.toString(),
                             )
+                            appContainer.selectSource(jellyfinSource)
                             LoginUiState.Idle
                         } catch (e: Exception) {
                             LoginUiState.Error(e.message ?: "Login failed")
@@ -439,6 +443,136 @@ fun JellyfinLogin(address: String, api: ApiClient) {
                 Spacer(modifier = Modifier.height(8.dp))
                 ErrorCard(message = (loginState as LoginUiState.Error).message)
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Subsonic login flow
+// ---------------------------------------------------------------------------
+
+/**
+ * Subsonic tab in the login screen. Two-step: server URL probe → credentials.
+ * Mirrors the structure of [JellyfinMain] (server picker → login form) but without
+ * LAN discovery (Subsonic has no discovery protocol).
+ */
+@Composable
+fun SubsonicMain() {
+    val appContainer = LocalAppContainer.current
+    val setBackAction = LocalSetBackAction.current
+    var selectedServer by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) { onDispose { setBackAction(null) } }
+
+    LaunchedEffect(selectedServer) {
+        setBackAction(if (selectedServer.isNotEmpty()) ({ selectedServer = "" }) else null)
+    }
+
+    if (selectedServer.isEmpty()) {
+        SubsonicServerPicker(onServerSelected = { selectedServer = it })
+    } else {
+        Async(
+            key = selectedServer,
+            producer = { appContainer.subsonicSource.connect(selectedServer) },
+            error = { t ->
+                ErrorCard(
+                    title = "Could not reach server",
+                    message = if (t is SubsonicException) t.message ?: "Subsonic error"
+                              else t.message ?: "Unknown error",
+                )
+            },
+        ) { normalizedUrl ->
+            SubsonicLogin(serverUrl = normalizedUrl)
+        }
+    }
+}
+
+@Composable
+private fun SubsonicServerPicker(onServerSelected: (String) -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "Connect to a Subsonic-compatible server (Navidrome, Airsonic, Gonic, …)",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        val hostState = rememberTextFieldState()
+        OutlinedTextField(
+            state = hostState,
+            label = { Text("Server Address") },
+            placeholder = { Text("https://music.example.com") },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            enabled = hostState.text.isNotBlank(),
+            onClick = { onServerSelected(hostState.text.toString().trim()) },
+        ) {
+            Text("Connect")
+        }
+    }
+}
+
+@Composable
+private fun SubsonicLogin(serverUrl: String) {
+    val appContainer = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
+
+    val usernameState = rememberTextFieldState()
+    val passwordState = rememberTextFieldState()
+    val autofillManager = LocalAutofillManager.current
+
+    var loginState by remember { mutableStateOf<LoginUiState>(LoginUiState.Idle) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(serverUrl, style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(16.dp))
+        OutlinedTextField(
+            state = usernameState,
+            modifier = Modifier.semantics { contentType = ContentType.Username }.tabFocusTraversal(),
+            label = { Text("Username") },
+        )
+        OutlinedSecureTextField(
+            state = passwordState,
+            modifier = Modifier.semantics { contentType = ContentType.Password }.tabFocusTraversal(),
+            label = { Text("Password") },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            enabled = loginState !is LoginUiState.Loading,
+            onClick = {
+                scope.launch {
+                    loginState = LoginUiState.Loading
+                    loginState = try {
+                        autofillManager?.commit()
+                        appContainer.subsonicSource.login(
+                            serverUrl = serverUrl,
+                            username = usernameState.text.toString(),
+                            password = passwordState.text.toString(),
+                        )
+                        // Switch the active source to Subsonic so App.kt observes
+                        // isAuthenticated = true and transitions to MainScreen.
+                        // Also clears showLoginScreen for the "Add Source" modal flow.
+                        appContainer.selectSource(appContainer.subsonicSource)
+                        appContainer.showLoginScreen = false
+                        LoginUiState.Idle
+                    } catch (e: Exception) {
+                        LoginUiState.Error(e.message ?: "Login failed")
+                    }
+                }
+            },
+        ) {
+            if (loginState is LoginUiState.Loading) CircularProgressIndicator() else Text("Log In")
+        }
+        if (loginState is LoginUiState.Error) {
+            Spacer(modifier = Modifier.height(8.dp))
+            ErrorCard(message = (loginState as LoginUiState.Error).message)
         }
     }
 }

@@ -48,7 +48,7 @@ fun PlaylistsView(
             contentPadding = contentPadding,
             prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
         ) {
-            items(filtered) { playlist ->
+            items(filtered, key = { it.id }) { playlist ->
                 AsyncImageGridCard(
                     title = playlist.name,
                     subtitle = playlist.itemCount?.let { "$it tracks" },
@@ -56,6 +56,7 @@ fun PlaylistsView(
                     imageHash = playlist.imageHash,
                     imageFallback = painterResource(Res.drawable.library_music),
                     onClick = { onPlaylistClick(playlist.id) },
+                    focusKey = playlist.id,
                 )
             }
         }

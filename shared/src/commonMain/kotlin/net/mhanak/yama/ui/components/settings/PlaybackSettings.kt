@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.util.StreamingQuality
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,6 +93,15 @@ fun PlaybackSettings(modifier: Modifier = Modifier) {
                     }
                 }
             }
+        }
+        if (!isTelevisionDevice()) {
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+            SettingToggle(
+                title = "Controller / TV layout",
+                subtitle = "Use D-pad and controller navigation instead of pointer",
+                checked = appContainer.forceTvMode,
+                onCheckedChange = { appContainer.forceTvMode = it },
+            )
         }
         Spacer(Modifier.height(8.dp))
     }

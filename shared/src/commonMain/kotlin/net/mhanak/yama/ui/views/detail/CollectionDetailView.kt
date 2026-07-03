@@ -195,7 +195,7 @@ fun CollectionDetailView(
                     TextButton(onClick = { retryKey++ }) { Text("Retry") }
                 }
             }
-            is LoadState.Success -> itemsIndexed(state.value) { index, track ->
+            is LoadState.Success -> itemsIndexed(state.value, key = { _, track -> track.id }) { index, track ->
                 val album = albums.find { it.id == track.albumId }
                 TrackListCard(
                     track = track,
@@ -211,13 +211,14 @@ fun CollectionDetailView(
         if (fetchAlbums != null) {
             item { CollectionSectionHeader(title = "Albums", onViewAll = onViewAllAlbums) }
 
-            items(albums) { album ->
+            items(albums, key = { it.id }) { album ->
                 AsyncImageListCard(
                     title = album.name,
                     subtitle = album.year?.toString(),
                     imageUrl = album.imageUrl,
                     imageHash = album.imageHash,
                     onClick = { onNavigate(AlbumDetailRoute(album.id)) },
+                    focusKey = album.id,
                 )
             }
         }

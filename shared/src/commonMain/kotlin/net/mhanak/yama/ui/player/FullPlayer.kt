@@ -70,7 +70,7 @@ import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
 import yama.shared.generated.resources.album
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.isTelevisionDevice
+import net.mhanak.yama.LocalIsTvMode
 import net.mhanak.yama.ui.components.image.BlurredBackgroundImage
 import net.mhanak.yama.ui.theme.glassSource
 import net.mhanak.yama.ui.theme.DynamicColorTheme
@@ -128,7 +128,7 @@ fun FullPlayer(
     val travelPx = (screenHeightPx - peekHeightPx).coerceAtLeast(1f)
     // Minimum upward swipe (in px) that opens the queue when the player is fully expanded.
     val swipeUpThresholdPx = with(density) { 80.dp.toPx() }
-    val playerScale = if (isTelevisionDevice()) 1f else with(density) {
+    val playerScale = if (LocalIsTvMode.current) 1f else with(density) {
         playerScaleFor(minOf(containerSize.width.toDp(), containerSize.height.toDp()))
     }
     val expandSpec = tween<Float>(400, easing = FastOutSlowInEasing)

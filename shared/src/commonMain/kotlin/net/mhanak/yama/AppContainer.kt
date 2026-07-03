@@ -40,7 +40,9 @@ import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.media.sources.local.LocalSource
+import net.mhanak.yama.media.sources.subsonic.SubsonicSource
 import net.mhanak.yama.session.JellyfinSessionRepository
+import net.mhanak.yama.session.SubsonicSessionRepository
 import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.SecureStorage
@@ -56,6 +58,9 @@ class AppContainer {
     val jellyfinSessionRepository = JellyfinSessionRepository(SecureStorage("jellyfin"))
     val jellyfinSource = JellyfinSource(jellyfinSessionRepository)
 
+    val subsonicSessionRepository = SubsonicSessionRepository(SecureStorage("subsonic"))
+    val subsonicSource = SubsonicSource(subsonicSessionRepository)
+
     // The shared offline index: SQLite (SQLDelight) holding both the local scan (`sourceKey = "local"`)
     // and downloads (`"jellyfin:<token>"`), partitioned by sourceKey. Replaces the per-feature JSON
     // FileLibraryStores so writes are incremental and search is indexed. No JSON→DB migration: the local
@@ -69,7 +74,7 @@ class AppContainer {
 
     /** All registered sources in display order. The switcher iterates this instead of reading
      *  concrete fields so adding a new source later requires only one change here. */
-    val sources: List<MusicSource> = listOf(jellyfinSource, localSource)
+    val sources: List<MusicSource> = listOf(jellyfinSource, subsonicSource, localSource)
 
     // Reopen on the source the user last had active (Jellyfin by default / on first run). If the
     // restored source isn't usable (e.g. last on Jellyfin but the session is gone), App.kt still falls
@@ -80,6 +85,7 @@ class AppContainer {
 
     private fun sourceForType(typeName: String?): MusicSource = when (typeName) {
         SourceType.Local.name -> localSource
+        SourceType.Subsonic.name -> subsonicSource
         else -> jellyfinSource
     }
 
@@ -229,6 +235,14 @@ class AppContainer {
         set(value) {
             _keepScreenOn.value = value
             AppPreferences.keepScreenOnWhilePlaying = value
+        }
+
+    private val _forceTvMode = mutableStateOf(AppPreferences.forceTvMode)
+    var forceTvMode: Boolean
+        get() = _forceTvMode.value
+        set(value) {
+            _forceTvMode.value = value
+            AppPreferences.forceTvMode = value
         }
 
     private val _streamingQuality = mutableStateOf(AppPreferences.streamingQuality)

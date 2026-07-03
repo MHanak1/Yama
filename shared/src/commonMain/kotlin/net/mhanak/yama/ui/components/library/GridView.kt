@@ -25,9 +25,6 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,8 +35,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -53,7 +53,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import net.mhanak.yama.ui.components.interaction.RegisterPrimaryContentFocus
+import net.mhanak.yama.ui.components.interaction.ContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.LocalContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.RegisterActiveContentFocus
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.ui.components.image.ImagePrefetch
 import net.mhanak.yama.ui.components.settings.SelectableKind
 import net.mhanak.yama.ui.components.settings.LocalLibrarySelection
@@ -68,25 +71,28 @@ fun GridView(
     prefetchUrls: List<String?>? = null,
     content: LazyGridScope.() -> Unit
 ) {
-    // On TV, register this grid as the screen's primary focus target so the shell routes screen-entry
-    // focus straight into the focusRestorer here (restoring the previously focused item) instead of
-    // onto the top search bar. Attaching the requester off TV is harmless — it's only ever requested
-    // there. See TvFocus.kt.
-    val contentFocus = remember { FocusRequester() }
-    RegisterPrimaryContentFocus(contentFocus)
-    // focusRestorer/focusRequester must precede focusGroup: a focus target reads focus properties
-    // from itself and its ancestors (the modifiers before it), so the restorer only applies to the
-    // group when it sits ahead of focusGroup in the chain.
-    BoxWithConstraints(modifier.focusRequester(contentFocus).focusRestorer().focusGroup()) {
-        LazyVerticalGrid(
-            state = state,
-            // silly way of making the grid size fit both mobile and desktop
-            columns = GridCells.Adaptive(minSize = Dp(100.toFloat() + (maxWidth.value / 12F))),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = contentPadding.plus(PaddingValues(8.dp)),
-            content = content,
-        )
+    // On TV, each item card registers its own FocusRequester via contentFocusItem, keyed by item id.
+    // The registry records which item was last focused (savedKey, rememberSaveable so it survives
+    // the back-stack round-trip) and restores focus to that leaf directly on screen entry — avoiding
+    // the group-requestFocus → skip-onEnter → wrong-target problem of the implicit focusRestorer
+    // approach. See TvFocus.kt.
+    val savedKey = rememberSaveable { mutableStateOf<String?>(null) }
+    val registry = remember { ContentFocusRegistry(savedKey) }
+    RegisterActiveContentFocus(registry)
+    // Keep focusGroup so the rail and search bar remain D-pad-separated from content — but drop
+    // focusRestorer and focusRequester since restoration is now handled explicitly via requestRestore().
+    BoxWithConstraints(modifier.focusGroup()) {
+        CompositionLocalProvider(LocalContentFocusRegistry provides registry) {
+            LazyVerticalGrid(
+                state = state,
+                // silly way of making the grid size fit both mobile and desktop
+                columns = GridCells.Adaptive(minSize = Dp(100.toFloat() + (maxWidth.value / 12F))),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = contentPadding.plus(PaddingValues(8.dp)),
+                content = content,
+            )
+        }
     }
     if (prefetchUrls != null) {
         // The image box is the cell width minus the card's 12.dp padding on each side
@@ -120,14 +126,20 @@ fun GridCard(
     // Dimmed when the item is neither downloaded nor reachable. Navigation stays enabled (you can open
     // a grayed album to download from it) — only the visual is dimmed.
     dimmed: Boolean = false,
+    // TV D-pad: the item's id, used to register a per-item FocusRequester for explicit restoration.
+    // Null means no focus tracking (e.g. non-TV or items without a stable id).
+    focusKey: String? = null,
 ) {
     val selected = selectable?.selected == true
     // The grid recycles card slots, so keep the shift-click gesture (keyed on Unit, never relaunched)
     // pointing at the *current* item's toggle rather than the one captured when the slot was first laid
     // out — otherwise shift-clicking a recycled card toggles whichever album used to occupy it.
     val onToggle = rememberUpdatedState(selectable?.onToggle)
+    // contentFocusItem comes first: focusRequester must precede combinedClickable so the focus target
+    // node (created by combinedClickable) is downstream and the requester resolves to it.
+    val focusMod = Modifier.contentFocusItem(focusKey)
     val clickModifier = if (selectable != null) {
-        Modifier
+        focusMod
             .combinedClickable(
                 onClick = { if (selectable.active) selectable.onToggle() else onClick() },
                 onLongClick = selectable.onToggle,
@@ -147,7 +159,7 @@ fun GridCard(
                 }
             }
     } else {
-        Modifier.combinedClickable(onClick = onClick)
+        focusMod.combinedClickable(onClick = onClick)
     }
     ElevatedCard(
         modifier = clickModifier.alpha(if (dimmed) 0.5f else 1f),
@@ -220,6 +232,9 @@ fun AsyncImageGridCard(
     // When both are provided and a LocalLibrarySelection is present, the card becomes multi-selectable.
     selectableKind: SelectableKind? = null,
     selectionId: String? = null,
+    // TV D-pad: the item's stable id for focus registration. Defaults to selectionId so callers that
+    // already pass selectionId get focus tracking for free — only pass explicitly when selectionId is absent.
+    focusKey: String? = selectionId,
 ) {
     val selection = LocalLibrarySelection.current
     val gridSelection = if (selection != null && selectableKind != null && selectionId != null) {
@@ -244,5 +259,6 @@ fun AsyncImageGridCard(
         subtitle = subtitle,
         selectable = gridSelection,
         dimmed = dimmed,
+        focusKey = focusKey,
     )
 }

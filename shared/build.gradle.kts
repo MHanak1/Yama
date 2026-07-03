@@ -50,6 +50,8 @@ kotlin {
             implementation("com.vanniktech:blurhash:0.3.0")
             implementation(libs.sqldelight.androidDriver)
             implementation(libs.androidx.work.runtime)
+            // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
+            implementation(libs.ktor.client.okhttp)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -77,6 +79,11 @@ kotlin {
 
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.coroutines)
+
+            // Ktor multiplatform artifacts for SubsonicSource
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
         }
         jvmMain.dependencies {
             implementation("ch.qos.logback:logback-classic:1.5.6")
@@ -94,6 +101,8 @@ kotlin {
             implementation("com.github.hypfvieh:dbus-java-core:5.1.0")
             implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.0")
             implementation(libs.sqldelight.sqliteDriver)
+            // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
+            implementation(libs.ktor.client.okhttp)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -140,7 +140,7 @@ fun AlbumDetailView(
                 }
             }
 
-            is LoadState.Success -> itemsIndexed(state.value) { index, track ->
+            is LoadState.Success -> itemsIndexed(state.value, key = { _, track -> track.id }) { index, track ->
                 TrackListCard(
                     track = track,
                     tracks = state.value,

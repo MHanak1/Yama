@@ -70,10 +70,10 @@ import net.mhanak.yama.ui.components.navigation.AppBottomBar
 import net.mhanak.yama.ui.components.navigation.AppNavRail
 import net.mhanak.yama.ui.components.navigation.BottomBarDestination
 import net.mhanak.yama.ui.platform.KeepScreenOn
-import net.mhanak.yama.ui.components.interaction.LocalPrimaryContentFocus
+import net.mhanak.yama.ui.components.interaction.ActiveContentFocus
+import net.mhanak.yama.ui.components.interaction.LocalActiveContentFocus
 import net.mhanak.yama.ui.platform.PlatformBackHandler
 import net.mhanak.yama.ui.platform.PlatformDeviceWakeEffect
-import net.mhanak.yama.ui.components.interaction.PrimaryContentFocus
 import net.mhanak.yama.ui.platform.PlatformUserInteractionEffect
 import net.mhanak.yama.ui.components.interaction.PlayerIdleTimeoutMs
 import net.mhanak.yama.ui.components.settings.SourceSwitcher
@@ -84,7 +84,7 @@ import net.mhanak.yama.ui.components.interaction.resetIdleOn
 import net.mhanak.yama.ui.player.FullPlayer
 import net.mhanak.yama.ui.player.NowPlayingBar
 import net.mhanak.yama.ui.player.VolumeIndicator
-import net.mhanak.yama.isTelevisionDevice
+import net.mhanak.yama.LocalIsTvMode
 import androidx.compose.foundation.layout.statusBarsPadding
 import net.mhanak.yama.ui.components.library.PaginatedTrackList
 import net.mhanak.yama.ui.theme.glassSource
@@ -164,12 +164,13 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
     val navController = rememberNavController()
     var selectedTab by remember { mutableStateOf(LibraryTab.Albums) }
-    val isTV = isTelevisionDevice()
+    val isTV = LocalIsTvMode.current
     val contentFocusRequester = remember { FocusRequester() }
-    // The active screen's primary grid registers here so the focus effect below can request focus on
-    // it directly (landing on content + restoring the previously focused item) rather than on the
-    // NavHost group, which would land on the first focusable — the top search bar. See TvFocus.kt.
-    val primaryContentFocus = remember { PrimaryContentFocus() }
+    // The active screen's grid registers its ContentFocusRegistry here. The focus effect below
+    // calls registry.requestRestore() to land on the saved leaf item directly (no group redirect,
+    // no focusRestorer, no global flag). Falls back to contentFocusRequester for non-content
+    // screens (Home, Settings) that have no registry. See TvFocus.kt.
+    val activeContentFocus = remember { ActiveContentFocus() }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val destination = navBackStackEntry?.destination
 
@@ -258,12 +259,15 @@ fun MainScreen() {
             trySend(lifecycle.currentState)
             awaitClose { lifecycle.removeObserver(observer) }
         }.first { it >= Lifecycle.State.RESUMED }
-        // Request focus on the active screen's content grid directly (not the NavHost group): a
-        // programmatic requestFocus() on a group skips its onEnter redirect and lands on the first
-        // focusable — the search bar. Requesting the grid lands in the content, and the grid's
-        // focusRestorer (reached via the child→parent custom-enter path) returns to the previously
-        // focused item. Falls back to the NavHost group on screens with no grid (Home/Settings).
-        runCatching { (primaryContentFocus.requester ?: contentFocusRequester).requestFocus() }
+        // Request focus on the exact previously-focused item via ContentFocusRegistry.requestRestore()
+        // (direct leaf requestFocus — no group redirect, no focusRestorer, no global flag). Falls
+        // back to the NavHost group for screens with no content grid (Home/Settings).
+        val registry = activeContentFocus.registry
+        if (registry != null) {
+            registry.requestRestore()
+        } else {
+            runCatching { contentFocusRequester.requestFocus() }
+        }
     }
 
     val onTabClick: (LibraryTab) -> Unit = { tab ->
@@ -286,12 +290,26 @@ fun MainScreen() {
     Box(Modifier.fillMaxSize().resetIdleOn(idleMonitor)) {
     // Provided to the content (NavHost) subtree only — overlays drawn below (full player, sheets)
     // sit outside it, so their lists never register as the screen's entry-focus target.
-    CompositionLocalProvider(LocalPrimaryContentFocus provides primaryContentFocus) {
+    CompositionLocalProvider(LocalActiveContentFocus provides activeContentFocus) {
     AdaptiveNavigationLayout(
         playerActive = playerStatus.current != null,
         // On TV, pressing up from the now-playing bar returns focus to the content grid (or the
         // content area as a fallback), not into limbo above the bar.
-        miniPlayer = { wide -> NowPlayingBar(playerStatus, player, playerExpansion = playerExpansion, wide = wide, peekHeight = playerPeek, focusUp = if (isTV) (primaryContentFocus.requester ?: contentFocusRequester) else null) },
+        miniPlayer = { wide ->
+            NowPlayingBar(
+                playerStatus, player,
+                playerExpansion = playerExpansion,
+                wide = wide,
+                peekHeight = playerPeek,
+                // On TV, D-pad up from the bar returns focus to the content grid (or the NavHost
+                // group fallback for non-content screens), not into limbo above the bar.
+                onExitUp = if (isTV) ({
+                    val r = activeContentFocus.registry
+                    if (r != null) r.requestRestore()
+                    else runCatching { contentFocusRequester.requestFocus() }
+                }) else null,
+            )
+        },
         rail = { forceExpanded ->
             AppNavRail(
                 forceExpanded = forceExpanded,

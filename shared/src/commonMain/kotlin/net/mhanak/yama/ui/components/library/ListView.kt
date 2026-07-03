@@ -22,15 +22,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +40,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import net.mhanak.yama.ui.components.interaction.RegisterPrimaryContentFocus
+import net.mhanak.yama.ui.components.interaction.ContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.LocalContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.RegisterActiveContentFocus
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.ui.components.image.ImagePrefetch
 import net.mhanak.yama.ui.theme.GlassElevatedCard
 import net.mhanak.yama.ui.components.image.CardImage
@@ -53,22 +56,22 @@ fun ListView(
     prefetchUrls: List<String?>? = null,
     content: LazyListScope.() -> Unit
 ) {
-    // On TV, register this list as the screen's primary focus target so screen-entry focus lands in
-    // the content (restoring the previously focused row) rather than elsewhere. See TvFocus.kt.
-    val contentFocus = remember { FocusRequester() }
-    RegisterPrimaryContentFocus(contentFocus)
-    LazyColumn(
-        state = state,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = contentPadding.plus(PaddingValues(8.dp)),
-        content = content,
-        // focusRestorer/focusRequester must precede focusGroup so they apply to the group's focus
-        // target (which reads properties from itself and its ancestors), not the child rows.
-        modifier = modifier
-            .focusRequester(contentFocus)
-            .focusRestorer()
-            .focusGroup()
-    )
+    // On TV, each row registers its own FocusRequester via contentFocusItem. The registry records
+    // which row was last focused and restores focus to that leaf directly on screen entry — see TvFocus.kt.
+    val savedKey = rememberSaveable { mutableStateOf<String?>(null) }
+    val registry = remember { ContentFocusRegistry(savedKey) }
+    RegisterActiveContentFocus(registry)
+    // Keep focusGroup for D-pad group separation (rail / search boundary). No focusRestorer or
+    // focusRequester needed — restoration goes through ContentFocusRegistry.requestRestore().
+    CompositionLocalProvider(LocalContentFocusRegistry provides registry) {
+        LazyColumn(
+            state = state,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = contentPadding.plus(PaddingValues(8.dp)),
+            content = content,
+            modifier = modifier.focusGroup(),
+        )
+    }
     if (prefetchUrls != null) {
         // AsyncImageListCard renders its art in a fixed 64.dp box — decode prefetched images at
         // that size so they match what the visible card requests.
@@ -87,9 +90,12 @@ fun ListCard(
     image: (@Composable BoxScope.() -> Unit)? = null,
     title: String? = null,
     subtitle: String? = null,
+    // TV D-pad: the item's stable id. GlassElevatedCard forwards this modifier before combinedClickable
+    // so it binds to the same focus target node as the click surface.
+    focusKey: String? = null,
     endContent: @Composable (RowScope.() -> Unit)? = null,
 ) {
-    GlassElevatedCard(onClick = onClick) {
+    GlassElevatedCard(onClick = onClick, modifier = Modifier.contentFocusItem(focusKey)) {
         ListCardRow(image = image, title = title, subtitle = subtitle, endContent = endContent)
     }
 }
@@ -149,9 +155,11 @@ fun AsyncImageListCard(
     imageFallback: Painter? = null,
     title: String? = null,
     subtitle: String? = null,
+    focusKey: String? = null,
 ) {
     ListCard(
         onClick = onClick,
+        focusKey = focusKey,
         image = {
             Box(
                 modifier = Modifier

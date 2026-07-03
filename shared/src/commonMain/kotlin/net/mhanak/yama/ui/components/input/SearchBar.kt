@@ -47,6 +47,9 @@ fun SearchBar(
     placeholder: String,
     modifier: Modifier = Modifier,
     height: Dp = 44.dp,
+    // TV only: called when the user presses D-pad down while the search bar is focused. Return true
+    // to consume the event (focus was redirected), false to fall through to the default moveFocus.
+    onFocusDown: (() -> Boolean)? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
@@ -62,7 +65,13 @@ fun SearchBar(
         modifier = modifier.height(height).onPreviewKeyEvent { event ->
             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             when (event.key) {
-                Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Down)
+                // If a custom focus-down handler is provided (e.g., LibraryView sending focus to the
+                // content grid via ContentFocusRegistry.requestRestore), prefer it; otherwise fall
+                // back to the standard moveFocus so non-TV / non-library hosts still work.
+                Key.DirectionDown -> {
+                    val handled = onFocusDown?.invoke() == true
+                    if (handled) true else focusManager.moveFocus(FocusDirection.Down)
+                }
                 Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Up)
                 else -> false
             }

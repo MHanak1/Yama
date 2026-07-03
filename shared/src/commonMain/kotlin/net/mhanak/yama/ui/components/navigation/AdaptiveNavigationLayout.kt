@@ -21,7 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.mhanak.yama.isTelevisionDevice
+import net.mhanak.yama.LocalIsTvMode
 import net.mhanak.yama.ui.theme.glassSource
 import net.mhanak.yama.ui.components.image.BlurredBackgroundImage
 import net.mhanak.yama.ui.theme.LocalDetailTint
@@ -60,7 +60,7 @@ fun AdaptiveNavigationLayout(
     miniPlayer: @Composable (wide: Boolean) -> Unit = {},
     content: @Composable (hasRail: Boolean, onMenuClick: (() -> Unit)?, bottomInset: Dp) -> Unit,
 ) {
-    val isTV = isTelevisionDevice()
+    val isTV = LocalIsTvMode.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 

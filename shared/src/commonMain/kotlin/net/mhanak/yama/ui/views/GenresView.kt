@@ -49,7 +49,7 @@ fun GenresView(
             contentPadding = contentPadding,
             prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
         ) {
-            items(filtered) { genre ->
+            items(filtered, key = { it.id }) { genre ->
                 AsyncImageGridCard(
                     title = genre.name,
                     imageUrl = genre.imageUrl,

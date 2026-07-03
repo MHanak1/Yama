@@ -46,7 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.isTelevisionDevice
+import net.mhanak.yama.LocalIsTvMode
 import net.mhanak.yama.ui.views.LibraryTab
 import net.mhanak.yama.ui.components.settings.SourceSwitcher
 import net.mhanak.yama.ui.components.input.isInFlight
@@ -83,7 +83,7 @@ fun AppNavRail(
     nowPlayingVisible: Boolean = false,
     onNowPlayingClick: () -> Unit = {},
 ) {
-    val isTV = isTelevisionDevice()
+    val isTV = LocalIsTvMode.current
     // TV: rail starts collapsed and expands while focused. Non-TV: width-driven only.
     var focused by remember { mutableStateOf(false) }
     val expanded = if (isTV) focused else forceExpanded

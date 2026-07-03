@@ -76,6 +76,13 @@ object AppPreferences {
         get() = settings.getBoolean("keep_screen_on_while_playing", true)
         set(value) { settings.putBoolean("keep_screen_on_while_playing", value) }
 
+    // Force TV/controller navigation layout on non-television devices: nav rail, D-pad focus, and
+    // full-player scale behave as if isTelevisionDevice() returned true. Off by default. Ignored
+    // (redundant) when the device is already detected as a television.
+    var forceTvMode: Boolean
+        get() = settings.getBoolean("force_tv_mode", false)
+        set(value) { settings.putBoolean("force_tv_mode", value) }
+
     // The SourceType the user last had active (by name), restored on launch so the app reopens on the
     // same source. Null until the user first switches source — callers fall back to their own default.
     var lastSourceType: String?

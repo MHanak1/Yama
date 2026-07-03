@@ -41,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -85,8 +84,9 @@ fun NowPlayingBar(
     modifier: Modifier = Modifier,
     wide: Boolean = false,
     peekHeight: Dp = 0.dp,
-    // TV only: where D-pad focus goes when leaving the bar upward (the content area). Null off TV.
-    focusUp: FocusRequester? = null,
+    // TV only: called when the user presses D-pad up from the bar. Should call
+    // ContentFocusRegistry.requestRestore() to return focus to the active content grid. Null off TV.
+    onExitUp: (() -> Unit)? = null,
 ) {
     val track = status.current ?: return
     val baseHeight = if (wide) MiniPlayerWideHeight else MiniPlayerHeight
@@ -112,9 +112,9 @@ fun NowPlayingBar(
             // rather than getting stuck on the bar. Other directions keep their defaults (left → rail).
             // focusProperties must precede focusGroup so onExit applies to the bar's own focus target.
             .then(
-                if (focusUp != null) Modifier
+                if (onExitUp != null) Modifier
                     .focusProperties {
-                        onExit = { if (requestedFocusDirection == FocusDirection.Up) focusUp.requestFocus() }
+                        onExit = { if (requestedFocusDirection == FocusDirection.Up) onExitUp() }
                     }
                     .focusGroup()
                 else Modifier,

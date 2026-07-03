@@ -51,7 +51,7 @@ fun AlbumsView(
             contentPadding = contentPadding,
             prefetchUrls = remember(filtered) { filtered.map { it.imageUrl } },
         ) {
-            items(filtered) { album ->
+            items(filtered, key = { it.id }) { album ->
                 AsyncImageGridCard(
                     title = album.name,
                     subtitle = album.albumArtist ?: "",
