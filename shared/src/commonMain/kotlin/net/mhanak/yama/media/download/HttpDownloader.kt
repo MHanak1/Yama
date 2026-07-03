@@ -3,6 +3,7 @@ package net.mhanak.yama.media.download
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import net.mhanak.yama.util.logger
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -20,6 +21,8 @@ import kotlin.coroutines.coroutineContext
  * the real container when it can direct-play).
  */
 internal object HttpDownloader {
+
+    private val log = logger("Downloads")
 
     data class Result(val contentType: String?, val bytes: Long)
 
@@ -59,6 +62,7 @@ internal object HttpDownloader {
             }
             Result(contentType = conn.contentType, bytes = downloaded)
         } catch (t: Throwable) {
+            log.error("download failed url=$url dest=${dest.name}", t)
             part.delete()
             throw t
         } finally {
@@ -81,17 +85,22 @@ internal object HttpDownloader {
             if (code in 300..399) {
                 val location = conn.getHeaderField("Location")
                 conn.disconnect()
-                if (location.isNullOrBlank()) error("Redirect with no Location from $current")
+                if (location.isNullOrBlank()) {
+                    log.error("Redirect with no Location header from $current (HTTP $code)")
+                    error("Redirect with no Location from $current")
+                }
                 // Resolve relative redirects against the current URL.
                 current = URI(current).resolve(location).toString()
                 return@repeat
             }
             if (code !in 200..299) {
                 conn.disconnect()
+                log.error("HTTP $code fetching $current")
                 error("HTTP $code fetching $current")
             }
             return conn
         }
+        log.error("Too many redirects fetching $url")
         error("Too many redirects fetching $url")
     }
 }

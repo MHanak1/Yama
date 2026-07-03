@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.media.sources.PlaybackReporting
+import net.mhanak.yama.util.logger
 import java.io.File
 
 /** A durable record of one completed play, persisted until the backend acknowledges it. */
@@ -45,6 +46,7 @@ class ScrobbleOutbox(
     private val mutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true }
     private var seq = 0L
+    private val log = logger("Playback")
 
     /**
      * Record that [trackId] was played to completion at [positionMs]. No-op while online (live
@@ -79,6 +81,7 @@ class ScrobbleOutbox(
             for (e in toFlush) {
                 val reporter = src as? PlaybackReporting
                 val ok = reporter != null && runCatching { reporter.reportPlayed(e.trackId, e.playedAtEpochMs, e.positionMs) }
+                    .onFailure { log.warn("ScrobbleOutbox: flush failed for track=${e.trackId}", it) }
                     .getOrDefault(false)
                 if (ok) acked.add(e.id) else break // stop on the first failure; retry the rest later
             }
@@ -92,13 +95,15 @@ class ScrobbleOutbox(
 
     private fun read(): List<PlayedEvent> {
         if (!file.exists()) return emptyList()
-        return runCatching { json.decodeFromString<List<PlayedEvent>>(file.readText()) }.getOrDefault(emptyList())
+        return runCatching { json.decodeFromString<List<PlayedEvent>>(file.readText()) }
+            .onFailure { log.warn("ScrobbleOutbox: failed to read ${file.name} — events lost", it) }
+            .getOrDefault(emptyList())
     }
 
     private fun write(events: List<PlayedEvent>) {
         runCatching {
             file.parentFile?.mkdirs()
             file.writeText(json.encodeToString(events))
-        }
+        }.onFailure { log.warn("ScrobbleOutbox: failed to write ${file.name}", it) }
     }
 }

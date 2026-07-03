@@ -35,6 +35,7 @@ import net.mhanak.yama.media.playback.PlaybackReporter
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.playback.FavoriteOutbox
 import net.mhanak.yama.media.playback.ScrobbleOutbox
+import net.mhanak.yama.media.sources.AccountedSource
 import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.SourceType
@@ -66,6 +67,10 @@ class AppContainer {
     // IO scope, so constructing it here is cheap.
     val localSource = LocalSource.create(libraryStore)
 
+    /** All registered sources in display order. The switcher iterates this instead of reading
+     *  concrete fields so adding a new source later requires only one change here. */
+    val sources: List<MusicSource> = listOf(jellyfinSource, localSource)
+
     // Reopen on the source the user last had active (Jellyfin by default / on first run). If the
     // restored source isn't usable (e.g. last on Jellyfin but the session is gone), App.kt still falls
     // back to the login screen via isAuthenticated, so picking it here is safe.
@@ -89,6 +94,17 @@ class AppContainer {
         activeMusicSource = source
         AppPreferences.lastSourceType = source.type.name
         playback.restoreTargetForActiveSource()
+    }
+
+    /**
+     * Switch to [source] and select the given account within it. The two-axis nature of source
+     * switching — axis 1: active source, axis 2: account within that source — is kept in one place
+     * here so callers (the switcher UI) never need to call both [selectSource] and
+     * `[AccountedSource.selectAccount]` separately.
+     */
+    fun selectAccount(source: MusicSource, accountId: String) {
+        selectSource(source)
+        (source as? AccountedSource)?.selectAccount(accountId)
     }
 
     val playback = PlaybackController { activeMusicSource }

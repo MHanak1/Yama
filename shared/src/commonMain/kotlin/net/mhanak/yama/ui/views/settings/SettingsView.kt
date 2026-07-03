@@ -77,8 +77,8 @@ fun SettingsView(
             Column(modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
                 SettingsCategoryCard(
                     icon = Icons.Default.Palette,
-                    iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    iconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    iconContainerColor = Color.hsv(200f, 0.6f, 1f),
+                    iconContentColor = Color.hsv(200f, 1f, 0.4f),
                     title = "Appearance",
                     subtitle = "Theme, colours, blur & album art",
                     onClick = { onNavigate(AppearanceSettingsRoute) },
@@ -86,8 +86,8 @@ fun SettingsView(
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(
                     icon = Icons.Default.MusicNote,
-                    iconContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    iconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    iconContainerColor = Color.hsv(150f, 0.6f, 1f),
+                    iconContentColor = Color.hsv(150f, 1f, 0.4f),
                     title = "Playback",
                     subtitle = "Volume, quality & remote control",
                     onClick = { onNavigate(PlaybackSettingsRoute) },
@@ -95,8 +95,8 @@ fun SettingsView(
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(
                     icon = Icons.Default.Download,
-                    iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    iconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    iconContainerColor = Color.hsv(100f, 0.6f, 1f),
+                    iconContentColor = Color.hsv(100f, 1f, 0.4f),
                     title = "Downloads",
                     subtitle = "Offline tracks, cache & Wi-Fi-only",
                     onClick = { onNavigate(DownloadsSettingsRoute) },
@@ -104,8 +104,8 @@ fun SettingsView(
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(
                     icon = Icons.Default.FolderOpen,
-                    iconContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    iconContentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    iconContainerColor = Color.hsv(50f, 0.6f, 1f),
+                    iconContentColor = Color.hsv(50f, 1f, 0.4f),
                     title = "Local Library",
                     subtitle = "Music folders & scan settings",
                     onClick = { onNavigate(LocalLibrarySettingsRoute) },

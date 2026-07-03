@@ -1,24 +1,37 @@
 package net.mhanak.yama.ui.components.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,46 +43,43 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.media.sources.SourceType
-import net.mhanak.yama.ui.components.library.SourceIcon
-import net.mhanak.yama.ui.theme.GlassOutlinedButton
-import net.mhanak.yama.ui.theme.glassEffect
+import net.mhanak.yama.media.model.MusicLibrary
+import net.mhanak.yama.media.sources.AccountedSource
+import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.SourceAccount
+import net.mhanak.yama.ui.components.library.SourceAvatar
 
-// The SourceIcon label for a given source type (matches the keys SourceIcon switches on).
-private fun SourceType.iconLabel(): String = when (this) {
-    SourceType.Jellyfin -> "Jellyfin"
-    SourceType.Subsonic -> "Subsonic"
-    SourceType.Local -> "Local Files"
-}
+private const val ANIM_MS = 200
 
 @Composable
 fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, onRequestClose: () -> Unit = {}) {
     val appContainer = LocalAppContainer.current
-    val jellyfinSource = appContainer.jellyfinSource
     val scope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
 
-    // The active source drives the header icon/label; the Jellyfin user name is only meaningful when
-    // Jellyfin is the active source.
-    val activeType = appContainer.activeMusicSource.type
-
-    val sessions = jellyfinSource.sessions
-    val currentSessionId = jellyfinSource.currentSessionId
-    val currentSession = sessions.firstOrNull { it.id == currentSessionId }
-    val sortedSessions = remember(sessions, currentSessionId) {
-        sessions.sortedByDescending { it.id == currentSessionId }
-    }
-    // The library picker reflects the *active* source (it's empty for sources without the concept,
-    // e.g. Local), not Jellyfin specifically.
     val activeSource = appContainer.activeMusicSource
+    // Build the flat account list from all sources in registration order. Each entry pairs an
+    // account with its owning source so a click can call selectAccount on the right source.
+    val allEntries: List<Pair<MusicSource, SourceAccount>> = remember(appContainer.sources) {
+        appContainer.sources.flatMap { source ->
+            (source as? AccountedSource)?.accounts.orEmpty().map { source to it }
+        }
+    }
+    val activeAccountedSource = activeSource as? AccountedSource
+    val activeAccount = activeAccountedSource?.accounts?.firstOrNull { it.id == activeAccountedSource.currentAccountId }
+
+    // The library picker reflects the *active* source (it's empty for sources without the concept,
+    // e.g. Local), not any specific backend.
     val libraries by activeSource.libraries.collectAsState()
     val enabledLibraryIds by activeSource.enabledLibraryIds.collectAsState()
     val menuFocusRequester = remember { FocusRequester() }
@@ -80,131 +90,336 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
         if (expanded) runCatching { menuFocusRequester.requestFocus() }
     }
 
-    Box(
-        modifier = modifier
-            .padding(horizontal = if (collapsed) 8.dp else 16.dp, vertical = 8.dp),
-    ) {
-        // Fixed-height interactive area so the header doesn't change height between the collapsed
-        // (icon button) and expanded (outlined button) states — otherwise the rail jumps when it
-        // collapses.
-        Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
-            if (collapsed) {
-                IconButton(onClick = { expanded = true }) {
-                    SourceIcon(activeType.iconLabel())
+    val onSelectAccount: (MusicSource, SourceAccount) -> Unit = { source, account ->
+        appContainer.selectAccount(source, account.id)
+        expanded = false
+        onRequestClose()
+    }
+    val onLogout: (MusicSource, SourceAccount) -> Unit = { source, account ->
+        scope.launch {
+            expanded = false
+            onRequestClose()
+            (source as? AccountedSource)?.logout(account.id)
+        }
+    }
+    val onAddSource: () -> Unit = {
+        expanded = false
+        onRequestClose()
+        appContainer.showLoginScreen = true
+    }
+
+    Box(modifier = modifier.padding(horizontal = if (collapsed) 8.dp else 16.dp, vertical = if (collapsed) 10.dp else 8.dp)) {
+        if (collapsed) {
+            // 96dp narrow rail: avatar-only chip + popover panel.
+            // 44dp chip height matches the search bar (SearchBar default 44dp, centred in 64dp TopAppBar,
+            // top edge at statusBar+10dp; we use vertical=10dp above to align). The avatar circle fills
+            // the chip so the secondaryContainer background extends to the tap target — no IconButton
+            // wrapper, which would impose a 48dp ripple that overflows the 44dp box.
+            Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
+                if (activeAccount != null) {
+                    SourceAvatar(
+                        sourceType = activeAccount.sourceType,
+                        avatarUrl = activeAccount.avatarUrl,
+                        size = 44.dp,
+                        iconSize = 24.dp,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { expanded = !expanded },
+                    )
                 }
-            } else {
-                GlassOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        SourceIcon(activeType.iconLabel())
-                        Spacer(Modifier.width(8.dp))
-                        // Single line so the button doesn't wrap and grow vertically while the rail
-                        // is mid-expansion (it's narrower than the text for a few frames).
-                        Text(
-                            if (activeType == SourceType.Local) "Local Files" else currentSession?.userName ?: "Jellyfin",
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier
+                    .focusRequester(menuFocusRequester)
+                    .width(300.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            ) {
+                SourceSwitcherPanel(
+                    excludeActive = false,
+                    allEntries = allEntries,
+                    activeSource = activeSource,
+                    activeAccount = activeAccount,
+                    libraries = libraries,
+                    enabledLibraryIds = enabledLibraryIds,
+                    onSelectAccount = onSelectAccount,
+                    onLogout = onLogout,
+                    onToggleLibrary = { id, checked -> activeSource.setLibraryEnabled(id, !checked) },
+                    onAddSource = onAddSource,
+                )
+            }
+        } else {
+            // Wide rail / slim drawer: fixed identity pill on top; a brighter second container
+            // slides out from under it on expand. The pill shape never changes — 28dp all corners,
+            // secondaryContainer — matching the bevel sketch: /-\ | | \-/ on top, | | | | \-/ below.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Identity pill — fixed shape, never mutates. zIndex(1f) ensures it draws on top
+                // of the drawer's top overlap that fills the pill's rounded-corner gap region.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .zIndex(1f)
+                ) {
+                    IdentityRow(
+                        account = activeAccount,
+                        showChevron = true,
+                        expanded = expanded,
+                        onClick = { expanded = !expanded },
+                    )
+                }
+
+                // Drawer — offset upward by the pill's corner radius (28dp) so its background fills
+                // the transparent corner gap region at the pill's rounded bottom. The pill (zIndex 1f)
+                // draws on top, hiding the overlap in the centre while the corners are filled.
+                // A non-scrollable Spacer at the top of the drawer content keeps list items below
+                // the pill's visual bottom edge.
+                AnimatedVisibility(
+                    visible = expanded,
+                    enter = expandVertically(animationSpec = tween(ANIM_MS)),
+                    exit = shrinkVertically(animationSpec = tween(ANIM_MS)),
+                    modifier = Modifier.offset(y = (-28).dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    ) {
+                        Spacer(Modifier.height(28.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            SourceSwitcherPanel(
+                                excludeActive = true,
+                                allEntries = allEntries,
+                                activeSource = activeSource,
+                                activeAccount = activeAccount,
+                                libraries = libraries,
+                                enabledLibraryIds = enabledLibraryIds,
+                                onSelectAccount = onSelectAccount,
+                                onLogout = onLogout,
+                                onToggleLibrary = { id, checked -> activeSource.setLibraryEnabled(id, !checked) },
+                                onAddSource = onAddSource,
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+            }
+        }
+    }
+}
+
+// Pill header row: the identity trigger in the accordion.
+@Composable
+private fun IdentityRow(
+    account: SourceAccount?,
+    showChevron: Boolean,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(ANIM_MS),
+        label = "chevron",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (account != null) {
+            SourceAvatar(sourceType = account.sourceType, avatarUrl = account.avatarUrl, size = 36.dp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = account?.name ?: "",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val subtitle = account?.subtitle
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (showChevron) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.rotate(chevronRotation),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceSwitcherPanel(
+    modifier: Modifier = Modifier,
+    excludeActive: Boolean,
+    allEntries: List<Pair<MusicSource, SourceAccount>>,
+    activeSource: MusicSource,
+    activeAccount: SourceAccount?,
+    libraries: List<MusicLibrary>,
+    enabledLibraryIds: Set<String>,
+    onSelectAccount: (MusicSource, SourceAccount) -> Unit,
+    onLogout: (MusicSource, SourceAccount) -> Unit,
+    onToggleLibrary: (String, Boolean) -> Unit,
+    onAddSource: () -> Unit,
+) {
+    Column(modifier = modifier.padding(vertical = 8.dp)) {
+        allEntries.forEach { (source, account) ->
+            val isActive = source === activeSource && account.id == activeAccount?.id
+            // When excludeActive, the active account is shown in the identity pill — don't relist it.
+            if (excludeActive && isActive) return@forEach
+            SourceRow(
+                account = account,
+                isActive = isActive,
+                onClick = { onSelectAccount(source, account) },
+            )
+        }
+
+        // Library picker for the active source: tick which libraries feed the albums/artists/genres
+        // views. Toggling leaves the panel open so several can be changed in one pass.
+        if (libraries.isNotEmpty()) {
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            )
+            libraries.forEach { library ->
+                val checked = library.id in enabledLibraryIds
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggleLibrary(library.id, checked) }
+                        .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = library.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = checked,
+                        onCheckedChange = { onToggleLibrary(library.id, checked) },
+                    )
                 }
             }
         }
 
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+        )
+
+        Row(
             modifier = Modifier
-                .focusRequester(menuFocusRequester)
-                .glassEffect(MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.extraSmall),
-            containerColor = Color.Transparent,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                .fillMaxWidth()
+                .clickable(onClick = onAddSource)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // One item per saved Jellyfin session; active one sorted first and bolded.
-            // Logout button shown only for the first (active) session.
-            sortedSessions.forEachIndexed { index, session ->
-                val isActive = session.id == currentSessionId && activeType == SourceType.Jellyfin
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            session.userName ?: session.serverUrl,
-                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                        )
-                    },
-                    leadingIcon = { SourceIcon("Jellyfin") },
-                    trailingIcon = if (index == 0) {
-                        {
-                            IconButton(onClick = {
-                                scope.launch {
-                                    expanded = false
-                                    onRequestClose()
-                                    jellyfinSource.logoutSession(session.id)
-                                }
-                            }) {
-                                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Log out")
-                            }
-                        }
-                    } else null,
-                    onClick = {
-                        appContainer.selectSource(jellyfinSource)
-                        jellyfinSource.switchSession(session)
-                        expanded = false
-                    },
-                )
-            }
-
-            // Local files — always available (no auth). Selecting it swaps the active source so the
-            // whole library/player surface re-binds to the on-device index.
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        "Local Files",
-                        fontWeight = if (activeType == SourceType.Local) FontWeight.SemiBold else FontWeight.Normal,
-                    )
-                },
-                leadingIcon = { SourceIcon("Local Files") },
-                onClick = {
-                    appContainer.selectSource(appContainer.localSource)
-                    expanded = false
-                    onRequestClose()
-                },
+            Icon(
+                Icons.Default.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
             )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "Add Source",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
 
-            // Library picker for the active source: tick which libraries feed the albums/artists/genres
-            // views. Toggling leaves the menu open so several can be changed in one pass.
-            if (libraries.isNotEmpty()) {
-                HorizontalDivider()
+        // Log out the active account. Shown only when the active source supports logout (i.e.
+        // Jellyfin); disappears automatically when switching to Local or any other non-logout source.
+        val activeAccountedSource = activeSource as? AccountedSource
+        if (activeAccountedSource?.supportsLogout == true && activeAccount != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onLogout(activeSource, activeAccount) }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Logout,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(12.dp))
                 Text(
-                    "Libraries",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                    "Log out",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
                 )
-                libraries.forEach { library ->
-                    val checked = library.id in enabledLibraryIds
-                    DropdownMenuItem(
-                        text = { Text(library.name) },
-                        leadingIcon = { Checkbox(checked = checked, onCheckedChange = null) },
-                        onClick = { activeSource.setLibraryEnabled(library.id, !checked) },
-                    )
-                }
             }
+        }
+    }
+}
 
-            HorizontalDivider()
-
-            DropdownMenuItem(
-                text = { Text("Add Source") },
-                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                onClick = {
-                    expanded = false
-                    onRequestClose()
-                    appContainer.showLoginScreen = true
-                },
+@Composable
+private fun SourceRow(
+    account: SourceAccount,
+    isActive: Boolean,
+    onClick: () -> Unit,
+) {
+    val bgColor = if (isActive) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    val textColor = if (isActive) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurface
+    val subtitleColor = if (isActive) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(50))
+            .background(bgColor)
+            .clickable(onClick = onClick)
+            .padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SourceAvatar(sourceType = account.sourceType, avatarUrl = account.avatarUrl, size = 32.dp, iconSize = 20.dp, showBackground = false)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = account.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            if (account.subtitle != null) {
+                Text(
+                    text = account.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

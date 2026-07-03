@@ -14,6 +14,7 @@ import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.OfflineCapable
+import net.mhanak.yama.util.logger
 import java.io.File
 
 /** A durable record of one favourite toggle made offline, persisted until the backend accepts it. */
@@ -45,6 +46,7 @@ class FavoriteOutbox(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val mutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true }
+    private val log = logger("Playback")
 
     /**
      * Record that [id] of [kind] was set to [favorite]. No-op while online (the live [setFavorite]
@@ -80,7 +82,9 @@ class FavoriteOutbox(
                 val kind = runCatching { FavoritableKind.valueOf(c.kind) }.getOrNull()
                 if (kind == null) { acked.add(c); continue } // unknown kind — drop, can't replay
                 val fav = src as? FavoriteCapable
-                val ok = fav != null && runCatching { fav.setFavorite(kind, c.itemId, c.favorite); true }.getOrDefault(false)
+                val ok = fav != null && runCatching { fav.setFavorite(kind, c.itemId, c.favorite); true }
+                    .onFailure { log.warn("FavoriteOutbox: flush failed for ${c.kind}/${c.itemId}", it) }
+                    .getOrDefault(false)
                 if (ok) acked.add(c) else break // stop on the first failure; retry the rest later
             }
             if (acked.isNotEmpty()) {
@@ -100,13 +104,15 @@ class FavoriteOutbox(
 
     private fun read(): List<FavoriteChange> {
         if (!file.exists()) return emptyList()
-        return runCatching { json.decodeFromString<List<FavoriteChange>>(file.readText()) }.getOrDefault(emptyList())
+        return runCatching { json.decodeFromString<List<FavoriteChange>>(file.readText()) }
+            .onFailure { log.warn("FavoriteOutbox: failed to read ${file.name} — changes lost", it) }
+            .getOrDefault(emptyList())
     }
 
     private fun write(changes: List<FavoriteChange>) {
         runCatching {
             file.parentFile?.mkdirs()
             file.writeText(json.encodeToString(changes))
-        }
+        }.onFailure { log.warn("FavoriteOutbox: failed to write ${file.name}", it) }
     }
 }

@@ -67,6 +67,40 @@ interface PlaybackReporting {
 }
 
 /**
+ * Source-agnostic descriptor for one selectable identity in the source switcher: a logged-in
+ * account (Jellyfin/Subsonic) or a single implicit identity (Local Files). Produced by
+ * [AccountedSource.accounts] so the switcher UI never imports [net.mhanak.yama.session.JellyfinSession]
+ * or any other source-specific session type.
+ *
+ * @param avatarUrl Remote profile image URL, or null when there is no per-account image (e.g.
+ *   Local Files). [net.mhanak.yama.ui.components.library.SourceAvatar] falls back to the source
+ *   logo drawable when this is null.
+ */
+data class SourceAccount(
+    val id: String,
+    val sourceType: SourceType,
+    val name: String,
+    val subtitle: String?,
+    val avatarUrl: String?,
+)
+
+/**
+ * Implemented by sources that expose one or more switchable accounts in the source switcher.
+ * Mirrors the [FavoriteCapable]/[OfflineCapable] pattern: a standalone interface, only implemented
+ * by backends that support the feature, detected at runtime via `(source as? AccountedSource)`.
+ *
+ * [accounts] and [currentAccountId] should be backed by Compose snapshot state (`mutableStateOf`)
+ * in implementations so reads inside composition trigger recomposition without a separate StateFlow.
+ */
+interface AccountedSource {
+    val accounts: List<SourceAccount>
+    val currentAccountId: String?
+    fun selectAccount(id: String)
+    val supportsLogout: Boolean get() = false
+    suspend fun logout(id: String) {}
+}
+
+/**
  * Implemented by sources that persist offline state: downloads, catalog snapshots, and staleness
  * checking. Callers detect presence with `(source as? OfflineCapable)?.*`; a null result means
  * the source has no offline partition (e.g. local files, which rebuild from their own on-disk index).

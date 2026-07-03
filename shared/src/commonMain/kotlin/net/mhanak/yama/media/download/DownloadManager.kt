@@ -66,6 +66,7 @@ class DownloadManager(
     private val cacheBudgetMb: () -> Int = { 1024 },
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val log = logger("Downloads")
 
     private val _downloads = MutableStateFlow<List<DownloadJob>>(emptyList())
     val downloads: StateFlow<List<DownloadJob>> = _downloads.asStateFlow()
@@ -94,7 +95,10 @@ class DownloadManager(
      *  are disabled (the user tapped download and wants it now, metered or not). */
     private fun submit(request: DownloadRequest) {
         if (backgroundDownloads()) scheduler.enqueue(request)
-        else scope.launch { runCatching { executeRequest(request) } }
+        else scope.launch {
+            runCatching { executeRequest(request) }
+                .onFailure { log.error("executeRequest failed for track=${request.trackId}", it) }
+        }
     }
 
     // --- Enqueue entry points ----------------------------------------------------------------------
@@ -157,7 +161,9 @@ class DownloadManager(
         val src = source()
         val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         scope.launch {
-            val tracks = runCatching { fetch(src, key) }.getOrDefault(emptyList())
+            val tracks = runCatching { fetch(src, key) }
+                .onFailure { log.error("redownloadContainer: track list fetch failed for key=$key", it) }
+                .getOrDefault(emptyList())
                 .filter { store.get(key, it.id) != null }
             if (tracks.isNotEmpty()) redownload(tracks, quality)
         }
@@ -219,7 +225,10 @@ class DownloadManager(
         if (pendingTracks.containsKey(track.id)) return null
         pendingTracks[track.id] = track
         val request = DownloadRequest(key, track.id, cacheQuality(), Retention.Cached, force = false)
-        return scope.launch { runCatching { executeRequest(request) } }
+        return scope.launch {
+            runCatching { executeRequest(request) }
+                .onFailure { log.warn("auto-cache failed for track=${track.id} '${track.name}'", it) }
+        }
     }
 
     /** Evict cached (never pinned) rows oldest-first by [StoredTrack.lastPlayedAt] until the cache is
@@ -398,6 +407,7 @@ class DownloadManager(
             }
             throw c
         } catch (t: Throwable) {
+            log.error("download failed for track=${request.trackId} quality=${request.quality}", t)
             markFailed(request.trackId, t) // keep pendingTracks entry so retry() can re-queue it
             return
         }
@@ -411,7 +421,9 @@ class DownloadManager(
         val src = source()
         val key = (src as? OfflineCapable)?.downloadSourceKey() ?: return
         scope.launch {
-            val tracks = runCatching { fetch(src, key) }.getOrDefault(emptyList())
+            val tracks = runCatching { fetch(src, key) }
+                .onFailure { log.error("enqueueContainer: track list fetch failed for key=$key", it) }
+                .getOrDefault(emptyList())
             if (tracks.isNotEmpty()) enqueueTracks(tracks, quality)
         }
     }
@@ -452,7 +464,9 @@ class DownloadManager(
             ?.forEach { it.delete() }
 
         val artworkPath = track.albumId?.let { ensureAlbumArt(src, key, it, track) }
-        val version = runCatching { (src as? OfflineCapable)?.getContentVersion(track.id) }.getOrNull()
+        val version = runCatching { (src as? OfflineCapable)?.getContentVersion(track.id) }
+            .onFailure { log.warn("getContentVersion failed for track=${track.id}", it) }
+            .getOrNull()
 
         store.put(track.toStoredTrack(
             sourceKey = key,
@@ -476,7 +490,9 @@ class DownloadManager(
      *  download. */
     private suspend fun ensureAlbumTrackList(src: MusicSource, key: String, albumId: String) {
         if (catalogCache.loadTrackList(key, TrackListKind.Album, albumId) != null) return
-        val tracks = runCatching { src.getTracksForAlbum(albumId) }.getOrDefault(emptyList())
+        val tracks = runCatching { src.getTracksForAlbum(albumId) }
+            .onFailure { log.warn("ensureAlbumTrackList: fetch failed for album=$albumId", it) }
+            .getOrDefault(emptyList())
         if (tracks.isNotEmpty()) catalogCache.saveTrackList(key, TrackListKind.Album, albumId, tracks)
     }
 
@@ -503,7 +519,9 @@ class DownloadManager(
             if (artFile.exists()) artFile.delete()
             if (!tmp.renameTo(artFile)) { tmp.copyTo(artFile, overwrite = true); tmp.delete() }
             artFile.toURI().toString()
-        }.getOrNull()
+        }
+            .onFailure { log.warn("ensureAlbumArt: art download failed for album=$albumId url=$artUrl", it) }
+            .getOrNull()
     }
 
     private fun deleteFiles(key: String, trackId: String) {

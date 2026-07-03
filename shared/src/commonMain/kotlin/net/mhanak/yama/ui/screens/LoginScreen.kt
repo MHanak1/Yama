@@ -72,6 +72,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.ui.components.state.Async
 import net.mhanak.yama.ui.components.state.ErrorCard
 import net.mhanak.yama.ui.components.settings.LocalLibrarySettings
@@ -96,7 +97,7 @@ val LocalSetBackAction = compositionLocalOf<((() -> Unit)?) -> Unit> { {} }
 fun LoginScreen(onDismiss: (() -> Unit)? = null) {
     var selectedIndex by remember { mutableIntStateOf(0) }
     var backAction: (() -> Unit)? by remember { mutableStateOf(null) }
-    val options = listOf("Jellyfin", "Subsonic", "Local Files")
+    val options = listOf(SourceType.Jellyfin, SourceType.Subsonic, SourceType.Local)
 
     CompositionLocalProvider(LocalSetBackAction provides { backAction = it }) {
         Column(
@@ -143,7 +144,7 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 SourceIcon(options[idx])
                                 Spacer(Modifier.width(8.dp))
-                                Text(options[idx])
+                                Text(options[idx].displayName)
                             }
                         }
                         Spacer(Modifier.width(4.dp))
@@ -153,12 +154,12 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
                         expanded = sourceMenuExpanded,
                         onDismissRequest = { sourceMenuExpanded = false },
                     ) {
-                        options.forEachIndexed { index, label ->
+                        options.forEachIndexed { index, sourceType ->
                             DropdownMenuItem(
-                                text = { Text(label) },
-                                leadingIcon = { SourceIcon(label) },
+                                text = { Text(sourceType.displayName) },
+                                leadingIcon = { SourceIcon(sourceType) },
                                 onClick = { selectedIndex = index; sourceMenuExpanded = false },
-                                enabled = label == "Jellyfin" || label == "Local Files",
+                                enabled = sourceType == SourceType.Jellyfin || sourceType == SourceType.Local,
                             )
                         }
                     }

@@ -335,5 +335,7 @@ data class DownloadedTrack(
 )
 
 /** Desktop stores absolute file paths (→ file:// URI); Android download paths are app files (also
- *  absolute). A value that already carries a scheme (`content://`, `file://`) is passed through. */
-internal fun String.toPlayableUri(): String = if ("://" in this) this else File(this).toURI().toString()
+ *  absolute). A value that already carries a scheme (`content://`, `file://`) is passed through.
+ *  Uses Path.toUri() (not File.toURI()) because the latter emits `file:/path` (no authority) while
+ *  libvlc requires the RFC 3986 form `file:///path` (empty authority). */
+internal fun String.toPlayableUri(): String = if ("://" in this) this else File(this).toPath().toUri().toString()

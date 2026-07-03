@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.toTrack
+import net.mhanak.yama.util.logger
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.sessionApi
 import org.jellyfin.sdk.model.UUID
@@ -48,6 +49,7 @@ class JellyfinRemotePlayer(
     override val displayName: String = target.name
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val log = logger("RemotePlayer")
 
     // The remote device's actual state, as reported via the live session push.
     private val reportedStatus: StateFlow<PlayerStatus> =
@@ -216,6 +218,7 @@ class JellyfinRemotePlayer(
             repeat(RESYNC_BURST_COUNT) {
                 delay(RESYNC_BURST_INTERVAL_MS)
                 runCatching { resync() }
+                    .onFailure { log.warn("resyncBurst: session resync failed for ${target.id}", it) }
             }
         }
     }
@@ -302,7 +305,7 @@ class JellyfinRemotePlayer(
                         controllingUserId = controllingUserId?.toString(),
                     )
                 }
-            }
+            }.onFailure { log.warn("play($command) failed for session=${target.id}", it) }
         }
         resyncBurst()
     }
@@ -316,7 +319,7 @@ class JellyfinRemotePlayer(
                     seekPositionTicks = seekPositionTicks,
                     controllingUserId = controllingUserId?.toString(),
                 )
-            }
+            }.onFailure { log.warn("playstate($command) failed for session=${target.id}", it) }
         }
     }
 
@@ -328,7 +331,7 @@ class JellyfinRemotePlayer(
                     sessionId = target.id,
                     data = GeneralCommand(name = name, controllingUserId = userId, arguments = arguments),
                 )
-            }
+            }.onFailure { log.warn("generalCommand($name) failed for session=${target.id}", it) }
         }
     }
 
@@ -360,7 +363,7 @@ class JellyfinRemotePlayer(
                     command = PlaystateCommand.STOP,
                     controllingUserId = controllingUserId?.toString(),
                 )
-            }
+            }.onFailure { log.warn("stop() failed for session=${target.id}", it) }
         }
     }
 
@@ -495,7 +498,10 @@ class JellyfinRemotePlayer(
     }
 
     override fun refresh() {
-        scope.launch { runCatching { resync() } }
+        scope.launch {
+            runCatching { resync() }
+                .onFailure { log.warn("refresh() failed for session=${target.id}", it) }
+        }
     }
 
     override fun release() {

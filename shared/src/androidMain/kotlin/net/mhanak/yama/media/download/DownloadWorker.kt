@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import net.mhanak.yama.AppContainer
 import net.mhanak.yama.media.sources.local.Retention
 import net.mhanak.yama.util.StreamingQuality
+import net.mhanak.yama.util.logger
 
 /**
  * Runs one [DownloadRequest]'s byte fetch as a WorkManager foreground worker — what keeps a download
@@ -33,11 +34,15 @@ import net.mhanak.yama.util.StreamingQuality
  */
 class DownloadWorker(appContext: Context, params: WorkerParameters) : Worker(appContext, params) {
 
+    private val log = logger("Downloads")
+
     override fun doWork(): Result {
         val request = inputData.toDownloadRequest() ?: return Result.success()
         // Promote to a foreground service so the OS keeps us running while the app is away.
         runCatching { setForegroundAsync(buildForegroundInfo()).get() }
+            .onFailure { log.warn("setForegroundAsync failed for track=${request.trackId}", it) }
         runCatching { runBlocking { AppContainer.shared.downloadManager.executeRequest(request) } }
+            .onFailure { log.error("executeRequest failed in WorkManager for track=${request.trackId}", it) }
         return Result.success()
     }
 

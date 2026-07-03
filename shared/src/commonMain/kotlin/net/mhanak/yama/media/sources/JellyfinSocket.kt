@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import net.mhanak.yama.util.AppPreferences
+import net.mhanak.yama.util.logger
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.sessionApi
 import org.jellyfin.sdk.api.sockets.SocketApiState
@@ -46,6 +47,7 @@ import kotlin.time.TimeSource
  * Lifecycle is owned by [JellyfinSource]: [bind] on every auth event, [unbind] on logout.
  */
 class JellyfinSocket(private val source: JellyfinSource) {
+    private val log = logger("JellyfinSocket")
     private var scope: CoroutineScope? = null
     private var boundApi: ApiClient? = null
     private var refreshJob: Job? = null
@@ -157,12 +159,12 @@ class JellyfinSocket(private val source: JellyfinSource) {
         // pull a fresh snapshot at once rather than waiting for the next push.
         s.launch {
             ws.state.collect { state ->
-                println("[Yama] socket state = $state")
+                log.debug("socket state = $state")
                 val isConnected = state is SocketApiState.Connected
                 _socketUp.value = isConnected
                 if (isConnected) {
                     runCatching { postCapabilities(api) }
-                        .onFailure { println("[Yama] postCapabilities failed: $it") }
+                        .onFailure { log.warn("postCapabilities failed", it) }
                     resyncSessions()
                 }
                 recomputeLiveness()
@@ -225,7 +227,7 @@ class JellyfinSocket(private val source: JellyfinSource) {
                 recomputeLiveness()
             }
             .onFailure {
-                println("[Yama] resyncSessions failed: $it")
+                log.warn("resyncSessions failed", it)
                 // A failed recovery probe is the signal that the link is actually down (the socket may
                 // still claim up while half-open); flip [connected] false so the UI reflects the outage.
                 probeFailed = true
@@ -252,8 +254,8 @@ class JellyfinSocket(private val source: JellyfinSource) {
     private suspend fun handlePlay(message: PlayMessage) {
         if (!remoteControlEnabled) return
         val request = message.data ?: return
-        println(
-            "[Yama] PlayMessage cmd=${request.playCommand} ids=${request.itemIds.orEmpty().size} " +
+        log.debug(
+            "PlayMessage cmd=${request.playCommand} ids=${request.itemIds.orEmpty().size} " +
                 "startIndex=${request.startIndex} startPositionTicks=${request.startPositionTicks}",
         )
         val tracks = source.getTracksByIds(request.itemIds.orEmpty().map { it.toString() })

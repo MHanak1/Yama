@@ -9,6 +9,7 @@ import net.mhanak.yama.media.playback.LocalPlayer
 import net.mhanak.yama.media.playback.PlaybackState
 import net.mhanak.yama.media.playback.PlayerStatus
 import net.mhanak.yama.media.playback.RepeatMode
+import net.mhanak.yama.util.logger
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
@@ -32,6 +33,7 @@ private const val IFACE_PLAYER = "org.mpris.MediaPlayer2.Player"
 class MprisService(private val player: LocalPlayer) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var conn: DBusConnection? = null
+    private val log = logger("MprisService")
 
     fun start() {
         if (!System.getProperty("os.name").lowercase().contains("linux")) return
@@ -43,7 +45,7 @@ class MprisService(private val player: LocalPlayer) {
             c.exportObject(MPRIS_PATH, handler)
             scope.launch { player.status.collect { handler.onStatusChanged(it) } }
         }.onFailure {
-            System.err.println("MPRIS: D-Bus unavailable — ${it.message}")
+            log.warn("D-Bus unavailable — MPRIS disabled", it)
         }
     }
 

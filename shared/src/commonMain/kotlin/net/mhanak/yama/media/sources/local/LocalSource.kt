@@ -14,9 +14,11 @@ import net.mhanak.yama.media.model.Genre
 import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
+import net.mhanak.yama.media.sources.AccountedSource
 import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.SourceAccount
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.media.sources.StaleWhileRevalidateSource
 import net.mhanak.yama.media.sources.TrackSortOrder
@@ -41,12 +43,30 @@ import java.security.MessageDigest
 class LocalSource(
     private val store: LocalLibraryStore,
     private val artworkDir: File,
-) : StaleWhileRevalidateSource(), FavoriteCapable {
+) : StaleWhileRevalidateSource(), FavoriteCapable, AccountedSource {
     override val type: SourceType = SourceType.Local
 
     // No auth concept — the source is always usable. Kept as a var to satisfy the interface; nothing
     // flips it false.
     override var isAuthenticated: Boolean by mutableStateOf(true)
+
+    // --- AccountedSource -------------------------------------------------------------------------
+    // Local is a single fixed identity — no login, no account switching, no logout.
+
+    private val localAccount = SourceAccount(
+        id = SOURCE_KEY,
+        sourceType = SourceType.Local,
+        name = SourceType.Local.displayName,
+        subtitle = "On this device",
+        avatarUrl = null,
+    )
+
+    override val accounts: List<SourceAccount> get() = listOf(localAccount)
+    override val currentAccountId: String get() = SOURCE_KEY
+    override fun selectAccount(id: String) {} // single account, nothing to switch
+    // supportsLogout stays false (default)
+
+    // -------------------------------------------------------------------------------------
 
     // Local files have no playlist concept in a first pass (.m3u parsing is a later seam).
     // _playlists is inherited from StaleWhileRevalidateSource; it stays empty for this source.

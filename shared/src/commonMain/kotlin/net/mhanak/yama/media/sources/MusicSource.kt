@@ -16,7 +16,14 @@ import net.mhanak.yama.util.StreamingQuality
 enum class SourceType {
     Jellyfin,
     Subsonic,
-    Local,
+    Local;
+
+    /** Human-readable display name used by the source switcher and login screen. */
+    val displayName: String get() = when (this) {
+        Jellyfin -> "Jellyfin"
+        Subsonic -> "Subsonic"
+        Local    -> "Local Files"
+    }
 }
 
 enum class TrackSortOrder(val label: String) {

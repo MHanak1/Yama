@@ -70,7 +70,7 @@ import java.util.UUID
 import kotlin.collections.get
 import org.jellyfin.sdk.model.UUID as JellyfinUUID
 
-class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : StaleWhileRevalidateSource(), RemotePlaybackProvider, FavoriteCapable, PlaybackReporting, OfflineCapable {
+class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : StaleWhileRevalidateSource(), RemotePlaybackProvider, FavoriteCapable, PlaybackReporting, OfflineCapable, AccountedSource {
     override val type: SourceType = SourceType.Jellyfin
     override val supportsStreamingQuality: Boolean = true
     // Rebuilt by [reconnect] on device wake so a fresh instance (and thus a fresh OkHttp connection
@@ -89,6 +89,41 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         private set
     var currentSessionId: String? by mutableStateOf(null)
         private set
+
+    // --- AccountedSource -------------------------------------------------------------------------
+    // Presents the session list through the generic interface so the switcher UI never imports
+    // JellyfinSession. `accounts` and `currentAccountId` are derived from the snapshot-state vars
+    // above, so recomposition is automatic — no extra StateFlow required.
+
+    override val accounts: List<SourceAccount>
+        get() = sessions.map { it.toSourceAccount() }
+
+    override val currentAccountId: String?
+        get() = currentSessionId
+
+    override fun selectAccount(id: String) {
+        sessions.find { it.id == id }?.let { switchSession(it) }
+    }
+
+    override val supportsLogout: Boolean get() = true
+
+    override suspend fun logout(id: String) = logoutSession(id)
+
+    // Builds a source-agnostic account descriptor from a Jellyfin session. Owns the
+    // Jellyfin-specific profile-image URL construction so the UI never needs to know it.
+    // Jellyfin serves user profile images unauthenticated (no token appended); same approach
+    // as album art, which loads fine without one.
+    private fun JellyfinSession.toSourceAccount() = SourceAccount(
+        id = id,
+        sourceType = SourceType.Jellyfin,
+        name = userName ?: serverUrl,
+        subtitle = serverName ?: serverUrl,
+        avatarUrl = userId?.let { uid ->
+            "${serverUrl.trimEnd('/')}/Users/$uid/Images/Primary"
+        },
+    )
+
+    // -------------------------------------------------------------------------------------
 
     val socket = JellyfinSocket(this)
     override val libraryChanges get() = socket.libraryChanges
