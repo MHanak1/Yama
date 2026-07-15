@@ -36,6 +36,9 @@ object AppearanceSettingsRoute
 object PlaybackSettingsRoute
 
 @Serializable
+object ScrobblingSettingsRoute
+
+@Serializable
 object LocalLibrarySettingsRoute
 
 /** Top-level screen: downloads home — a managed list of downloaded albums. */

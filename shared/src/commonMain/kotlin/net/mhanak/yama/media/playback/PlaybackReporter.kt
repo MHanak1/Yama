@@ -32,6 +32,9 @@ class PlaybackReporter(
     // Invoked once per track when it has been played past the scrobble threshold, with the track and the
     // position reached. Backs the offline scrobble outbox; default no-op keeps the reporter standalone.
     private val onCompletedPlay: (Track, Long) -> Unit = { _, _ -> },
+    // Invoked once per track when it starts playing (the track→track transition), independent of source.
+    // Backs cross-source "now playing" push (ListenBrainz); default no-op keeps the reporter standalone.
+    private val onNowPlaying: (Track) -> Unit = { },
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val log = logger("Playback")
@@ -81,6 +84,29 @@ class PlaybackReporter(
                     return@collect
                 }
 
+                // Snapshot the running baselines before this emission overwrites them: the previous
+                // track's last observed position (used to close its tracker on a track advance — Part 1)
+                // and the wall-clock elapsed since the previous emission (used to spot a frozen flow
+                // after device sleep / doze — Part 2). Both must be read before lines below reassign
+                // `lastPositionMs` / `lastSeenMark`.
+                val previousPositionMs = lastPositionMs
+                val elapsedSinceLastEmission = lastSeenMark.elapsedNow()
+
+                // Repeat-one / manual replay of the SAME track: ExoPlayer loops the item in place (same
+                // id, same queueIndex, no Idle transition), so the only observable evidence of a restart
+                // is positionMs wrapping back to the start after the track had already counted as a play.
+                // Clear the guard so the next threshold crossing scrobbles the new listen — ListenBrainz
+                // counts each repeat as its own listen. Gated on playedRecorded, so a normal backward
+                // seek *before* completion can't trip it, and on same-id so a genuine A→B advance is
+                // handled by the track-change branch below instead.
+                val replayed = playedRecorded && track.id == currentTrack?.id &&
+                    status.positionMs < TRACK_REPLAY_START_MS &&
+                    previousPositionMs - status.positionMs > SEEK_REPORT_THRESHOLD_MS
+                if (replayed) {
+                    playedRecorded = false
+                    onNowPlaying(track)
+                }
+
                 // Offline-scrobble seam: once the track has been played past the threshold, record a
                 // completed play (the outbox persists it only when offline; online it's a no-op). Fires
                 // at most once per track.
@@ -93,7 +119,7 @@ class PlaybackReporter(
                 // the elapsed wall-clock time since we last saw it would explain. Compare against that
                 // expectation before overwriting our running baseline.
                 val expectedPositionMs = if (lastSeenPlaying)
-                    lastSeenPositionMs + lastSeenMark.elapsedNow().inWholeMilliseconds
+                    lastSeenPositionMs + elapsedSinceLastEmission.inWholeMilliseconds
                 else lastSeenPositionMs
                 val seeked = track.id == currentTrack?.id &&
                     kotlin.math.abs(status.positionMs - expectedPositionMs) > SEEK_REPORT_THRESHOLD_MS
@@ -116,7 +142,34 @@ class PlaybackReporter(
                     (lastShuffle != null && status.shuffle != lastShuffle) ||
                     (lastQueueIds != null && queueIds != lastQueueIds)
 
+                // A gap far beyond our 5s cadence means the reporter's flow was frozen (Android doze /
+                // desktop suspend) — real playback keeps emitting sub-second, so a 30s+ gap can only be
+                // a suspended process, not legitimate background music.
+                val largeGap = elapsedSinceLastEmission.inWholeMilliseconds > FROZEN_GAP_MS
+                // The specific over-count case: the *same* track was playing when the process froze, so
+                // on wake the backend would otherwise bill the whole frozen wall-clock as playback.
+                val frozenGap = track.id == currentTrack?.id && lastPaused == false && largeGap
+
                 if (track.id != currentTrack?.id) {
+                    // Part 1: close the previous track's tracker with an explicit stop *before* opening
+                    // the new one. Neither engine leaves ACTIVE_STATES on a track→track advance, so
+                    // without this the backend's per-track tracker stays open across the boundary —
+                    // which never scrobbles the finished track to server-side ListenBrainz and lets the
+                    // Playback Reporting plugin emit duplicate / runaway-duration rows.
+                    //
+                    // BUT only when the flow wasn't frozen since that track's last report: a stop bills
+                    // wall-clock up to now, so stopping a track whose last report predates a sleep would
+                    // charge the entire sleep to it. On a frozen advance we skip the stop and let the
+                    // server close that tracker at its last progress (correct duration) instead.
+                    if (!largeGap) {
+                        currentTrack?.let { prev ->
+                            try {
+                                (source() as? PlaybackReporting)?.reportPlaybackStopped(prev, previousPositionMs)
+                            } catch (e: Throwable) {
+                                log.warn("reportPlaybackStopped failed for '${prev.name}'", e)
+                            }
+                        }
+                    }
                     try {
                         (source() as? PlaybackReporting)?.reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
                     } catch (e: Throwable) {
@@ -124,6 +177,24 @@ class PlaybackReporter(
                     }
                     currentTrack = track
                     playedRecorded = false
+                    lastProgress = TimeSource.Monotonic.markNow()
+                    // Cross-source now-playing seam: fires only on a genuine track change (not the
+                    // frozen-gap restart below, which is the *same* track already "now playing").
+                    onNowPlaying(track)
+                } else if (frozenGap) {
+                    // Part 2: re-emit *only* a start for the same track — no stop. A fresh start for a
+                    // still-open key makes the Playback Reporting plugin commit the pre-gap segment at
+                    // its last real progress (NOT billed the frozen wall-clock) and open a clean new
+                    // interval at the current position. A stop here would instead bill the whole gap, so
+                    // it is deliberately omitted. `playedRecorded` is left untouched (unlike a real track
+                    // change) so the restart can't re-fire the completed-play callback for a track that
+                    // already counted. Net effect: a listen fragmented by a sleep becomes two correct
+                    // rows rather than one multi-hour phantom row.
+                    try {
+                        (source() as? PlaybackReporting)?.reportPlaybackStarted(track, status.positionMs, status.queue, status.volume, repeat, status.shuffle)
+                    } catch (e: Throwable) {
+                        log.warn("frozen-gap restart failed for '${track.name}'", e)
+                    }
                     lastProgress = TimeSource.Monotonic.markNow()
                 } else if (paused != lastPaused || volumeChanged || stateChanged || seeked ||
                     lastProgress.elapsedNow().inWholeMilliseconds >= PROGRESS_INTERVAL_MS
@@ -155,6 +226,14 @@ class PlaybackReporter(
         // as a seek and report immediately. Above the engine's status cadence + jitter, below a small
         // deliberate scrub, so normal advance never trips it but a real seek does.
         const val SEEK_REPORT_THRESHOLD_MS = 1_500L
+        // How close to the start a same-track position wrap must land to count as a repeat/replay (vs.
+        // an ordinary backward seek that stays mid-track). Together with a backward jump larger than
+        // SEEK_REPORT_THRESHOLD_MS, this distinguishes a repeat-one loop from a normal scrub.
+        const val TRACK_REPLAY_START_MS = 3_000L
+        // A gap between emissions larger than this means the reporter's flow was frozen (device sleep /
+        // doze / suspend) rather than genuinely playing. Sits well above the 5s progress cadence + any
+        // scheduling jitter, so live playback never trips it but a suspended process always does.
+        const val FROZEN_GAP_MS = 30_000L
     }
 }
 

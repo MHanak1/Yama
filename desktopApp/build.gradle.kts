@@ -1,9 +1,24 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+}
+
+kotlin {
+    // JDK 17 to match :shared (sendspin-jvm requires 17); the default 1.8 target can't consume it.
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
+}
+
+// Align the Java compile target with Kotlin's (17); otherwise compileJava defaults to the Gradle JDK
+// (21) and Gradle rejects the Java/Kotlin JVM-target mismatch.
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 dependencies {

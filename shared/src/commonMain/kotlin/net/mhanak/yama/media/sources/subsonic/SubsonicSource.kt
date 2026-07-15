@@ -110,6 +110,7 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
                 // avatar across password changes. Returning null is safer; the switcher falls back
                 // to the Subsonic logo drawable.
                 avatarUrl = null,
+                stableKey = sessionKey(session),
             )
         }
 
@@ -483,12 +484,18 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
         }.getOrDefault(false)
     }
 
+    // Subsonic has no stop/progress-based play counting: a play (and its ListenBrainz scrobble) only
+    // registers on scrobble submission=true, so the completed play must be submitted online here.
+    override val submitCompletedPlayOnline: Boolean get() = true
+
     // --- OfflineCapable -----------------------------------------------------
 
-    override fun downloadSourceKey(): String? {
-        val session = sessions.find { it.id == currentAccountId } ?: return null
-        // SHA-256 of "serverUrl|username", first 16 hex chars — stable per account,
-        // mirrors the pattern JellyfinSource uses for its partition key.
+    override fun downloadSourceKey(): String? =
+        sessions.find { it.id == currentAccountId }?.let { sessionKey(it) }
+
+    // SHA-256 of "serverUrl|username", first 16 hex chars — stable per account, mirrors the pattern
+    // JellyfinSource uses. Shared by downloadSourceKey and SourceAccount.stableKey.
+    private fun sessionKey(session: SubsonicSession): String {
         val hash = MessageDigest.getInstance("SHA-256")
             .digest("${session.serverUrl}|${session.username}".toByteArray())
             .joinToString("") { "%02x".format(it) }

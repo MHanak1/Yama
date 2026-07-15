@@ -25,6 +25,12 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        // JitPack hosts sendspin-jvm (Music Assistant Sendspin player). Scoped to com.github.* so
+        // JitPack isn't queried for every other dependency (those resolve from mavenCentral above).
+        maven {
+            url = uri("https://jitpack.io")
+            mavenContent { includeGroupByRegex("com\\.github\\..*") }
+        }
     }
 }
 

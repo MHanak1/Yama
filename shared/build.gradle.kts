@@ -19,15 +19,26 @@ sqldelight {
 
 kotlin {
 
-    jvm()
-    
+    // Explicitly (re)apply the default source-set hierarchy. Our custom `jvmCommonMain` source set adds
+    // manual `dependsOn` edges below, which otherwise suppress the auto-applied default template and
+    // would drop the standard commonTest→per-target-test edges; calling it here keeps those defaults and
+    // lets the jvmCommonMain edges layer on top.
+    applyDefaultHierarchyTemplate()
+
+    // JDK 17 across both JVM targets: sendspin-jvm (Music Assistant Sendspin player) targets JDK 17.
+    jvm {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_17
+        }
+    }
+
     androidLibrary {
        namespace = "net.mhanak.yama.shared"
        compileSdk = libs.versions.android.compileSdk.get().toInt()
        minSdk = libs.versions.android.minSdk.get().toInt()
-    
+
        compilerOptions {
-           jvmTarget = JvmTarget.JVM_11
+           jvmTarget = JvmTarget.JVM_17
        }
        androidResources {
            enable = true
@@ -40,18 +51,36 @@ kotlin {
     val jellyfinSdkVersion = "1.8.10"
 
     sourceSets {
-        androidMain.dependencies {
-            implementation(libs.compose.uiToolingPreview)
-            implementation("org.slf4j:slf4j-simple:2.0.13")
-            implementation(libs.androidx.security.crypto)
-            implementation(libs.androidx.activity.compose)
-            implementation("androidx.media3:media3-exoplayer:1.5.1")
-            implementation("androidx.media3:media3-session:1.5.1")
-            implementation("com.vanniktech:blurhash:0.3.0")
-            implementation(libs.sqldelight.androidDriver)
-            implementation(libs.androidx.work.runtime)
-            // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
-            implementation(libs.ktor.client.okhttp)
+        // Intermediate source set shared by the two JVM targets (android + desktop jvm). KMP's default
+        // hierarchy has no jvm+android group, so we create one by hand: all Sendspin/Music-Assistant
+        // playback code is identical JVM bytecode for both platforms (only PcmAudioSink diverges), so it
+        // lives here once instead of being duplicated in androidMain and jvmMain.
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
+            dependencies {
+                // Sendspin protocol client for Music Assistant playback (JDK 17, no iOS).
+                implementation(libs.sendspin.jvm)
+                // SendSpinClient's constructor names OkHttpClient + Moshi, but sendspin-jvm's POM scopes
+                // them `runtime` (off our compile classpath), so declare them explicitly here.
+                implementation(libs.okhttp)
+                implementation(libs.moshi.kotlin)
+            }
+        }
+        androidMain {
+            dependsOn(jvmCommonMain)
+            dependencies {
+                implementation(libs.compose.uiToolingPreview)
+                implementation("org.slf4j:slf4j-simple:2.0.13")
+                implementation(libs.androidx.security.crypto)
+                implementation(libs.androidx.activity.compose)
+                implementation("androidx.media3:media3-exoplayer:1.5.1")
+                implementation("androidx.media3:media3-session:1.5.1")
+                implementation("com.vanniktech:blurhash:0.3.0")
+                implementation(libs.sqldelight.androidDriver)
+                implementation(libs.androidx.work.runtime)
+                // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
+                implementation(libs.ktor.client.okhttp)
+            }
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -84,25 +113,30 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
+            // WebSocket client plugin for MusicAssistantSource's command/event socket.
+            implementation(libs.ktor.client.websockets)
         }
-        jvmMain.dependencies {
-            implementation("ch.qos.logback:logback-classic:1.5.6")
-            implementation(libs.jna)
-            implementation(libs.jna.platform)
-            // libvlc wrapper for desktop audio playback. Requires libvlc present at runtime
-            // (a package dependency on Linux, bundled on Windows).
-            implementation("uk.co.caprica:vlcj:4.8.3")
-            implementation("com.vanniktech:blurhash:0.3.0")
-            // Embedded-tag reading for the local-files source (ID3 / Vorbis / FLAC / MP4).
-            implementation("net.jthink:jaudiotagger:3.0.1")
-            // MPRIS D-Bus integration for Linux media key / taskbar / system tray support.
-            // The transport jar is discovered at runtime via ServiceLoader; without it the
-            // MprisService silently no-ops (the start() guard catches the missing-transport error).
-            implementation("com.github.hypfvieh:dbus-java-core:5.1.0")
-            implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.0")
-            implementation(libs.sqldelight.sqliteDriver)
-            // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
-            implementation(libs.ktor.client.okhttp)
+        jvmMain {
+            dependsOn(jvmCommonMain)
+            dependencies {
+                implementation("ch.qos.logback:logback-classic:1.5.6")
+                implementation(libs.jna)
+                implementation(libs.jna.platform)
+                // libvlc wrapper for desktop audio playback. Requires libvlc present at runtime
+                // (a package dependency on Linux, bundled on Windows).
+                implementation("uk.co.caprica:vlcj:4.8.3")
+                implementation("com.vanniktech:blurhash:0.3.0")
+                // Embedded-tag reading for the local-files source (ID3 / Vorbis / FLAC / MP4).
+                implementation("net.jthink:jaudiotagger:3.0.1")
+                // MPRIS D-Bus integration for Linux media key / taskbar / system tray support.
+                // The transport jar is discovered at runtime via ServiceLoader; without it the
+                // MprisService silently no-ops (the start() guard catches the missing-transport error).
+                implementation("com.github.hypfvieh:dbus-java-core:5.1.0")
+                implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.0")
+                implementation(libs.sqldelight.sqliteDriver)
+                // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
+                implementation(libs.ktor.client.okhttp)
+            }
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -28,11 +28,14 @@ data class PlayedEvent(
 
 /**
  * A durable, JSON-backed outbox for **completed plays that happened offline** (DOWNLOADS_PLAN.md
- * Phase 5). Live online scrobbling stays on [PlaybackReporter]'s report* path — calling the backend
- * again here would double-count — so [recordPlay] only persists an event when the source is unreachable
- * (and only if the user opted into offline-play recording). On reconnect, [flush] replays the queued
- * events through [MusicSource.reportPlayed] (a backdated mark-played) and drops each one the backend
- * acknowledges (remove-on-ack, so a partial flush can't double-count).
+ * Phase 5). Online, a completed play is submitted immediately on `AppContainer`'s `onCompletedPlay`
+ * path — source-specifically: Jellyfin's per-track [PlaybackReporting.reportPlaybackStopped] makes the
+ * server mark-played, while Subsonic/Navidrome submit via [PlaybackReporting.reportPlayed]
+ * (`scrobble?submission=true`). Submitting again here would double-count — so [recordPlay] only
+ * persists an event when the source is unreachable (and only if the user opted into offline-play
+ * recording). On reconnect, [flush] replays the queued events through [MusicSource.reportPlayed] (a
+ * backdated mark-played) and drops each one the backend acknowledges (remove-on-ack, so a partial
+ * flush can't double-count).
  *
  * Events are partitioned by `sourceKey` so only the active source's plays flush, and so two accounts
  * never cross-report.

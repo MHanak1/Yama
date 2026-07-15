@@ -2,6 +2,7 @@ package net.mhanak.yama
 
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -35,13 +36,23 @@ import net.mhanak.yama.media.playback.PlaybackReporter
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.playback.FavoriteOutbox
 import net.mhanak.yama.media.playback.ScrobbleOutbox
+import net.mhanak.yama.media.scrobble.ListenBrainzOutbox
+import net.mhanak.yama.media.scrobble.ListenBrainzScrobbler
+import net.mhanak.yama.media.scrobble.Scrobbler
+import net.mhanak.yama.media.scrobble.ValidationResult
+import net.mhanak.yama.media.scrobble.toListenMetadata
 import net.mhanak.yama.media.sources.AccountedSource
 import net.mhanak.yama.media.sources.JellyfinSource
 import net.mhanak.yama.media.sources.MusicSource
+import net.mhanak.yama.media.sources.OfflineCapable
+import net.mhanak.yama.media.sources.PlaybackReporting
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.media.sources.local.LocalSource
 import net.mhanak.yama.media.sources.subsonic.SubsonicSource
+import net.mhanak.yama.session.DEFAULT_LISTENBRAINZ_URL
 import net.mhanak.yama.session.JellyfinSessionRepository
+import net.mhanak.yama.session.ListenBrainzConfig
+import net.mhanak.yama.session.ListenBrainzConfigRepository
 import net.mhanak.yama.session.SubsonicSessionRepository
 import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.util.AppPreferences
@@ -144,6 +155,19 @@ class AppContainer {
         file = File(getAppDataDir().toString(), "scrobble_outbox.json"),
         source = { activeMusicSource },
         recordOffline = { recordOfflinePlays },
+    )
+
+    // --- Native ListenBrainz scrobbling (source-agnostic; see the Scrobbler seam) -------------------
+    // Token/base-URL live in SecureStorage; mirrored into snapshot state so the settings screen and the
+    // scrobbler both read one source of truth. The scrobbler reads this lazily (per call), so a token
+    // edited in settings takes effect without rebuilding the client.
+    val listenBrainzConfigRepository = ListenBrainzConfigRepository(SecureStorage("listenbrainz"))
+    private val _listenBrainzConfig = mutableStateOf(listenBrainzConfigRepository.load())
+    val listenBrainzScrobbler: Scrobbler = ListenBrainzScrobbler(config = { _listenBrainzConfig.value })
+    // Listens that couldn't be submitted immediately (offline, or a transient error), flushed when the
+    // active source becomes reachable again (see observeListenBrainzFlush).
+    val listenBrainzOutbox = ListenBrainzOutbox(
+        file = File(getAppDataDir().toString(), "listenbrainz_outbox.json"),
     )
 
     // Durable offline-favourite queue: hearts toggled while offline, flushed back to the server on
@@ -284,6 +308,83 @@ class AppContainer {
         get() = _recordOfflinePlays.value
         set(value) { _recordOfflinePlays.value = value; AppPreferences.recordOfflinePlays = value }
 
+    // --- Scrobbling (native ListenBrainz) --------------------------------------------------------
+
+    private val _scrobblingEnabled = mutableStateOf(AppPreferences.scrobblingEnabled)
+    /** Master switch. When turned on, any listens stranded in the outbox are flushed. */
+    var scrobblingEnabled: Boolean
+        get() = _scrobblingEnabled.value
+        set(value) {
+            _scrobblingEnabled.value = value
+            AppPreferences.scrobblingEnabled = value
+            if (value && hasListenBrainzToken()) {
+                scope.launch(Dispatchers.IO) { listenBrainzOutbox.flush(listenBrainzScrobbler) }
+            }
+        }
+
+    // Per-source scrobbling toggle mirrored into snapshot state so the settings switches recompose on
+    // change. Reads fall back to AppPreferences (no write-on-read, so it's safe to call during composition).
+    private val _scrobbleEnabled = mutableStateMapOf<String, Boolean>()
+    fun scrobbleEnabled(key: String): Boolean = _scrobbleEnabled[key] ?: AppPreferences.scrobbleEnabled(key)
+    fun setScrobbleEnabled(key: String, enabled: Boolean) {
+        _scrobbleEnabled[key] = enabled
+        AppPreferences.setScrobbleEnabled(key, enabled)
+    }
+
+    /** The scrobble-config key for a source's active account — the same value the settings UI keys a
+     *  row by ([SourceAccount.stableKey]). "local" for the local source (no offline partition). */
+    private fun scrobbleKey(source: MusicSource): String =
+        (source as? OfflineCapable)?.downloadSourceKey() ?: "local"
+
+    /** One selectable per-server scrobble row for the settings screen. */
+    data class ScrobbleTarget(val key: String, val name: String, val subtitle: String?)
+
+    /** Every configured account across all sources (the local source contributes its single fixed
+     *  account), each carrying the [ScrobbleTarget.key] the per-server mode is stored under. */
+    fun scrobbleTargets(): List<ScrobbleTarget> = buildList {
+        sources.forEach { src ->
+            (src as? AccountedSource)?.accounts?.forEach { acc ->
+                add(ScrobbleTarget(acc.stableKey, acc.name, acc.subtitle))
+            }
+        }
+    }
+
+    val listenBrainzUserName: String? get() = _listenBrainzConfig.value?.userName
+    val listenBrainzToken: String get() = _listenBrainzConfig.value?.userToken ?: ""
+    val listenBrainzBaseUrl: String get() = _listenBrainzConfig.value?.baseUrl ?: DEFAULT_LISTENBRAINZ_URL
+    fun hasListenBrainzToken(): Boolean = !_listenBrainzConfig.value?.userToken.isNullOrBlank()
+
+    /**
+     * Validate [token]/[baseUrl] against the service; on success persist them (with the resolved user
+     * name) and return the result for the UI to display. On failure the previous config is restored so
+     * an invalid token never becomes active.
+     */
+    suspend fun validateAndSaveListenBrainz(token: String, baseUrl: String): ValidationResult {
+        val previous = _listenBrainzConfig.value
+        val staged = ListenBrainzConfig(
+            userToken = token.trim(),
+            baseUrl = baseUrl.trim().ifBlank { DEFAULT_LISTENBRAINZ_URL },
+            userName = previous?.userName,
+        )
+        _listenBrainzConfig.value = staged
+        val result = listenBrainzScrobbler.validate()
+        if (result.valid) {
+            val saved = staged.copy(userName = result.userName)
+            listenBrainzConfigRepository.save(saved)
+            _listenBrainzConfig.value = saved
+        } else {
+            _listenBrainzConfig.value = previous
+        }
+        return result
+    }
+
+    /** Forget the ListenBrainz token and turn scrobbling off. */
+    fun clearListenBrainz() {
+        listenBrainzConfigRepository.clear()
+        _listenBrainzConfig.value = null
+        scrobblingEnabled = false
+    }
+
     private val _skipTracksWithoutMetadata = mutableStateOf(AppPreferences.skipTracksWithoutMetadata)
     var skipTracksWithoutMetadata: Boolean
         get() = _skipTracksWithoutMetadata.value
@@ -311,11 +412,50 @@ class AppContainer {
         PlaybackReporter(
             playback.local.status, { true }, { activeMusicSource },
             onCompletedPlay = { track, positionMs ->
+                val src = activeMusicSource
+                val reporting = src as? PlaybackReporting
+                // Online completed-play submission for sources that count a play only from an explicit
+                // submission (Subsonic/Navidrome: scrobble submission=true, which also forwards the
+                // ListenBrainz scrobble). Jellyfin's submitCompletedPlayOnline is false — its per-track
+                // reportPlaybackStopped already makes the server mark-played, so submitting again here
+                // would double the play count and the listen.
+                if (src.isReachable.value && reporting?.submitCompletedPlayOnline == true) {
+                    scope.launch(Dispatchers.IO) {
+                        runCatching { reporting.reportPlayed(track.id, System.currentTimeMillis(), positionMs) }
+                    }
+                }
+                // Offline durability: a no-op while online, this persists the play so it can be replayed
+                // through reportPlayed on reconnect (covers both source kinds when unreachable).
                 scrobbleOutbox.recordPlay(track.id, positionMs)
                 playCount.recordLocalPlay(track)
+
+                // Native ListenBrainz submission — independent of the source's own server-side
+                // reporting above (fires for every source, incl. local files). Governed by the master
+                // switch and this source's per-source toggle (on unless the user excluded a source that
+                // already scrobbles server-side). Submitted immediately; queued to the outbox on
+                // failure/offline for a later flush.
+                if (scrobblingEnabled && hasListenBrainzToken() && scrobbleEnabled(scrobbleKey(src))) {
+                    val metadata = track.toListenMetadata()
+                    val listenedAtSec = System.currentTimeMillis() / 1000
+                    scope.launch(Dispatchers.IO) {
+                        if (!listenBrainzScrobbler.submitListen(metadata, listenedAtSec)) {
+                            listenBrainzOutbox.enqueue(metadata, listenedAtSec)
+                        }
+                    }
+                }
+            },
+            onNowPlaying = { track ->
+                // Push a ListenBrainz "now playing" whenever scrobbling is enabled for this source.
+                // Ephemeral — never queued.
+                val src = activeMusicSource
+                if (scrobblingEnabled && hasListenBrainzToken() && scrobbleEnabled(scrobbleKey(src))) {
+                    val metadata = track.toListenMetadata()
+                    scope.launch(Dispatchers.IO) { listenBrainzScrobbler.nowPlaying(metadata) }
+                }
             },
         ).start()
         observeCastTargetAvailability()
+        observeListenBrainzFlush()
         observeRecentTrackCaching()
         scope.launch(Dispatchers.IO) { queue.restore() }
     }
@@ -361,6 +501,26 @@ class AppContainer {
                     val target = playback.viewedTarget ?: return@collect
                     if (targets.isNotEmpty() && targets.none { it.id == target.id }) {
                         playback.selectTarget(null, remember = false)
+                    }
+                }
+        }
+    }
+
+    /**
+     * Drain the ListenBrainz outbox when the active source becomes reachable again — a reasonable proxy
+     * for "we have connectivity". [StateFlow] replays the current value on collect, so a listen queued
+     * offline is submitted as soon as the source reconnects (and on launch if already online). No-op
+     * when there's nothing queued or no token is set.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeListenBrainzFlush() {
+        scope.launch {
+            snapshotFlow { activeMusicSource }
+                .flatMapLatest { it.isReachable }
+                .distinctUntilChanged()
+                .collect { reachable ->
+                    if (reachable && hasListenBrainzToken()) {
+                        listenBrainzOutbox.flush(listenBrainzScrobbler)
                     }
                 }
         }

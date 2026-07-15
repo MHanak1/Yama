@@ -64,6 +64,22 @@ interface PlaybackReporting {
      * the backend accepted it so the outbox can drop the event; false means keep queued.
      */
     suspend fun reportPlayed(trackId: String, playedAtEpochMs: Long, positionMs: Long): Boolean
+
+    /**
+     * Whether a completed play must be submitted explicitly via [reportPlayed] while **online**.
+     *
+     * Sources that infer the play from the ongoing report* stream return **false** (the default):
+     * Jellyfin's server auto-marks-played (play count + server-side ListenBrainz) once the per-track
+     * [reportPlaybackStopped] lands near the end, so an extra [reportPlayed] would double-count.
+     *
+     * Sources with no such inference return **true**: Subsonic/Navidrome only count a play — and only
+     * forward a ListenBrainz scrobble — on `scrobble?submission=true`, which is [reportPlayed]; the
+     * now-playing report ([reportPlaybackStarted], `submission=false`) never counts.
+     *
+     * The offline path is unaffected either way: [net.mhanak.yama.media.playback.ScrobbleOutbox]
+     * always replays via [reportPlayed] on reconnect.
+     */
+    val submitCompletedPlayOnline: Boolean get() = false
 }
 
 /**
@@ -75,6 +91,10 @@ interface PlaybackReporting {
  * @param avatarUrl Remote profile image URL, or null when there is no per-account image (e.g.
  *   Local Files). [net.mhanak.yama.ui.components.library.SourceAvatar] falls back to the source
  *   logo drawable when this is null.
+ * @param stableKey The account's durable partition identity — the same value
+ *   [OfflineCapable.downloadSourceKey] returns when this account is active (e.g. `"jellyfin:<hash>"`).
+ *   Stable across re-login (derived from server + user, not the ephemeral session id), so it's the key
+ *   for per-account settings like the scrobble mode.
  */
 data class SourceAccount(
     val id: String,
@@ -82,6 +102,7 @@ data class SourceAccount(
     val name: String,
     val subtitle: String?,
     val avatarUrl: String?,
+    val stableKey: String,
 )
 
 /**

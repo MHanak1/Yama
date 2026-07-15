@@ -121,6 +121,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         avatarUrl = userId?.let { uid ->
             "${serverUrl.trimEnd('/')}/Users/$uid/Images/Primary"
         },
+        stableKey = sessionKey(this),
     )
 
     // -------------------------------------------------------------------------------------
@@ -158,8 +159,12 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
 
     /** Partition key for this session's downloads — stable per server+user so two accounts on the same
      * device (or the same account on two servers) never share download rows or files. */
-    override fun downloadSourceKey(): String? {
-        val s = sessions.find { it.id == currentSessionId } ?: return null
+    override fun downloadSourceKey(): String? =
+        sessions.find { it.id == currentSessionId }?.let { sessionKey(it) }
+
+    /** The account's stable partition key — server+user hashed, so it survives re-login and is shared
+     *  by [downloadSourceKey] and [SourceAccount.stableKey]. */
+    private fun sessionKey(s: JellyfinSession): String {
         val token = MessageDigest.getInstance("SHA-256")
             .digest("${s.serverUrl}|${s.userId}".toByteArray())
             .joinToString("") { "%02x".format(it) }

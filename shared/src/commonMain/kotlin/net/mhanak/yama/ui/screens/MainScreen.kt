@@ -103,6 +103,7 @@ import net.mhanak.yama.ui.views.LibraryView
 import net.mhanak.yama.ui.views.settings.LocalLibrarySettingsView
 import net.mhanak.yama.ui.views.settings.PlaybackSettingsView
 import net.mhanak.yama.ui.views.detail.PlaylistDetailView
+import net.mhanak.yama.ui.views.settings.ScrobblingSettingsView
 import net.mhanak.yama.ui.views.settings.SettingsView
 
 private const val DETAIL_DURATION = 320
@@ -181,6 +182,7 @@ fun MainScreen() {
     val onSettings = destination?.hasRoute<SettingsRoute>() == true ||
         destination?.hasRoute<AppearanceSettingsRoute>() == true ||
         destination?.hasRoute<PlaybackSettingsRoute>() == true ||
+        destination?.hasRoute<ScrobblingSettingsRoute>() == true ||
         destination?.hasRoute<LocalLibrarySettingsRoute>() == true ||
         destination?.hasRoute<DownloadsSettingsRoute>() == true
 
@@ -450,6 +452,12 @@ fun MainScreen() {
             }
             detailComposable<PlaybackSettingsRoute> {
                 PlaybackSettingsView(
+                    onBack = { navController.popBackStack() },
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<ScrobblingSettingsRoute> {
+                ScrobblingSettingsView(
                     onBack = { navController.popBackStack() },
                     bottomContentPadding = bottomInset,
                 )

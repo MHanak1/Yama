@@ -160,6 +160,29 @@ object AppPreferences {
         get() = settings.getBoolean("record_offline_plays", true)
         set(value) { settings.putBoolean("record_offline_plays", value) }
 
+    // --- Scrobbling (native ListenBrainz; token lives in SecureStorage, not here) -------------------
+
+    // Master switch for first-party ListenBrainz scrobbling. Off by default — turned on once the user
+    // configures a token. When off, the per-server modes below are ignored entirely (and grayed in UI).
+    var scrobblingEnabled: Boolean
+        get() = settings.getBoolean("scrobbling_enabled", false)
+        set(value) { settings.putBoolean("scrobbling_enabled", value) }
+
+    // Per-source native-LB scrobbling toggle, keyed by the account's stable partition key ([key] =
+    // SourceAccount.stableKey / OfflineCapable.downloadSourceKey, e.g. "jellyfin:<hash>" or "local").
+    // On by default for every source; the user turns it Off only for a source that already scrobbles
+    // to ListenBrainz server-side, to avoid a duplicate listen.
+    fun scrobbleEnabled(key: String): Boolean {
+        settings.getBooleanOrNull("scrobble_enabled_$key")?.let { return it }
+        // Migrate the legacy per-source ScrobbleMode: only an explicit "Off" stays off; the old
+        // "Always"/"OfflineOnly" (and no stored value) all mean On.
+        return settings.getStringOrNull("scrobble_mode_$key") != "Off"
+    }
+
+    fun setScrobbleEnabled(key: String, enabled: Boolean) {
+        settings.putBoolean("scrobble_enabled_$key", enabled)
+    }
+
     // Hide local files with no embedded metadata (no readable title) from the library. On by default;
     // the index still stores them, so toggling this off brings them back without a rescan.
     var skipTracksWithoutMetadata: Boolean

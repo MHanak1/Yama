@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
@@ -42,6 +43,7 @@ import net.mhanak.yama.ui.screens.AppearanceSettingsRoute
 import net.mhanak.yama.ui.screens.DownloadsSettingsRoute
 import net.mhanak.yama.ui.screens.LocalLibrarySettingsRoute
 import net.mhanak.yama.ui.screens.PlaybackSettingsRoute
+import net.mhanak.yama.ui.screens.ScrobblingSettingsRoute
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +93,15 @@ fun SettingsView(
                     title = "Playback",
                     subtitle = "Volume, quality & remote control",
                     onClick = { onNavigate(PlaybackSettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingsCategoryCard(
+                    icon = Icons.Default.CloudUpload,
+                    iconContainerColor = Color.hsv(340f, 0.6f, 1f),
+                    iconContentColor = Color.hsv(340f, 1f, 0.4f),
+                    title = "Scrobbling",
+                    subtitle = "Submit your listens to ListenBrainz",
+                    onClick = { onNavigate(ScrobblingSettingsRoute) },
                 )
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(

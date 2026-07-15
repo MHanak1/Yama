@@ -59,6 +59,9 @@ class LocalSource(
         name = SourceType.Local.displayName,
         subtitle = "On this device",
         avatarUrl = null,
+        // The local source has no offline partition (not OfflineCapable), so its stable key is the
+        // fixed "local" — matching AppContainer.scrobbleKey's fallback for per-server settings.
+        stableKey = SOURCE_KEY,
     )
 
     override val accounts: List<SourceAccount> get() = listOf(localAccount)
