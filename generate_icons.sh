@@ -6,6 +6,7 @@ SVG="$SCRIPT_DIR/icon.svg"
 BANNER_SVG="$SCRIPT_DIR/banner.svg"
 ANDROID_RES="$SCRIPT_DIR/androidApp/src/main/res"
 SHARED_RES="$SCRIPT_DIR/shared/src/androidMain/res"
+COMPOSE_RES="$SCRIPT_DIR/shared/src/commonMain/composeResources/drawable"
 DESKTOP_RES="$SCRIPT_DIR/desktopApp/src/main/resources"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -178,6 +179,16 @@ inkscape "$BANNER_SVG" --export-type=png \
     --export-filename="$ANDROID_RES/drawable-xhdpi/tv_banner.png" \
     -w 640 -h 360 2>/dev/null
 echo "  drawable-xhdpi/tv_banner.png (640x360)"
+
+echo "Login hero logo (Compose shared resources)..."
+# The gradient waveform mark ONLY — background layer (rect) stripped — so it sits on transparency
+# beside the in-app "Yama" wordmark in the login screen's LoginHeader (which pairs it with a themed
+# Text, not baked-in copy). Exporting layer1 with --export-id-only hides the background rect.
+# Compose Resources can't load .svg directly, so ship a PNG; 512px is ample for the ~56dp hero.
+mkdir -p "$COMPOSE_RES"
+inkscape "$SVG" --export-id=layer1 --export-id-only --export-area-page --export-type=png \
+    --export-filename="$COMPOSE_RES/yama_logo.png" -w 512 -h 512 2>/dev/null
+echo "  yama_logo.png (512x512, transparent — waveform only)"
 
 echo "Desktop icons..."
 mkdir -p "$DESKTOP_RES"

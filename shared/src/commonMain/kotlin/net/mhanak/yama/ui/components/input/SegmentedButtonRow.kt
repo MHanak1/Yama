@@ -68,7 +68,7 @@ fun <T> SegmentedButtonRow(
                 options.forEachIndexed { index, option ->
                     key(index) {
                         val selected = option == selectedOption
-                        val shape = segmentedItemShape(index, count)
+                        val shape = segmentedItemShape(index, count, vertical = false)
                         val bringIntoViewRequester = remember { BringIntoViewRequester() }
 
                         LaunchedEffect(selected) {
@@ -121,13 +121,28 @@ fun <T> SegmentedButtonRow(
     }
 }
 
-private fun segmentedItemShape(index: Int, count: Int): Shape = when {
+/**
+ * Corner shape for one item in a joined segmented group. The outer ends of the group stay fully
+ * rounded (50%) while the corners where items meet tighten to 25%, so a run of items reads as a
+ * single connected control. [vertical] maps that same logic onto top/bottom (for a stacked rail)
+ * instead of start/end (for a horizontal row). Shared with the navigation rail.
+ */
+internal fun segmentedItemShape(index: Int, count: Int, vertical: Boolean = false): Shape = when {
     count == 1 -> RoundedCornerShape(percent = 50)
-    index == 0 -> RoundedCornerShape(
+    // First item: outer corners (top for vertical, start for horizontal) fully rounded; the pair
+    // facing the next item tightened to 25%.
+    index == 0 -> if (vertical) RoundedCornerShape(
+        topStartPercent = 50, topEndPercent = 50,
+        bottomStartPercent = 25, bottomEndPercent = 25,
+    ) else RoundedCornerShape(
         topStartPercent = 50, bottomStartPercent = 50,
         topEndPercent = 25, bottomEndPercent = 25,
     )
-    index == count - 1 -> RoundedCornerShape(
+    // Last item: mirror of the first.
+    index == count - 1 -> if (vertical) RoundedCornerShape(
+        topStartPercent = 25, topEndPercent = 25,
+        bottomStartPercent = 50, bottomEndPercent = 50,
+    ) else RoundedCornerShape(
         topStartPercent = 25, bottomStartPercent = 25,
         topEndPercent = 50, bottomEndPercent = 50,
     )

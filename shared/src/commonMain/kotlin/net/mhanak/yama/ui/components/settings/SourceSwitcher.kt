@@ -61,6 +61,14 @@ import net.mhanak.yama.ui.components.library.SourceAvatar
 
 private const val ANIM_MS = 200
 
+// Both rail widths must render at the same total height so toggling wide <-> slim never shifts
+// the nav items below. Total = content height + 2 * outer vertical padding, tuned to 64dp:
+//   slim: 44 (chip)  + 2 * 10 = 64
+//   wide: 56 (pill)  + 2 * 4  = 64
+// The pill height is fixed (not padding-driven) so an account subtitle can't grow it past 56dp.
+private val CHIP_HEIGHT = 44.dp   // slim rail avatar chip; also matches the search bar height
+private val PILL_HEIGHT = 56.dp   // wide rail identity pill
+
 @Composable
 fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, onRequestClose: () -> Unit = {}) {
     val appContainer = LocalAppContainer.current
@@ -108,14 +116,14 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
         appContainer.showLoginScreen = true
     }
 
-    Box(modifier = modifier.padding(horizontal = if (collapsed) 8.dp else 16.dp, vertical = if (collapsed) 10.dp else 8.dp)) {
+    Box(modifier = modifier.padding(horizontal = if (collapsed) 8.dp else 16.dp, vertical = if (collapsed) 10.dp else 4.dp)) {
         if (collapsed) {
             // 96dp narrow rail: avatar-only chip + popover panel.
             // 44dp chip height matches the search bar (SearchBar default 44dp, centred in 64dp TopAppBar,
             // top edge at statusBar+10dp; we use vertical=10dp above to align). The avatar circle fills
             // the chip so the secondaryContainer background extends to the tap target — no IconButton
             // wrapper, which would impose a 48dp ripple that overflows the 44dp box.
-            Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().height(CHIP_HEIGHT), contentAlignment = Alignment.Center) {
                 if (activeAccount != null) {
                     SourceAvatar(
                         sourceType = activeAccount.sourceType,
@@ -231,9 +239,10 @@ private fun IdentityRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(PILL_HEIGHT)
             .background(MaterialTheme.colorScheme.secondaryContainer)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (account != null) {
