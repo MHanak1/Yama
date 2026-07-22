@@ -5,6 +5,7 @@ package net.mhanak.yama.ui.theme
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
@@ -222,10 +223,14 @@ fun GlassFilledIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    // Overridable so callers can animate an expressive shape morph on press; the same shape is used
+    // for the glass clip so the blur silhouette morphs with the button. [interactionSource] is
+    // likewise exposed so a caller can observe the press to drive that animation.
+    shape: Shape = ButtonDefaults.shape,
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable () -> Unit,
 ) {
     val containerColor = MaterialTheme.colorScheme.primary
-    val shape = ButtonDefaults.shape
     // Unspecified prevents M3's minimumInteractiveComponentSize from inflating the layout node to
     // 48dp, which would make the glass taller than the visible button border.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
@@ -235,6 +240,7 @@ fun GlassFilledIconButton(
             enabled = enabled,
             shape = shape,
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Transparent),
+            interactionSource = interactionSource,
             content = content,
         )
     }

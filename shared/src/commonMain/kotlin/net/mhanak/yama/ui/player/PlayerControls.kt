@@ -1,9 +1,14 @@
 package net.mhanak.yama.ui.player
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Lyrics
@@ -28,14 +34,21 @@ import androidx.compose.material.icons.filled.ShuffleOn
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Lyrics
+import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,13 +61,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.util.lerp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.theme.GlassFilledIconButton
 import net.mhanak.yama.ui.theme.GlassIconButton
 import net.mhanak.yama.ui.components.input.FavoriteButton
+import net.mhanak.yama.media.playback.PlaybackState
 import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlayerStatus
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
@@ -132,6 +148,7 @@ fun formatPlaybackTime(ms: Long): String {
  * [scale]: multiplies every size (buttons, icons, spacing, time text) so the controls grow to fill
  * a large window. 1f = phone baseline; [FullPlayer] drives this continuously.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PlayerControls(
     status: PlayerStatus,
@@ -193,57 +210,149 @@ fun PlayerControls(
                 .width(IntrinsicSize.Max),
             horizontalAlignment = Alignment.CenterHorizontally,
         ){
+            // prev/play/next each get an interaction source so ButtonGroup's animateWidth can expand the
+            // pressed button and compress its neighbours — the expressive "squish" physics. Shuffle and
+            // repeat sit outside the group, so they need no such source and never shove the transport.
+            val prevInteraction = remember { MutableInteractionSource() }
+            val playInteraction = remember { MutableInteractionSource() }
+            val nextInteraction = remember { MutableInteractionSource() }
+            // Inactive toggles are transparent so they read like the plain prev/next icon buttons; only
+            // the active (checked) state fills, keeping the row visually even instead of boxing off the
+            // toggles behind grey containers.
+            val toggleColors = ToggleButtonDefaults.toggleButtonColors(
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // A single 0→1 fraction drives all three transport shapes together: 0 when paused (three
+            // full circles), 1 when playing (play squishes to a squircle and the prev/next edges
+            // facing it tighten, so the trio reads as one connected segmented button). Spring so the
+            // morph feels physical rather than mechanically timed.
+            val morph by animateFloatAsState(
+                targetValue = if (status.isPlaying) 1f else 0f,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "transportMorph",
+            )
+            // All three transport buttons share one height, so corners as a fraction of that height
+            // (50% = full round, 25% = segmented interface — the same ratio segmentedItemShape() uses)
+            // keep the facing edges visually matched at every frame of the morph.
+            val cornerFrac = lerp(0.50f, 0.25f, morph)
+            val buttonSize = 56.dp * scale
+            val playShape = RoundedCornerShape(buttonSize * cornerFrac)
+            // Prev: outer (start) corners stay fully round; the inner (end) corners facing play morph.
+            val prevShape = RoundedCornerShape(
+                topStart = buttonSize * 0.5f, bottomStart = buttonSize * 0.5f,
+                topEnd = buttonSize * cornerFrac, bottomEnd = buttonSize * cornerFrac,
+            )
+            // Next: mirror — inner (start) corners morph, outer (end) corners stay round.
+            val nextShape = RoundedCornerShape(
+                topStart = buttonSize * cornerFrac, bottomStart = buttonSize * cornerFrac,
+                topEnd = buttonSize * 0.5f, bottomEnd = buttonSize * 0.5f,
+            )
+            // Prev/next share the seek-bar's inactive-track colour so the transport reads as tied to the
+            // scrubber above it. Bound to SliderDefaults.colors().inactiveTrackColor directly (rather than
+            // hardcoding a role) so it stays in lockstep with whatever the Slider actually paints —
+            // currently secondaryContainer, hence onSecondaryContainer for the glyphs.
+            val sideColors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = SliderDefaults.colors().inactiveTrackColor,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+
+            // Shuffle and repeat flank the transport group but sit *outside* it, vertically centred
+            // against its taller (56dp) buttons, so toggling one animates only itself (the checked-shape
+            // morph) and never nudges prev/play/next.
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp * scale, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp * scale, Alignment.CenterHorizontally),
             ) {
                 if (showSecondaryControls) {
-                    IconButton(
-                        onClick = { player.setShuffle(!status.shuffle) },
-                        modifier = downMod.size(48.dp * scale)
+                    // Shape still morphs round → squarish when active; the transparent container means
+                    // that morph (not a grey box) is what signals shuffle-on.
+                    ToggleButton(
+                        checked = status.shuffle,
+                        onCheckedChange = { player.setShuffle(it) },
+                        modifier = Modifier.then(downMod).size(48.dp * scale),
+                        shapes = ToggleButtonDefaults.shapes(),
+                        colors = toggleColors,
+                        contentPadding = PaddingValues(0.dp),
                     ) {
                         Icon(
                             if (status.shuffle) Icons.Filled.ShuffleOn else Icons.Filled.Shuffle,
                             contentDescription = "Shuffle",
-                            tint = if (status.shuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(24.dp * scale)
                         )
                     }
                 }
 
-                IconButton(onClick = { player.previous() }, modifier = downMod.size(48.dp * scale)) {
-                    Icon(
-                        Icons.Filled.SkipPrevious,
-                        contentDescription = "Previous",
-                        modifier = Modifier.size(24.dp * scale)
-                    )
-                }
-
-                FilledIconButton(
-                    onClick = { player.togglePlayPause() },
-                    modifier = Modifier.size(56.dp * scale)
-                        .then(if (playPauseFocusRequester != null) Modifier.focusRequester(playPauseFocusRequester) else Modifier)
-                        .then(downMod),
+                ButtonGroup(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp * scale, Alignment.CenterHorizontally),
                 ) {
-                    Icon(
-                        if (status.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (status.isPlaying) "Pause" else "Play",
-                        modifier = Modifier.size(24.dp * scale),
-                    )
-                }
+                    FilledIconButton(
+                        onClick = { player.previous() },
+                        modifier = Modifier.animateWidth(prevInteraction).then(downMod).size(56.dp * scale),
+                        shape = prevShape,
+                        colors = sideColors,
+                        interactionSource = prevInteraction,
+                    ) {
+                        Icon(
+                            Icons.Filled.SkipPrevious,
+                            contentDescription = "Previous",
+                            modifier = Modifier.size(24.dp * scale)
+                        )
+                    }
 
-                IconButton(onClick = { player.next() }, modifier = downMod.size(48.dp * scale)) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(24.dp * scale))
+                    FilledIconButton(
+                        onClick = { player.togglePlayPause() },
+                        modifier = Modifier.animateWidth(playInteraction).size(56.dp * scale)
+                            .then(if (playPauseFocusRequester != null) Modifier.focusRequester(playPauseFocusRequester) else Modifier)
+                            .then(downMod),
+                        shape = playShape,
+                        interactionSource = playInteraction,
+                    ) {
+                        // While the track is buffering, swap the glyph for the app's standard spinner. It
+                        // must be tinted onPrimary (LocalContentColor here) — the indicator's default
+                        // primary colour would be invisible on the primary-filled container.
+                        Crossfade(status.state == PlaybackState.Buffering, label = "playLoading") { loading ->
+                            if (loading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp * scale),
+                                    color = LocalContentColor.current,
+                                )
+                            } else {
+                                Icon(
+                                    if (status.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    contentDescription = if (status.isPlaying) "Pause" else "Play",
+                                    modifier = Modifier.size(24.dp * scale),
+                                )
+                            }
+                        }
+                    }
+
+                    FilledIconButton(
+                        onClick = { player.next() },
+                        modifier = Modifier.animateWidth(nextInteraction).then(downMod).size(56.dp * scale),
+                        shape = nextShape,
+                        colors = sideColors,
+                        interactionSource = nextInteraction,
+                    ) {
+                        Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(24.dp * scale))
+                    }
                 }
 
                 if (showSecondaryControls) {
-                    IconButton(
-                        onClick = { player.setRepeat(status.repeat.next()) },
-                        modifier = downMod.size(48.dp * scale)
+                    // Tri-state (Off → All → One → Off): the tap always cycles via next(), while
+                    // `checked` (repeat != Off) drives the same fill + shape morph. The icon still
+                    // distinguishes All vs One.
+                    ToggleButton(
+                        checked = status.repeat != RepeatMode.Off,
+                        onCheckedChange = { player.setRepeat(status.repeat.next()) },
+                        modifier = Modifier.then(downMod).size(48.dp * scale),
+                        shapes = ToggleButtonDefaults.shapes(),
+                        colors = toggleColors,
+                        contentPadding = PaddingValues(0.dp),
                     ) {
                         Icon(
                             if (status.repeat == RepeatMode.One) Icons.Filled.RepeatOneOn else if (status.repeat == RepeatMode.All) Icons.Filled.RepeatOn else Icons.Filled.Repeat,
-                            tint = if (status.repeat != RepeatMode.Off) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             contentDescription = "Repeat",
                             modifier = Modifier.size(24.dp * scale),
                         )
@@ -284,14 +393,20 @@ fun PlayerControls(
                             modifier = Modifier.size(24.dp * scale)
                         )
                     }
-                    IconButton(
-                        onClick = onToggleLyrics,
+                    // Lyrics toggle: same round→squarish fill-on-active morph as shuffle/repeat, so an
+                    // open lyrics pane reads from the button's silhouette. Shares `toggleColors`
+                    // (transparent until checked, then fills primary).
+                    ToggleButton(
+                        checked = showLyrics,
+                        onCheckedChange = { onToggleLyrics() },
                         modifier = Modifier.focusRequester(bottomCenterFocus).then(loopUp).size(48.dp * scale),
+                        shapes = ToggleButtonDefaults.shapes(),
+                        colors = toggleColors,
+                        contentPadding = PaddingValues(0.dp),
                     ) {
                         Icon(
                             if (showLyrics) Icons.Filled.Lyrics else Icons.Outlined.Lyrics,
                             contentDescription = "Lyrics",
-                            tint = if (showLyrics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(24.dp * scale),
                         )
                     }
@@ -301,6 +416,7 @@ fun PlayerControls(
                         initial = status.current?.favorite,
                         modifier = loopUp.size(48.dp * scale),
                         iconSize = 24.dp * scale,
+                        emphasized = true,
                     )
                 }
             }

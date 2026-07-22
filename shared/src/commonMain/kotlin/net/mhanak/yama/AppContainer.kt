@@ -23,9 +23,11 @@ import net.mhanak.yama.coordinators.FavoritesCoordinator
 import net.mhanak.yama.coordinators.OfflineSyncOrchestrator
 import net.mhanak.yama.coordinators.PlayCountRecorder
 import net.mhanak.yama.coordinators.QueuePersistence
+import net.mhanak.yama.media.download.CachePolicyDeps
 import net.mhanak.yama.media.download.CatalogCache
 import net.mhanak.yama.media.download.DownloadManager
 import net.mhanak.yama.media.download.DownloadRepository
+import net.mhanak.yama.media.download.createCachePolicy
 import net.mhanak.yama.media.model.InMemoryTrackUserDataStore
 import net.mhanak.yama.media.model.TrackUserDataStore
 import net.mhanak.yama.db.createYamaDatabase
@@ -55,6 +57,7 @@ import net.mhanak.yama.session.ListenBrainzConfig
 import net.mhanak.yama.session.ListenBrainzConfigRepository
 import net.mhanak.yama.session.SubsonicSessionRepository
 import net.mhanak.yama.ui.theme.AlbumTintMode
+import net.mhanak.yama.ui.player.PlayerLayoutMode
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.SecureStorage
 import net.mhanak.yama.util.StreamingQuality
@@ -150,6 +153,19 @@ class AppContainer {
         cacheBudgetMb = { cacheSizeBudgetMb },
     )
 
+    // The platform's cache producers (prefetch + play-capture) and invalidation, behind one seam. Cache
+    // and prefetch are distinct mechanisms feeding one store: desktop fills `Retention.Cached` rows via
+    // the DownloadManager; Android fills the ExoPlayer read-through SimpleCache. See [CachePolicy].
+    val cachePolicy = createCachePolicy(
+        CachePolicyDeps(
+            downloadManager = downloadManager,
+            source = { activeMusicSource },
+            quality = { streamingQuality },
+            cacheDir = File(getAppDataDir().toString(), "media-cache"),
+            cacheBudgetMb = { cacheSizeBudgetMb },
+        ),
+    )
+
     // Durable offline-scrobble queue: completed plays that happened offline, flushed on reconnect.
     val scrobbleOutbox = ScrobbleOutbox(
         file = File(getAppDataDir().toString(), "scrobble_outbox.json"),
@@ -226,6 +242,7 @@ class AppContainer {
         source = { activeMusicSource },
         playback = playback,
         downloads = downloads,
+        cachePolicy = cachePolicy,
         catalogCache = catalogCache,
         userData = userData,
         scrobbleOutbox = scrobbleOutbox,
@@ -293,6 +310,11 @@ class AppContainer {
     var cacheRecentTracks: Boolean
         get() = _cacheRecentTracks.value
         set(value) { _cacheRecentTracks.value = value; AppPreferences.cacheRecentTracks = value }
+
+    private val _prefetchUpcoming = mutableStateOf(AppPreferences.prefetchUpcoming)
+    var prefetchUpcoming: Boolean
+        get() = _prefetchUpcoming.value
+        set(value) { _prefetchUpcoming.value = value; AppPreferences.prefetchUpcoming = value }
 
     private val _cacheSizeBudgetMb = mutableStateOf(AppPreferences.cacheSizeBudgetMb)
     var cacheSizeBudgetMb: Int
@@ -527,16 +549,26 @@ class AppContainer {
     }
 
     /**
-     * When a new track starts on the local player, let the download layer refresh its LRU timestamp (if
-     * already offline) and — when the recent-tracks cache is enabled — auto-cache it. Keyed on the
-     * track id so it fires once per track, not on every status tick.
+     * The two cache producers, driven off the local player's status. These are deliberately *separate
+     * mechanisms* (see [net.mhanak.yama.media.download.CachePolicy]):
+     *
+     * - **Play-capture** (reactive): on each new current track, [CachePolicy.onPlayed] caches the track
+     *   that's playing when [cacheRecentTracks] is on. Desktop background-re-fetches a not-yet-cached
+     *   current track; Android's engine captures the stream for free (this just records a version
+     *   baseline). This replaces the old "auto-download the current track" path — the source of the
+     *   double-fetch, since the player was already streaming those same bytes.
+     * - **Prefetch** (predictive): on each new queue position, fetch-ahead up to 3 upcoming tracks
+     *   (≤20 min) into the cache when [prefetchUpcoming] is on, so sequential playback plays each track
+     *   from the cache — a single fetch — and the queue survives going offline.
+     *
+     * Both are keyed on id / index so they fire once per track / position, not on every status tick.
      */
     private fun observeRecentTrackCaching() {
         scope.launch {
             playback.local.status
                 .map { it.current }
                 .distinctUntilChanged { a, b -> a?.id == b?.id }
-                .collect { track -> track?.let { downloadManager.onTrackPlayed(it, cacheRecentTracks) } }
+                .collect { track -> track?.let { cachePolicy.onPlayed(it, captureEnabled = cacheRecentTracks) } }
         }
         scope.launch {
             var lookAheadJob: Job? = null
@@ -546,7 +578,7 @@ class AppContainer {
                 .collect { (index, queue) ->
                     // Cancel any in-progress batch from the previous queue position.
                     lookAheadJob?.cancel()
-                    if (!cacheRecentTracks) return@collect
+                    if (!prefetchUpcoming) return@collect
                     lookAheadJob = scope.launch {
                         val maxMs = 20 * 60 * 1000L
                         var totalMs = 0L
@@ -557,7 +589,7 @@ class AppContainer {
                             if (totalMs + dur > maxMs) break
                             totalMs += dur
                             count++
-                            downloadManager.cacheUpcoming(track) // suspends until done before next
+                            cachePolicy.prefetch(track) // suspends until done before next
                         }
                     }
                 }
@@ -598,6 +630,11 @@ class AppContainer {
     var albumTintMode: AlbumTintMode
         get() = _albumTintMode.value
         set(value) { _albumTintMode.value = value; AppPreferences.albumTintMode = value }
+
+    private val _playerLayoutMode = mutableStateOf(AppPreferences.playerLayoutMode)
+    var playerLayoutMode: PlayerLayoutMode
+        get() = _playerLayoutMode.value
+        set(value) { _playerLayoutMode.value = value; AppPreferences.playerLayoutMode = value }
 
     companion object {
         // Process-wide singleton. On Android the Activity (and thus the Compose tree) can be

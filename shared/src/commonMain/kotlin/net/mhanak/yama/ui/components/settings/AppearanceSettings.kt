@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.theme.AlbumTintMode
+import net.mhanak.yama.ui.player.PlayerLayoutMode
 import net.mhanak.yama.ui.theme.ThemeMode
 import net.mhanak.yama.ui.theme.supportsDynamicColor
 import net.mhanak.yama.ui.components.input.SegmentedButtonRow
@@ -127,6 +128,47 @@ fun AppearanceSettings(modifier: Modifier = Modifier) {
             }
         }
 
+        // ── Player ────────────────────────────────────────────────────
+        SettingsSectionHeader("Player")
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                "Layout",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            var layoutExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = layoutExpanded,
+                onExpandedChange = { layoutExpanded = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedTextField(
+                    value = appContainer.playerLayoutMode.label,
+                    onValueChange = {},
+                    readOnly = true,
+                    singleLine = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = layoutExpanded) },
+                    modifier = Modifier
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth(),
+                )
+                ExposedDropdownMenu(
+                    expanded = layoutExpanded,
+                    onDismissRequest = { layoutExpanded = false },
+                ) {
+                    PlayerLayoutMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(mode.label) },
+                            onClick = {
+                                appContainer.playerLayoutMode = mode
+                                layoutExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
         // ── Display ───────────────────────────────────────────────────
         SettingsSectionHeader("Display")
         ListItem(
@@ -209,4 +251,12 @@ private val AlbumTintMode.label: String
         AlbumTintMode.Player -> "Player only"
         AlbumTintMode.PlayerAndLibrary -> "Player & library"
         AlbumTintMode.AllUi -> "Entire app"
+    }
+
+/** Human-readable label for each player layout mode, shown in the dropdown. */
+private val PlayerLayoutMode.label: String
+    get() = when (this) {
+        PlayerLayoutMode.Auto -> "Auto (by aspect ratio)"
+        PlayerLayoutMode.Vertical -> "Vertical"
+        PlayerLayoutMode.Horizontal -> "Horizontal"
     }

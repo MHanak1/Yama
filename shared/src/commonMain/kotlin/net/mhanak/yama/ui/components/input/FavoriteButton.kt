@@ -1,12 +1,16 @@
 package net.mhanak.yama.ui.components.input
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -14,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
@@ -32,6 +37,11 @@ import net.mhanak.yama.ui.components.state.rememberTrackFavorite
  * and updated optimistically on tap; the write goes through [net.mhanak.yama.coordinators.FavoritesCoordinator.setFavorite],
  * which persists it locally (so it shows offline) and flushes it to the backend. Only when no [initial]
  * is supplied does it fall back to fetching the state for [itemId].
+ *
+ * [emphasized] switches the rendering from a plain icon (the default — light enough for dense list rows
+ * and detail headers) to an expressive [ToggleButton] whose shape morphs round → squarish when
+ * favourited. Only the prominent player control opts in; leaving it off keeps every other call site
+ * visually unchanged.
  */
 @Composable
 fun FavoriteButton(
@@ -40,6 +50,7 @@ fun FavoriteButton(
     modifier: Modifier = Modifier,
     iconSize: Dp = 24.dp,
     initial: Boolean? = null,
+    emphasized: Boolean = false,
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
@@ -52,7 +63,7 @@ fun FavoriteButton(
     // their own optimistic local state seeded from the model, falling back to a fetch when no seed.
     if (kind == FavoritableKind.Track) {
         val favorite = rememberTrackFavorite(itemId, fallback = initial ?: false)
-        FavoriteIcon(favorite, iconSize, modifier) { appContainer.favorites.setFavorite(kind, itemId, !favorite) }
+        FavoriteIcon(favorite, iconSize, modifier, emphasized) { appContainer.favorites.setFavorite(kind, itemId, !favorite) }
         return
     }
 
@@ -60,22 +71,46 @@ fun FavoriteButton(
     LaunchedEffect(source, kind, itemId, initial) {
         favorite = initial ?: (source as? FavoriteCapable)?.isFavorite(kind, itemId) ?: false
     }
-    FavoriteIcon(favorite, iconSize, modifier) {
+    FavoriteIcon(favorite, iconSize, modifier, emphasized) {
         val next = !favorite
         favorite = next // optimistic — the write persists locally and is flushed to the backend.
         appContainer.favorites.setFavorite(kind, itemId, next)
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun FavoriteIcon(favorite: Boolean, iconSize: Dp, modifier: Modifier, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-            contentDescription = if (favorite) "Remove favourite" else "Add favourite",
-            tint = if (favorite) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(iconSize),
-        )
+private fun FavoriteIcon(favorite: Boolean, iconSize: Dp, modifier: Modifier, emphasized: Boolean, onClick: () -> Unit) {
+    val icon = if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
+    val description = if (favorite) "Remove favourite" else "Add favourite"
+    if (emphasized) {
+        // Expressive toggle: the container fills + the shape morphs round → squarish when favourited,
+        // so the state reads from the silhouette, not just the heart's fill. contentPadding is zeroed
+        // so the icon centres in the caller-sized (48.dp) button rather than adding button padding.
+        ToggleButton(
+            checked = favorite,
+            onCheckedChange = { onClick() },
+            modifier = modifier,
+            shapes = ToggleButtonDefaults.shapes(),
+            // Transparent until favourited so the idle heart matches the surrounding icon buttons;
+            // only the active state fills. The checked container keeps the theme default (primary).
+            colors = ToggleButtonDefaults.toggleButtonColors(
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(icon, contentDescription = description, modifier = Modifier.size(iconSize))
+        }
+    } else {
+        IconButton(onClick = onClick, modifier = modifier) {
+            Icon(
+                icon,
+                contentDescription = description,
+                tint = if (favorite) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(iconSize),
+            )
+        }
     }
 }

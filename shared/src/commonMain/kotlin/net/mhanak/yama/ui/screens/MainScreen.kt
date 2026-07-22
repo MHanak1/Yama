@@ -38,7 +38,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -205,7 +207,16 @@ fun MainScreen() {
             else if (!player.controlsSystemVolume.value) appContainer.playback.notifyVolumeChanged()
         }
     }
-    val playerExpansion = remember { Animatable(0f) }
+    // Whether the full player was open, persisted across Android config changes (rotation recreates the
+    // Activity and would otherwise wipe the plain `remember` below, snapping the player shut) and process
+    // death. Animatable itself isn't Saveable, so we save this intent and reseed the Animatable from it.
+    var playerWasOpen by rememberSaveable { mutableStateOf(false) }
+    val playerExpansion = remember { Animatable(if (playerWasOpen) 1f else 0f) }
+    // Mirror the animation's target (0=collapsed, 1=open) back into the saveable so every animateTo call
+    // stays the single source of truth; targetValue updates the instant animateTo is invoked.
+    LaunchedEffect(playerExpansion) {
+        snapshotFlow { playerExpansion.targetValue }.collect { playerWasOpen = it >= 0.5f }
+    }
     // Distance from the screen bottom to the mini-player bar's top (bar height on rail, bar + bottom
     // bar on slim). Captured from the layout's content bottom inset so the full player can rest with
     // its top at that line — see NowPlayingBar/FullPlayer peekHeight. Updated inside the content lambda.
@@ -297,11 +308,11 @@ fun MainScreen() {
         playerActive = playerStatus.current != null,
         // On TV, pressing up from the now-playing bar returns focus to the content grid (or the
         // content area as a fallback), not into limbo above the bar.
-        miniPlayer = { wide ->
+        miniPlayer = { tall ->
             NowPlayingBar(
                 playerStatus, player,
                 playerExpansion = playerExpansion,
-                wide = wide,
+                tall = tall,
                 peekHeight = playerPeek,
                 // On TV, D-pad up from the bar returns focus to the content grid (or the NavHost
                 // group fallback for non-content screens), not into limbo above the bar.

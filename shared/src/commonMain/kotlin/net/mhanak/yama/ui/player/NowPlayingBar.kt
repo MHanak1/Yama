@@ -58,18 +58,18 @@ import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlayerStatus
 import kotlin.math.abs
 
-/** Height of the compact player bar (slim / TV): track row + a thin progress line. */
+/** Height of the compact player bar (short / TV): track row + a thin progress line. */
 val MiniPlayerHeight = 80.dp
 
-/** Height of the wider player bar (medium / wide): larger row + an interactive seek slider. */
-val MiniPlayerWideHeight = 120.dp
+/** Height of the taller player bar (tall viewports): larger row + an interactive seek slider. */
+val MiniPlayerTallHeight = 120.dp
 
 /**
  * The persistent player bar shown at the bottom of every layout (glass, so it blurs the content
  * scrolling underneath). Tapping the track info expands the full player.
  *
- * On the wider two layouts ([wide] = true) the artwork and text are larger and the progress bar is
- * an interactive seek slider; on slim/TV it is a thin, non-interactive progress line.
+ * On tall viewports ([tall] = true) the artwork and text are larger and the progress bar is
+ * an interactive seek slider; on short screens/TV it is a thin, non-interactive progress line.
  *
  * Gestures: swipe left/right → next/previous, swipe down → stop playback, swipe up → expand. The
  * swipe-up raises the full-player sheet 1:1 with the finger (driving [playerExpansion] directly, the
@@ -82,14 +82,14 @@ fun NowPlayingBar(
     player: Player,
     playerExpansion: Animatable<Float, AnimationVector1D>,
     modifier: Modifier = Modifier,
-    wide: Boolean = false,
+    tall: Boolean = false,
     peekHeight: Dp = 0.dp,
     // TV only: called when the user presses D-pad up from the bar. Should call
     // ContentFocusRegistry.requestRestore() to return focus to the active content grid. Null off TV.
     onExitUp: (() -> Unit)? = null,
 ) {
     val track = status.current ?: return
-    val baseHeight = if (wide) MiniPlayerWideHeight else MiniPlayerHeight
+    val baseHeight = if (tall) MiniPlayerTallHeight else MiniPlayerHeight
     val density = LocalDensity.current
     val baseHeightPx = with(density) { baseHeight.toPx() }
     val screenHeightPx = LocalWindowInfo.current.containerSize.height.toFloat()
@@ -208,19 +208,19 @@ fun NowPlayingBar(
                 model = track.imageUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(if (wide) 64.dp else 48.dp).clip(RoundedCornerShape(8.dp)),
+                modifier = Modifier.size(if (tall) 64.dp else 48.dp).clip(RoundedCornerShape(8.dp)),
             )
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(
                     track.name,
-                    style = if (wide) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                    style = if (tall) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 track.artists?.joinToString(", ")?.let {
                     Text(
                         it,
-                        style = if (wide) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+                        style = if (tall) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

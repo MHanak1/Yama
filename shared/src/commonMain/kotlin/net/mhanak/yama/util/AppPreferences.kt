@@ -4,6 +4,7 @@ import com.russhwolf.settings.Settings
 import net.mhanak.yama.defaultUseDeviceVolume
 import net.mhanak.yama.ui.theme.ThemeMode
 import net.mhanak.yama.ui.theme.AlbumTintMode
+import net.mhanak.yama.ui.player.PlayerLayoutMode
 
 // commonMain
 object AppPreferences {
@@ -57,6 +58,12 @@ object AppPreferences {
     var albumTintMode: AlbumTintMode
         get() = AlbumTintMode.entries.getOrElse(settings.getInt("album_tint_mode", AlbumTintMode.AllUi.ordinal)) { AlbumTintMode.AllUi }
         set(value) { settings.putInt("album_tint_mode", value.ordinal) }
+
+    // How the full player arranges artwork vs. info/controls: Auto (by the player's aspect ratio),
+    // or forced Vertical/Horizontal. Defaults to Auto.
+    var playerLayoutMode: PlayerLayoutMode
+        get() = PlayerLayoutMode.entries.getOrElse(settings.getInt("player_layout_mode", PlayerLayoutMode.Auto.ordinal)) { PlayerLayoutMode.Auto }
+        set(value) { settings.putInt("player_layout_mode", value.ordinal) }
 
     // Whether other clients may remote-control ("Play On") this device. Off by default.
     var allowRemoteControl: Boolean
@@ -142,11 +149,19 @@ object AppPreferences {
         get() = settings.getBoolean("background_downloads", true)
         set(value) { settings.putBoolean("background_downloads", value) }
 
-    // Automatically keep recently-played tracks offline (Retention.Cached), trimmed by an LRU size
-    // budget. Off by default — opt in to spend disk on a recent-tracks cache.
+    // Play-capture: cache the track that's *currently playing* so replaying it doesn't re-fetch. On
+    // desktop this background-re-fetches a not-already-cached current track; on Android the playback
+    // engine's read-through cache captures the stream for free. Off by default — opt in to spend disk.
     var cacheRecentTracks: Boolean
         get() = settings.getBoolean("cache_recent_tracks", false)
         set(value) { settings.putBoolean("cache_recent_tracks", value) }
+
+    // Prefetch (fetch-ahead): proactively pull the next few upcoming queue tracks into the cache so
+    // playback stays smooth and the queue survives going offline. Independent of [cacheRecentTracks] —
+    // this is the predictive producer; that one is the reactive (current-track) producer. On by default.
+    var prefetchUpcoming: Boolean
+        get() = settings.getBoolean("prefetch_upcoming", true)
+        set(value) { settings.putBoolean("prefetch_upcoming", value) }
 
     // Size budget (MB) for the recent-tracks cache; cached (not pinned) rows are evicted oldest-first
     // past this. Pinned downloads never count against it.
