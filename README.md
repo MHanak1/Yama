@@ -1,5 +1,5 @@
 <p align="center">
-    <img alt="MCManager" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/banner.svg"/>
+    <img alt="Yama Logo" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/banner.svg"/>
 </p>
 Yama is a Kotlin Multiplatform (KMP) music app.
 
@@ -10,7 +10,7 @@ The goal of this app is to provide a unified experience across various platforms
 ## Major Features
 
 <p align="center">
-    <img alt="MCManager" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots.png"/>
+    <img alt="Yama Screenshots" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots.png"/>
 </p>
 
 - Downloads and seamless offline playback
