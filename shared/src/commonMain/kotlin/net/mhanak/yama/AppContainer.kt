@@ -234,6 +234,7 @@ class AppContainer {
         source = { activeMusicSource },
     )
 
+	/*
     /**
      * Wires the offline catalog + downloads to the active source: partition switch, snapshot
      * persistence, and the reachable-edge pass (staleness + outbox flush + favourites refresh).
@@ -248,7 +249,7 @@ class AppContainer {
         scrobbleOutbox = scrobbleOutbox,
         favoriteOutbox = favoriteOutbox,
         favorites = favorites,
-    )
+    )*/
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
