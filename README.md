@@ -1,6 +1,4 @@
-<p align="center">
-    <img alt="Yama Logo" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/banner.svg"/>
-</p>
+![Yama Logo](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/banner.svg)
 Yama is a Kotlin Multiplatform (KMP) music app.
 
 ## Goals
@@ -9,16 +7,60 @@ The goal of this app is to provide a unified experience across various platforms
 
 ## Major Features
 
-<p align="center">
-    <img alt="Yama Screenshots" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots.png"/>
-</p>
+![Yama Screenshots](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/screenshots.png)
 
-- Downloads and seamless offline playback
-- Remote playback control\*
-- Line-by-line lyric support
-- Dynamic colour scheme based on system theme, played tracks and viewed albums
-- Listen scrobbling to ListenBrainz
-- UI which scales for (almost) any size of screen
+
+<details>
+    <summary>Downloads and seamless offline playback</summary>
+
+    ![Downloads Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/downloads.png)
+    Yama lets you download tracks for offline playback, and can handle a spotty connection fairly well (if the internet connection drops out, tracks unavaliable offline become grayed out)
+    You can also configure the app to automatically download recently played tracks, and keep a certain amout of them.
+</details>
+
+<details>
+    <summary>
+    Remote playback control
+    </summary>
+
+    ![Remote Playback Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/remote_playback.png)
+    Yama implements Jellyfin's "Play On" feature, allowing other jellyfin clients to control the app and vice-versa. 
+    That being said, the implementation in the official clients is kind of... bad, so controlling them won't work that well.
+    I am hoping I will be able to implement a solution which will work across all music sources, not just Jellyfin.
+</details>
+
+<details>
+    <summary>Line-by-line lyric support</summary>
+
+    ![Lyrics Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/lyrics.png)
+</details>
+
+<details>
+    <summary> (extra) Dynamic colour scheme </summary>
+
+    ![Dynamic Colour Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/colour_scheme.png)
+
+    Yama will change its UI colours to match the album art whenever possible. When the track is playing, the UI will match that, and when viewing albums in the library, their pages will tint to the album colours.
+
+    In addition to dynamic colours, the entire UI is a hybrid of Material Design and the frosted glass aesthetic. The latter can tuned down or turned off.
+</details>
+
+<details>
+    <summary> Listen scrobbling to ListenBrainz </summary>
+
+    ![Scrobbling Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/scrobbling.png)
+</details>
+
+
+<details>
+    <summary> UI which scales for (almost) any size of screen </summary>
+
+    ![UI Scaling Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/sceenshots/ui_scaling.png)
+
+    The main goal when designing this app was to make it fit as many screens as possible, providing a continuous experience accross all those platforms.
+
+    I do not guarantee it will work on a smartwatch... yet.
+</details>
 
 
 ## Supported backends

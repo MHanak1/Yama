@@ -23,11 +23,9 @@ import net.mhanak.yama.coordinators.FavoritesCoordinator
 import net.mhanak.yama.coordinators.OfflineSyncOrchestrator
 import net.mhanak.yama.coordinators.PlayCountRecorder
 import net.mhanak.yama.coordinators.QueuePersistence
-import net.mhanak.yama.media.download.CachePolicyDeps
 import net.mhanak.yama.media.download.CatalogCache
 import net.mhanak.yama.media.download.DownloadManager
 import net.mhanak.yama.media.download.DownloadRepository
-import net.mhanak.yama.media.download.createCachePolicy
 import net.mhanak.yama.media.model.InMemoryTrackUserDataStore
 import net.mhanak.yama.media.model.TrackUserDataStore
 import net.mhanak.yama.db.createYamaDatabase
@@ -153,19 +151,6 @@ class AppContainer {
         cacheBudgetMb = { cacheSizeBudgetMb },
     )
 
-    // The platform's cache producers (prefetch + play-capture) and invalidation, behind one seam. Cache
-    // and prefetch are distinct mechanisms feeding one store: desktop fills `Retention.Cached` rows via
-    // the DownloadManager; Android fills the ExoPlayer read-through SimpleCache. See [CachePolicy].
-    val cachePolicy = createCachePolicy(
-        CachePolicyDeps(
-            downloadManager = downloadManager,
-            source = { activeMusicSource },
-            quality = { streamingQuality },
-            cacheDir = File(getAppDataDir().toString(), "media-cache"),
-            cacheBudgetMb = { cacheSizeBudgetMb },
-        ),
-    )
-
     // Durable offline-scrobble queue: completed plays that happened offline, flushed on reconnect.
     val scrobbleOutbox = ScrobbleOutbox(
         file = File(getAppDataDir().toString(), "scrobble_outbox.json"),
@@ -234,7 +219,6 @@ class AppContainer {
         source = { activeMusicSource },
     )
 
-	/*
     /**
      * Wires the offline catalog + downloads to the active source: partition switch, snapshot
      * persistence, and the reachable-edge pass (staleness + outbox flush + favourites refresh).
@@ -243,13 +227,12 @@ class AppContainer {
         source = { activeMusicSource },
         playback = playback,
         downloads = downloads,
-        cachePolicy = cachePolicy,
         catalogCache = catalogCache,
         userData = userData,
         scrobbleOutbox = scrobbleOutbox,
         favoriteOutbox = favoriteOutbox,
         favorites = favorites,
-    )*/
+    )
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -550,26 +533,16 @@ class AppContainer {
     }
 
     /**
-     * The two cache producers, driven off the local player's status. These are deliberately *separate
-     * mechanisms* (see [net.mhanak.yama.media.download.CachePolicy]):
-     *
-     * - **Play-capture** (reactive): on each new current track, [CachePolicy.onPlayed] caches the track
-     *   that's playing when [cacheRecentTracks] is on. Desktop background-re-fetches a not-yet-cached
-     *   current track; Android's engine captures the stream for free (this just records a version
-     *   baseline). This replaces the old "auto-download the current track" path — the source of the
-     *   double-fetch, since the player was already streaming those same bytes.
-     * - **Prefetch** (predictive): on each new queue position, fetch-ahead up to 3 upcoming tracks
-     *   (≤20 min) into the cache when [prefetchUpcoming] is on, so sequential playback plays each track
-     *   from the cache — a single fetch — and the queue survives going offline.
-     *
-     * Both are keyed on id / index so they fire once per track / position, not on every status tick.
+     * When a new track starts on the local player, let the download layer refresh its LRU timestamp (if
+     * already offline) and — when the recent-tracks cache is enabled — auto-cache it. Keyed on the
+     * track id so it fires once per track, not on every status tick.
      */
     private fun observeRecentTrackCaching() {
         scope.launch {
             playback.local.status
                 .map { it.current }
                 .distinctUntilChanged { a, b -> a?.id == b?.id }
-                .collect { track -> track?.let { cachePolicy.onPlayed(it, captureEnabled = cacheRecentTracks) } }
+                .collect { track -> track?.let { downloadManager.onTrackPlayed(it, cacheRecentTracks) } }
         }
         scope.launch {
             var lookAheadJob: Job? = null
@@ -590,7 +563,7 @@ class AppContainer {
                             if (totalMs + dur > maxMs) break
                             totalMs += dur
                             count++
-                            cachePolicy.prefetch(track) // suspends until done before next
+                            downloadManager.cacheUpcoming(track) // suspends until done before next
                         }
                     }
                 }
