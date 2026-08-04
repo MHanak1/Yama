@@ -13,7 +13,7 @@ The goal of this app is to provide a unified experience across various platforms
 <details>
 <summary>Downloads and seamless offline playback</summary>
 
-![Downloads Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/downloads.png)
+<img alt="Downloads Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/downloads.png" width = 300/>
 Yama lets you download tracks for offline playback, and can handle a spotty connection fairly well (if the internet connection drops out, tracks unavaliable offline become grayed out)
 You can also configure the app to automatically download recently played tracks, and keep a certain amout of them.
 </details>
@@ -23,7 +23,7 @@ You can also configure the app to automatically download recently played tracks,
 Remote playback control
 </summary>
 
-![Remote Playback Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/remote_playback.png)
+<img alt="Remote Playback Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/remote_playback.png" width = 300/>
 Yama implements Jellyfin's "Play On" feature, allowing other jellyfin clients to control the app and vice-versa. 
 That being said, the implementation in the official clients is kind of... bad, so controlling them won't work that well.
 I am hoping I will be able to implement a solution which will work across all music sources, not just Jellyfin.
@@ -32,13 +32,13 @@ I am hoping I will be able to implement a solution which will work across all mu
 <details>
 <summary>Line-by-line lyric support</summary>
 
-![Lyrics Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/lyrics.png)
+<img alt="Lyrics Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/lyrics.png" width = 300/>
 </details>
 
 <details>
 <summary> (extra) Dynamic colour scheme </summary>
 
-![Dynamic Colour Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/colour_scheme.png)
+<img alt="Dynamic Colour Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/colour_scheme.png" width = 300/>
 
 Yama will change its UI colours to match the album art whenever possible. When the track is playing, the UI will match that, and when viewing albums in the library, their pages will tint to the album colours.
 
@@ -48,14 +48,14 @@ In addition to dynamic colours, the entire UI is a hybrid of Material Design and
 <details>
 <summary> Listen scrobbling to ListenBrainz </summary>
 
-![Scrobbling Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/scrobbling.png)
+<img alt="Scrobbling Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/scrobbling.png" width = 300/>
 </details>
 
 
 <details>
 <summary> UI which scales for (almost) any size of screen </summary>
 
-![UI Scaling Screenshot](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/ui_scaling.png)
+<img alt="UI Scaling Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/ui_scaling.png" width = 300/>
 
 The main goal when designing this app was to make it fit as many screens as possible, providing a continuous experience accross all those platforms.
 
