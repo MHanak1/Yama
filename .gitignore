@@ -18,3 +18,14 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 .claude
+
+# Release signing — never commit keystores or their passwords
+keystore.properties
+*.jks
+*.keystore
+
+# Bundled libvlc is downloaded fresh in CI, never committed
+desktopApp/resources/*/vlc/
+
+# JVM crash logs
+hs_err_pid*.log

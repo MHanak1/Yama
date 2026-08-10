@@ -50,6 +50,9 @@ actual class MediaPlayerEngine actual constructor() {
 
     // Built lazily so a missing libvlc only disables playback instead of crashing app launch.
     private val component: AudioPlayerComponent? by lazy {
+        // Point JNA at the bundled libvlc (packaged Windows app) before vlcj loads the native library;
+        // a no-op under `./gradlew run` and on Linux, where the system VLC is discovered normally.
+        ensureBundledVlc()
         runCatching {
             object : AudioPlayerComponent() {
                 override fun finished(mediaPlayer: MediaPlayer) {

@@ -1,0 +1,157 @@
+name: Release
+
+# Cut a release by pushing a tag:  git tag v1.2.0 && git push origin v1.2.0
+# The tag name (minus the leading "v") becomes the version stamped into every artifact.
+# Tags MUST be numeric x.y.z — jpackage/MSI reject suffixes like "-beta".
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # needed to create the GitHub Release and upload assets
+
+env:
+  # ────────────────────────────────────────────────────────────────────────────
+  # The ONLY place the bundled Windows libvlc version is pinned. Bump this one line
+  # to ship a newer libvlc; nothing in the Gradle build or app code references it.
+  # ────────────────────────────────────────────────────────────────────────────
+  VLC_VERSION: "3.0.21"
+
+jobs:
+  # Derive the version strings once so every job stamps identical values.
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      version_code: ${{ steps.v.outputs.version_code }}
+    steps:
+      - id: v
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME}"
+          version="${ref#v}"
+          # Fallback for manual runs off a branch (not a vX.Y.Z tag).
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then version="0.0.0"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Building version $version (code ${GITHUB_RUN_NUMBER})"
+
+  # ── Windows MSI with libvlc bundled inside ──────────────────────────────────
+  windows:
+    needs: meta
+    runs-on: windows-latest
+    env:
+      YAMA_VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Download and stage libvlc (v${{ env.VLC_VERSION }})
+        shell: pwsh
+        run: |
+          $url = "https://get.videolan.org/vlc/$env:VLC_VERSION/win64/vlc-$env:VLC_VERSION-win64.7z"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile vlc.7z
+          & 7z x vlc.7z -ovlc_extracted | Out-Null
+          $src = "vlc_extracted/vlc-$env:VLC_VERSION"
+          $dst = "desktopApp/resources/windows-x64/vlc"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          # Only the runtime bits vlcj needs: the two core DLLs + the codec plugin tree.
+          Copy-Item "$src/libvlc.dll"     "$dst/" -Force
+          Copy-Item "$src/libvlccore.dll" "$dst/" -Force
+          Copy-Item "$src/plugins"        "$dst/plugins" -Recurse -Force
+          Write-Host "Staged libvlc into $dst"
+
+      - name: Build MSI
+        shell: pwsh
+        run: .\gradlew.bat :desktopApp:packageMsi --no-daemon
+
+      - name: Collect MSI
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $msi = Get-ChildItem desktopApp/build/compose/binaries/main/msi/*.msi | Select-Object -First 1
+          Copy-Item $msi.FullName "dist/Yama-$env:YAMA_VERSION-windows-x64.msi"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: dist/*.msi
+
+  # ── Linux desktop (tarball + .deb) and signed Android APK ───────────────────
+  linux-android:
+    needs: meta
+    runs-on: ubuntu-latest
+    env:
+      YAMA_VERSION: ${{ needs.meta.outputs.version }}
+      YAMA_VERSION_CODE: ${{ needs.meta.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Decode the signing keystore from a base64 secret into a file the Gradle build can read.
+      - name: Prepare keystore
+        id: keystore
+        shell: bash
+        run: |
+          if [[ -n "${{ secrets.YAMA_KEYSTORE_BASE64 }}" ]]; then
+            echo "${{ secrets.YAMA_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/yama-release.jks"
+            echo "path=$RUNNER_TEMP/yama-release.jks" >> "$GITHUB_OUTPUT"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No YAMA_KEYSTORE_BASE64 secret set — the release APK will be UNSIGNED."
+          fi
+
+      - name: Build signed release APK
+        env:
+          YAMA_KEYSTORE_FILE: ${{ steps.keystore.outputs.path }}
+          YAMA_KEYSTORE_PASSWORD: ${{ secrets.YAMA_KEYSTORE_PASSWORD }}
+          YAMA_KEY_ALIAS: ${{ secrets.YAMA_KEY_ALIAS }}
+          YAMA_KEY_PASSWORD: ${{ secrets.YAMA_KEY_PASSWORD }}
+        run: ./gradlew :androidApp:assembleRelease --no-daemon
+
+      - name: Build Linux desktop (app image + .deb)
+        run: ./gradlew :desktopApp:createDistributable :desktopApp:packageDeb --no-daemon
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          # Self-contained app image -> tarball (bundled JRE; no Java needed at runtime).
+          tar -C desktopApp/build/compose/binaries/main/app -czf \
+            "dist/yama-${YAMA_VERSION}-linux-x64.tar.gz" Yama
+          cp desktopApp/build/compose/binaries/main/deb/*.deb "dist/" || true
+          cp androidApp/build/outputs/apk/release/*.apk \
+            "dist/yama-${YAMA_VERSION}.apk" || cp androidApp/build/outputs/apk/release/*-release-unsigned.apk "dist/yama-${YAMA_VERSION}-unsigned.apk"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-android
+          path: dist/*
+
+  # ── Attach everything to the GitHub Release for the tag ─────────────────────
+  release:
+    needs: [windows, linux-android]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: true # review the assets, then publish manually the first few times

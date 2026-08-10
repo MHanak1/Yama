@@ -36,11 +36,32 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "net.mhanak.yamao"
-            packageVersion = "1.0.0"
+            packageName = "Yama"
+            // Driven by the release tag in CI (YAMA_VERSION, e.g. "1.2.0"); "1.0.0" for local builds.
+            // Must be numeric x.y.z — jpackage/MSI reject suffixes like "-beta" (see RELEASING.md).
+            packageVersion = System.getenv("YAMA_VERSION") ?: "1.0.0"
+            description = "Yama — a self-hosted music client"
+            vendor = "Michał Hanak"
+            copyright = "© 2026 Michał Hanak"
 
-            linux { iconFile.set(project.file("src/main/resources/icon.png")) }
-            windows { iconFile.set(project.file("src/main/resources/icon.ico")) }
+            // Files placed here are copied into the packaged app image and exposed at runtime via the
+            // `compose.application.resources.dir` system property. Per-platform subfolders (e.g.
+            // `windows-x64/`) are merged with `common/`. The release workflow drops the bundled libvlc
+            // into `resources/windows-x64/vlc/` on the Windows runner; nothing VLC-related is committed.
+            appResourcesRootDir.set(project.file("resources"))
+
+            linux {
+                iconFile.set(project.file("src/main/resources/icon.png"))
+                // libvlc is a runtime system dependency on Linux (bundled only on Windows). Users of the
+                // .deb / AUR package need the `vlc` package installed — documented in RELEASING.md.
+            }
+            windows {
+                iconFile.set(project.file("src/main/resources/icon.ico"))
+                menuGroup = "Yama"
+                // Stable across releases so each new MSI *upgrades* the previous install instead of
+                // installing side-by-side. Never change this once a release ships.
+                upgradeUuid = "4b4dab44-881a-496c-b745-6e5759b9bf1f"
+            }
         }
     }
 }
