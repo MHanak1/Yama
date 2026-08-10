@@ -23,6 +23,7 @@ import net.mhanak.yama.coordinators.FavoritesCoordinator
 import net.mhanak.yama.coordinators.OfflineSyncOrchestrator
 import net.mhanak.yama.coordinators.PlayCountRecorder
 import net.mhanak.yama.coordinators.QueuePersistence
+import net.mhanak.yama.ui.home.HomeContentStore
 import net.mhanak.yama.media.download.CatalogCache
 import net.mhanak.yama.media.download.DownloadManager
 import net.mhanak.yama.media.download.DownloadRepository
@@ -212,6 +213,9 @@ class AppContainer {
         downloads = downloads,
         userData = userData,
     )
+
+    /** Session-lived cache of the home screen's loaded shelves, so it survives HomeView navigation. */
+    val homeContent = HomeContentStore()
 
     /** Persists and restores the local player's queue across launches. */
     val queue = QueuePersistence(

@@ -55,7 +55,7 @@ In addition to dynamic colours, the entire UI is a hybrid of Material Design and
 <details>
 <summary> UI which scales for (almost) any size of screen </summary>
 
-<img alt="UI Scaling Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/ui_scaling.png" width = 300/>
+<img alt="UI Scaling Screenshot" src="https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/ui_scaling.png" width = 600/>
 
 The main goal when designing this app was to make it fit as many screens as possible, providing a continuous experience accross all those platforms.
 

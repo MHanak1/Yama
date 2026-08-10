@@ -11,6 +11,15 @@ object LibraryRoute
 @Serializable
 object SettingsRoute
 
+/** "See more" page for a home block — a full paginated list (tracks) or grid (albums) of the block's
+ *  contents. [blockKind] is a [net.mhanak.yama.media.sources.HomeBlockKind] name. */
+@Serializable
+data class HomeBlockRoute(val blockKind: String)
+
+/** The home-screen layout editor: reorder/remove the active source's blocks and add new ones. */
+@Serializable
+object HomeLayoutRoute
+
 @Serializable
 data class AlbumDetailRoute(val albumId: String)
 

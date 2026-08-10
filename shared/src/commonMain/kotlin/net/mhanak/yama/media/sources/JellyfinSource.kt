@@ -538,6 +538,31 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         } ?: emptyList()
     }
 
+    override suspend fun getAlbums(sortBy: AlbumSortOrder, limit: Int, offset: Int): List<Album> {
+        val currentApi = api ?: return emptyList()
+        return currentApi.itemsApi.getItems(
+            includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+            recursive = true,
+            sortBy = sortBy.toJellyfinSortBy(),
+            sortOrder = listOf(sortBy.toSortOrder()),
+            fields = listOf(ItemFields.CHILD_COUNT, ItemFields.GENRES),
+            limit = limit,
+            startIndex = offset,
+        ).content.items?.map { item ->
+            Album(
+                id = item.id.toString(),
+                name = item.name ?: "",
+                albumArtist = item.albumArtist,
+                year = item.productionYear,
+                songCount = item.childCount,
+                imageUrl = currentApi.imageApi.getItemImageUrl(item.id, ImageType.PRIMARY),
+                imageHash = item.imageBlurHashes?.get(ImageType.PRIMARY)?.get(item.imageTags?.get(ImageType.PRIMARY)),
+                favorite = item.userData?.isFavorite == true,
+                genres = item.genres ?: emptyList(),
+            )
+        } ?: emptyList()
+    }
+
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> {
         val currentApi = api ?: return emptyList()
         return currentApi.playlistsApi.getPlaylistItems(
@@ -1004,6 +1029,20 @@ private fun TrackSortOrder.toSortOrder(): SortOrder = when (this) {
     TrackSortOrder.RecentlyAdded    -> SortOrder.DESCENDING
     TrackSortOrder.RecentlyPlayed   -> SortOrder.DESCENDING
     TrackSortOrder.Random           -> SortOrder.ASCENDING
+}
+
+private fun AlbumSortOrder.toJellyfinSortBy(): List<ItemSortBy> = when (this) {
+    AlbumSortOrder.Alphabetical  -> listOf(ItemSortBy.NAME)
+    AlbumSortOrder.RecentlyAdded -> listOf(ItemSortBy.DATE_CREATED)
+    AlbumSortOrder.MostPlayed    -> listOf(ItemSortBy.PLAY_COUNT, ItemSortBy.NAME)
+    AlbumSortOrder.ReleaseDate   -> listOf(ItemSortBy.PRODUCTION_YEAR, ItemSortBy.NAME)
+    AlbumSortOrder.Random        -> listOf(ItemSortBy.RANDOM)
+}
+
+private fun AlbumSortOrder.toSortOrder(): SortOrder = when (this) {
+    // Newest-first for added/plays/year; alphabetical ascending; random ignores direction.
+    AlbumSortOrder.Alphabetical -> SortOrder.ASCENDING
+    else                        -> SortOrder.DESCENDING
 }
 
 // Expands a user-entered address into an ordered list of URLs to probe.

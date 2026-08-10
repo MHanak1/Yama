@@ -2,6 +2,8 @@ package net.mhanak.yama.util
 
 import com.russhwolf.settings.Settings
 import net.mhanak.yama.defaultUseDeviceVolume
+import net.mhanak.yama.media.sources.HomeBlockKind
+import net.mhanak.yama.ui.screens.LaunchDestination
 import net.mhanak.yama.ui.theme.ThemeMode
 import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.ui.player.PlayerLayoutMode
@@ -89,6 +91,27 @@ object AppPreferences {
     var forceTvMode: Boolean
         get() = settings.getBoolean("force_tv_mode", false)
         set(value) { settings.putBoolean("force_tv_mode", value) }
+
+    // Which top-level screen the app opens on after login. Defaults to Home.
+    var launchDestination: LaunchDestination
+        get() = LaunchDestination.entries.getOrElse(settings.getInt("launch_destination", LaunchDestination.Home.ordinal)) { LaunchDestination.Home }
+        set(value) { settings.putInt("launch_destination", value.ordinal) }
+
+    // The user's home-screen layout for a given source ([key] = the source's stable partition key,
+    // i.e. OfflineCapable.downloadSourceKey() or "local"). Stored as an ordered, newline-joined list of
+    // HomeBlockKind names — the list *is* the enabled set, in display order. Returns null when the user
+    // has never customised this source (callers fall back to the source's default layout); an explicitly
+    // empty layout is stored as the empty string ("configured, but empty") so it isn't re-defaulted.
+    // Unknown names (a block removed in a later version) are dropped on read for forward-compatibility.
+    fun homeBlocks(key: String): List<HomeBlockKind>? {
+        val raw = settings.getStringOrNull("home_blocks_$key") ?: return null
+        if (raw.isEmpty()) return emptyList()
+        return raw.split('\n').mapNotNull { name -> runCatching { HomeBlockKind.valueOf(name) }.getOrNull() }
+    }
+
+    fun setHomeBlocks(key: String, blocks: List<HomeBlockKind>) {
+        settings.putString("home_blocks_$key", blocks.joinToString("\n") { it.name })
+    }
 
     // The SourceType the user last had active (by name), restored on launch so the app reopens on the
     // same source. Null until the user first switches source — callers fall back to their own default.

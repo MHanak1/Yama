@@ -99,7 +99,10 @@ import net.mhanak.yama.ui.views.downloaded.DownloadedTracksView
 import net.mhanak.yama.ui.views.settings.DownloadsSettingsView
 import net.mhanak.yama.ui.views.detail.ArtistDetailView
 import net.mhanak.yama.ui.views.detail.GenreDetailView
+import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.ui.views.HomeView
+import net.mhanak.yama.ui.views.HomeBlockView
+import net.mhanak.yama.ui.views.settings.HomeLayoutView
 import net.mhanak.yama.ui.views.LibraryTab
 import net.mhanak.yama.ui.views.LibraryView
 import net.mhanak.yama.ui.views.settings.LocalLibrarySettingsView
@@ -331,7 +334,14 @@ fun MainScreen() {
                 selectedTab = if (onHome || onSettings || onDownloadedMusic) null else selectedTab,
                 settingsSelected = onSettings,
                 downloadsSelected = onDownloadedMusic,
-                onHomeClick = { navController.navigateTopLevel(HomeRoute) },
+                onHomeClick = {
+                    // Re-tapping Home while already there refreshes it (mirrors the Library re-tap).
+                    if (navController.currentBackStackEntry?.destination?.hasRoute<HomeRoute>() == true) {
+                        scope.launch { appContainer.homeContent.refreshActive(appContainer) }
+                    } else {
+                        navController.navigateTopLevel(HomeRoute)
+                    }
+                },
                 onTabClick = onTabClick,
                 onSettingsClick = { navController.navigateTopLevel(SettingsRoute) },
                 onDownloadsClick = { navController.navigateTopLevel(DownloadedMusicRoute) },
@@ -348,7 +358,13 @@ fun MainScreen() {
                 },
                 onSelect = { dest ->
                     when (dest) {
-                        BottomBarDestination.Home -> navController.navigateTopLevel(HomeRoute)
+                        BottomBarDestination.Home -> {
+                            if (navController.currentBackStackEntry?.destination?.hasRoute<HomeRoute>() == true) {
+                                scope.launch { appContainer.homeContent.refreshActive(appContainer) }
+                            } else {
+                                navController.navigateTopLevel(HomeRoute)
+                            }
+                        }
                         BottomBarDestination.Library -> {
                             val onLibrary = navController.currentBackStackEntry?.destination?.hasRoute<LibraryRoute>() == true
                             if (onLibrary) {
@@ -396,9 +412,13 @@ fun MainScreen() {
     ) { hasRail, onMenuClick, bottomInset ->
         // Mirror the bar-top line out to the full player (which lives outside this lambda).
         if (playerPeek != bottomInset) playerPeek = bottomInset
+        // Which top-level screen the app opens on, per the user's preference (defaults to Home).
+        val startDestination = remember {
+            if (AppPreferences.launchDestination == LaunchDestination.Library) LibraryRoute else HomeRoute
+        }
         NavHost(
             navController = navController,
-            startDestination = LibraryRoute,
+            startDestination = startDestination,
             modifier = Modifier.fillMaxSize()
                 // Group the content so it's a single D-pad focus region distinct from the rail. The
                 // contentFocusRequester is the fallback target for screens without a content grid;
@@ -410,7 +430,26 @@ fun MainScreen() {
             popExitTransition = { topLevelExit(vertical = hasRail) ?: fadeOut(tween(DETAIL_DURATION)) },
         ) {
             composable<HomeRoute> {
-                HomeView(onMenuClick = onMenuClick, bottomContentPadding = bottomInset)
+                HomeView(
+                    onMenuClick = onMenuClick,
+                    onNavigate = { navController.navigate(it) { launchSingleTop = true } },
+                    bottomContentPadding = bottomInset,
+                )
+            }
+            detailComposable<HomeBlockRoute> { backStackEntry ->
+                val route = backStackEntry.toRoute<HomeBlockRoute>()
+                HomeBlockView(
+                    blockKind = route.blockKind,
+                    onBack = { navController.popBackStack() },
+                    onNavigate = { navController.navigate(it) { launchSingleTop = true } },
+                    contentPadding = PaddingValues(bottom = bottomInset),
+                )
+            }
+            detailComposable<HomeLayoutRoute> {
+                HomeLayoutView(
+                    onBack = { navController.popBackStack() },
+                    contentPadding = PaddingValues(bottom = bottomInset),
+                )
             }
             composable<LibraryRoute> {
                 LibraryView(

@@ -15,6 +15,7 @@ import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.Playlist
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.AccountedSource
+import net.mhanak.yama.media.sources.AlbumSortOrder
 import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.MusicSource
@@ -286,6 +287,25 @@ class LocalSource(
     override suspend fun getAlbumsForGenre(genreId: String): List<Album> {
         val albumIds = rows.filter { genreId in it.genreIds }.mapNotNull { it.albumId }.toSet()
         return albumIds.mapNotNull { albumsById[it] }.sortedBy { it.name.lowercase() }
+    }
+
+    override suspend fun getAlbums(sortBy: AlbumSortOrder, limit: Int, offset: Int): List<Album> {
+        // The Album model carries no date-added / play-count, but the StoredTrack rows do — so derive
+        // RecentlyAdded/MostPlayed ordering by aggregating each album's rows (newest lastModified /
+        // summed playCount). The other orderings are expressible straight off the derived Album.
+        val byAlbum by lazy { rows.filter { it.albumId != null }.groupBy { it.albumId!! } }
+        val ordered = when (sortBy) {
+            AlbumSortOrder.Alphabetical  -> albumsById.values.sortedBy { it.name.lowercase() }
+            AlbumSortOrder.ReleaseDate   -> albumsById.values.sortedByDescending { it.year ?: 0 }
+            AlbumSortOrder.Random        -> albumsById.values.shuffled()
+            AlbumSortOrder.RecentlyAdded -> albumsById.values.sortedByDescending { a ->
+                byAlbum[a.id]?.maxOfOrNull { it.lastModified } ?: 0L
+            }
+            AlbumSortOrder.MostPlayed    -> albumsById.values.sortedByDescending { a ->
+                byAlbum[a.id]?.sumOf { it.playCount } ?: 0
+            }
+        }
+        return ordered.drop(offset).take(limit)
     }
 
     override suspend fun getTracksByIds(ids: List<String>): List<Track> =

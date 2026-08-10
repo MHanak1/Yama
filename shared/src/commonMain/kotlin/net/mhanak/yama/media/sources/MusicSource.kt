@@ -35,6 +35,21 @@ enum class TrackSortOrder(val label: String) {
     Random("Random"),
 }
 
+/**
+ * Album-level discovery orderings, the symmetric counterpart to [TrackSortOrder] for [getAlbums].
+ * The [Album] model carries no date-added / play-count field, so RecentlyAdded/MostPlayed ordering
+ * cannot be derived client-side — a source must return the list pre-ordered (Jellyfin native sorts,
+ * Subsonic `getAlbumList2` newest/frequent, Local sorting its own index rows). The default [getAlbums]
+ * only honours the orderings expressible from the in-memory model (Alphabetical/ReleaseDate/Random).
+ */
+enum class AlbumSortOrder(val label: String) {
+    Alphabetical("Name"),
+    RecentlyAdded("Added"),
+    MostPlayed("Plays"),
+    ReleaseDate("Year"),
+    Random("Random"),
+}
+
 interface MusicSource {
     val type: SourceType
     var isAuthenticated: Boolean
@@ -85,6 +100,44 @@ interface MusicSource {
     suspend fun getTracksForPlaylist(playlistId: String): List<Track>
     suspend fun getAlbumsForArtist(artistId: String): List<Album>
     suspend fun getAlbumsForGenre(genreId: String): List<Album>
+
+    /**
+     * Discovery listing of albums in the given [sortBy] order — the album-level counterpart to
+     * [getAllTracks]. Powers the home screen's album shelves and their paginated "See more" pages.
+     *
+     * The default sorts the already-loaded [albums] flow, which can only honour orderings the [Album]
+     * model actually carries (Alphabetical/ReleaseDate/Random); [AlbumSortOrder.RecentlyAdded] and
+     * [AlbumSortOrder.MostPlayed] fall through unsorted here. Sources with server-native ordering
+     * (or a richer local index) override this — see [AlbumSortOrder].
+     */
+    suspend fun getAlbums(sortBy: AlbumSortOrder, limit: Int = 20, offset: Int = 0): List<Album> {
+        val all = albums.value
+        val sorted = when (sortBy) {
+            AlbumSortOrder.Alphabetical -> all.sortedBy { it.name.lowercase() }
+            AlbumSortOrder.ReleaseDate -> all.sortedByDescending { it.year ?: Int.MIN_VALUE }
+            AlbumSortOrder.Random -> all.shuffled()
+            // No date-added / play-count on the model — sources that can order by these override.
+            AlbumSortOrder.RecentlyAdded, AlbumSortOrder.MostPlayed -> all
+        }
+        return sorted.drop(offset).take(limit)
+    }
+
+    /**
+     * The set of home-screen blocks this source can meaningfully back, used both to gate the default
+     * layout and to populate the "add block" picker. The default derives from the source's capability
+     * interfaces (favourites → [HomeBlockKind.FavouriteAlbums], [OfflineCapable] →
+     * [HomeBlockKind.DownloadedAlbums]); sources narrow it further when they can't honour a query
+     * (e.g. Subsonic drops the played-tracks blocks its `getAllTracks` ignores).
+     */
+    val supportedHomeBlocks: Set<HomeBlockKind>
+        get() = HomeBlockKind.entries.filterTo(LinkedHashSet()) { kind ->
+            when (kind) {
+                HomeBlockKind.FavouriteAlbums ->
+                    (this as? FavoriteCapable)?.supportsFavorites(FavoritableKind.Album) == true
+                HomeBlockKind.DownloadedAlbums -> this is OfflineCapable
+                else -> true
+            }
+        }
 
     /** Resolve track IDs to [Track]s, preserving the requested order. Used to fulfil remote "Play On". */
     suspend fun getTracksByIds(ids: List<String>): List<Track> = emptyList()

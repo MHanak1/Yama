@@ -27,6 +27,8 @@ import net.mhanak.yama.media.sources.PlaybackReporting
 import net.mhanak.yama.media.sources.RemoteCommand
 import net.mhanak.yama.media.sources.SourceAccount
 import net.mhanak.yama.media.sources.SourceType
+import net.mhanak.yama.media.sources.AlbumSortOrder
+import net.mhanak.yama.media.sources.HomeBlockKind
 import net.mhanak.yama.media.sources.StaleWhileRevalidateSource
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.session.SubsonicSession
@@ -337,6 +339,29 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
             }
         }.getOrDefault(emptyList())
     }
+
+    override suspend fun getAlbums(sortBy: AlbumSortOrder, limit: Int, offset: Int): List<Album> {
+        val currentApi = api ?: return emptyList()
+        val type = when (sortBy) {
+            AlbumSortOrder.Alphabetical  -> "alphabeticalByName"
+            AlbumSortOrder.RecentlyAdded -> "newest"    // getAlbumList2 native "newest"
+            AlbumSortOrder.MostPlayed    -> "frequent"  // getAlbumList2 native "frequent"
+            AlbumSortOrder.Random        -> "random"
+            // Subsonic's "byYear" needs an explicit year range; fall back to the in-memory sort.
+            AlbumSortOrder.ReleaseDate   -> return super.getAlbums(sortBy, limit, offset)
+        }
+        return runCatching {
+            currentApi.getAlbumList2(type = type, size = limit, offset = offset)
+                .map { it.toAlbum(currentApi) }
+        }.getOrDefault(emptyList())
+    }
+
+    // getAllTracks silently ignores RecentlyPlayed/PlayCount (Subsonic has no such all-songs sort), so
+    // don't advertise the track blocks that rely on them — the picker only offers what we can honour.
+    override val supportedHomeBlocks: Set<HomeBlockKind>
+        get() = super.supportedHomeBlocks - setOf(
+            HomeBlockKind.RecentlyPlayedTracks, HomeBlockKind.MostPlayedTracks,
+        )
 
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> {
         val currentApi = api ?: return emptyList()

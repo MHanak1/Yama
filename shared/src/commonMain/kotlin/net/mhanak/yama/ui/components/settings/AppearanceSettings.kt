@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.ui.screens.LaunchDestination
+import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.ui.player.PlayerLayoutMode
 import net.mhanak.yama.ui.theme.ThemeMode
@@ -42,6 +44,25 @@ import net.mhanak.yama.ui.theme.SeedColorPicker
 fun AppearanceSettings(modifier: Modifier = Modifier) {
     val appContainer = LocalAppContainer.current
     Column(modifier = modifier) {
+
+        // ── Startup ───────────────────────────────────────────────────
+        // Which top-level screen opens after login. Not routed through AppContainer's reactive state
+        // since it's only read once at NavHost start — a local mirror keeps the toggle in sync here.
+        SettingsSectionHeader("Startup")
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                "Open on launch",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            var launch by remember { mutableStateOf(AppPreferences.launchDestination) }
+            SegmentedButtonRow(
+                options = LaunchDestination.entries,
+                selectedOption = launch,
+                onOptionSelected = { launch = it; AppPreferences.launchDestination = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(it.label) }
+        }
 
         // ── Theme ─────────────────────────────────────────────────────
         SettingsSectionHeader("Theme")
