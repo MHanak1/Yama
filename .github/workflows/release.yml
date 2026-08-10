@@ -54,10 +54,25 @@ jobs:
       - name: Download and stage libvlc (v${{ env.VLC_VERSION }})
         shell: pwsh
         run: |
-          $url = "https://get.videolan.org/vlc/$env:VLC_VERSION/win64/vlc-$env:VLC_VERSION-win64.7z"
-          Write-Host "Downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile vlc.7z
-          & 7z x vlc.7z -ovlc_extracted | Out-Null
+          $ErrorActionPreference = "Stop"
+          $base = "https://get.videolan.org/vlc/$env:VLC_VERSION/win64"
+          $file = "vlc-$env:VLC_VERSION-win64.7z"
+          # get.videolan.org 302-redirects to a geo-chosen mirror; use curl.exe (present on every
+          # Windows runner) with -f (fail on HTTP error), -L (follow redirects) and retries, rather
+          # than Invoke-WebRequest which silently saves whatever a bad mirror returns.
+          Write-Host "Downloading $base/$file"
+          curl.exe -fL --retry 5 --retry-all-errors --retry-delay 3 -o vlc.7z "$base/$file"
+          if ($LASTEXITCODE -ne 0) { throw "curl failed to download $file (exit $LASTEXITCODE)" }
+          curl.exe -fL --retry 5 --retry-all-errors --retry-delay 3 -o vlc.7z.sha256 "$base/$file.sha256"
+          if ($LASTEXITCODE -ne 0) { throw "curl failed to download $file.sha256 (exit $LASTEXITCODE)" }
+          # Verify integrity — catches a truncated download or an HTML error page served with 200,
+          # and gives supply-chain assurance on a native DLL we ship to users.
+          $expected = ((Get-Content vlc.7z.sha256 -Raw).Trim() -split '\s+')[0].ToLower()
+          $actual = (Get-FileHash vlc.7z -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "libvlc checksum mismatch: expected $expected, got $actual" }
+          Write-Host "Checksum OK ($actual)"
+          & 7z x vlc.7z -ovlc_extracted
+          if ($LASTEXITCODE -ne 0) { throw "7z extraction failed (exit $LASTEXITCODE)" }
           $src = "vlc_extracted/vlc-$env:VLC_VERSION"
           $dst = "desktopApp/resources/windows-x64/vlc"
           New-Item -ItemType Directory -Force -Path $dst | Out-Null
