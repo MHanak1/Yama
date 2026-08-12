@@ -1,21 +1,14 @@
 package net.mhanak.yama.ui.components.library
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.plus
 import androidx.compose.foundation.lazy.LazyListScope
@@ -26,14 +19,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +40,6 @@ import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.ui.components.interaction.ContentFocusRegistry
@@ -62,6 +51,20 @@ import net.mhanak.yama.ui.components.settings.SelectableKind
 import net.mhanak.yama.ui.components.settings.LocalLibrarySelection
 import net.mhanak.yama.ui.components.state.LocalAvailability
 import net.mhanak.yama.ui.components.image.CardImage
+import net.mhanak.yama.ui.components.card.ItemCard
+
+/**
+ * The un-clamped target width for one library card at a given container [maxWidth]. Starts at 100dp
+ * and grows gently (1/12 of the width) so cards get larger on bigger screens rather than just adding
+ * columns.
+ *
+ * [GridView] feeds this to [GridCells.Adaptive], which then rounds *up* to a whole number of columns
+ * (so an integer count of cards exactly fills the row). [net.mhanak.yama.ui.components.home.HomeShelf]
+ * uses the same value directly for its fixed-width cards, deliberately skipping that integer clamp —
+ * a horizontal shelf reads better showing a fractional number of cards (a peek of the next one) than
+ * snapping to a whole count, and it keeps both surfaces growing along one shared curve.
+ */
+fun adaptiveCardWidth(maxWidth: Dp): Dp = 100.dp + maxWidth / 12f
 
 @Composable
 fun GridView(
@@ -85,8 +88,9 @@ fun GridView(
         CompositionLocalProvider(LocalContentFocusRegistry provides registry) {
             LazyVerticalGrid(
                 state = state,
-                // silly way of making the grid size fit both mobile and desktop
-                columns = GridCells.Adaptive(minSize = Dp(100.toFloat() + (maxWidth.value / 12F))),
+                // Adaptive fits a whole number of columns of at least this width, so cards scale up
+                // on larger screens (see [adaptiveCardWidth]) instead of just adding narrow columns.
+                columns = GridCells.Adaptive(minSize = adaptiveCardWidth(maxWidth)),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = contentPadding.plus(PaddingValues(8.dp)),
@@ -112,8 +116,8 @@ fun GridView(
 /**
  * When [selectable] is non-null the card joins the library multi-selection: a long-press or
  * shift+left-click toggles it, and once any item is selected a plain tap toggles instead of opening it.
- * A selected card is outlined in the primary colour and, while selection mode is active, shows a
- * check/empty-circle indicator over its artwork.
+ * While selection mode is active the card shows a check/empty-circle indicator over its artwork, filled
+ * in the primary colour when selected.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -161,56 +165,33 @@ fun GridCard(
     } else {
         focusMod.combinedClickable(onClick = onClick)
     }
-    ElevatedCard(
-        modifier = clickModifier.alpha(if (dimmed) 0.5f else 1f),
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxSize()
-        ) {
-            Box (
-                modifier = Modifier
-                    .fillMaxSize()
-                    .aspectRatio(ratio = 1.0F)
-                    .clip(RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                image?.invoke(this)
-                if (selectable?.active == true) {
-                    Icon(
-                        if (selected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                        contentDescription = if (selected) "Selected" else "Not selected",
-                        tint = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-                            .padding(2.dp),
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                title ?: "",
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (subtitle!= null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+    // Presentation comes from the shared [ItemCard]; this only injects library behaviour. The click /
+    // long-press / shift-select / TV-focus chain rides in on contentModifier, so it lands inside the
+    // card's Surface and its highlight is clipped to the rounded shape (rather than bleeding into the
+    // corners). The selection indicator overlays the artwork slot, and dimming sits on the outer card.
+    ItemCard(
+        title = title,
+        subtitle = subtitle,
+        modifier = Modifier.alpha(if (dimmed) 0.5f else 1f),
+        contentModifier = clickModifier,
+        image = {
+            image?.invoke(this)
+            if (selectable?.active == true) {
+                Icon(
+                    if (selected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = if (selected) "Selected" else "Not selected",
+                    tint = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                        .padding(2.dp),
                 )
             }
-        }
-    }
+        },
+    )
 }
 
 /** Selection wiring for one [GridCard]: whether it's [selected], whether selection mode is [active]
