@@ -37,6 +37,14 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Yama"
+
+            // Bundle the full JDK module set into the jlink runtime. Several dependencies load JDK
+            // modules reflectively (Logback -> java.naming, SQLDelight JDBC -> java.sql, TLS EC ciphers
+            // -> jdk.crypto.ec, JNA/OkHttp/Netty -> jdk.unsupported), which jlink's static analysis
+            // misses — so a minimal runtime crashes at startup with NoClassDefFoundError. The size cost
+            // (~30-40 MB) is worth not chasing missing modules one CI round-trip at a time. To slim this
+            // later, replace with explicit `modules(...)` guided by the `suggestRuntimeModules` task.
+            includeAllModules = true
             // Driven by the release tag in CI (YAMA_VERSION, e.g. "1.2.0"); "1.0.0" for local builds.
             // Must be numeric x.y.z — jpackage/MSI reject suffixes like "-beta" (see RELEASING.md).
             packageVersion = System.getenv("YAMA_VERSION") ?: "1.0.0"
