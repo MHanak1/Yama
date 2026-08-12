@@ -86,6 +86,25 @@ jobs:
         shell: pwsh
         run: .\gradlew.bat :desktopApp:packageMsi --no-daemon
 
+      # jpackage writes its real error to files on disk (not the console), which the runner discards
+      # when the job ends. Surface them so a packaging failure is actually diagnosable.
+      - name: Dump jpackage logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $logDir = "desktopApp/build/compose/logs"
+          if (Test-Path $logDir) {
+            Get-ChildItem -Recurse -File $logDir | ForEach-Object {
+              Write-Host "========== $($_.FullName) =========="
+              Get-Content $_.FullName
+            }
+          } else { Write-Host "No jpackage logs found at $logDir" }
+          $args = "desktopApp/build/compose/tmp/packageMsi.args.txt"
+          if (Test-Path $args) {
+            Write-Host "========== $args =========="
+            Get-Content $args
+          }
+
       - name: Collect MSI
         shell: pwsh
         run: |
