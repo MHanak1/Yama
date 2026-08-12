@@ -62,9 +62,11 @@ import net.mhanak.yama.ui.components.library.SourceAvatar
 private const val ANIM_MS = 200
 
 // Both rail widths must render at the same total height so toggling wide <-> slim never shifts
-// the nav items below. Total = content height + 2 * outer vertical padding, tuned to 64dp:
-//   slim: 44 (chip)  + 2 * 10 = 64
-//   wide: 56 (pill)  + 2 * 4  = 64
+// the nav items below. Total = content height + top + bottom outer padding, tuned to 72dp:
+//   collapsed: 44 (chip) + 10 top + 18 bottom = 72   (10dp top keeps the chip search-bar-aligned)
+//   expanded:  56 (pill) +  8 top +  8 bottom = 72   (8dp top clears the window edge; 8dp bottom matches the Home->tabs spacer)
+// The taller pill (56 vs 44) forces the 12dp difference into the collapsed bottom gap, since the
+// chip's top is pinned for search-bar alignment — that's why collapsed carries the larger bottom.
 // The pill height is fixed (not padding-driven) so an account subtitle can't grow it past 56dp.
 private val CHIP_HEIGHT = 44.dp   // slim rail avatar chip; also matches the search bar height
 private val PILL_HEIGHT = 56.dp   // wide rail identity pill
@@ -116,7 +118,21 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
         appContainer.showLoginScreen = true
     }
 
-    Box(modifier = modifier.padding(horizontal = if (collapsed) 8.dp else 16.dp, vertical = if (collapsed) 10.dp else 4.dp)) {
+    // Horizontal inset matches the rail's RailItem pills (8.dp each side) so the identity pill lines up
+    // flush with the Home / library / footer buttons below it in both collapsed and expanded widths.
+    // Vertical padding is asymmetric so both widths stay 72dp tall (see CHIP/PILL comment above): the
+    // expanded pill gets 8.dp top (so it doesn't touch the window edge) and 8.dp bottom (matching the
+    // Home->tabs spacer, seating it the same distance from Home as the nav items sit from each other),
+    // while collapsed keeps its 10.dp top for search-bar alignment and absorbs the height difference in
+    // its bottom gap.
+    Box(
+        modifier = modifier.padding(
+            start = 8.dp,
+            end = 8.dp,
+            top = if (collapsed) 10.dp else 8.dp,
+            bottom = if (collapsed) 18.dp else 8.dp,
+        ),
+    ) {
         if (collapsed) {
             // 96dp narrow rail: avatar-only chip + popover panel.
             // 44dp chip height matches the search bar (SearchBar default 44dp, centred in 64dp TopAppBar,

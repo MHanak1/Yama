@@ -145,8 +145,12 @@ fun AppNavRail(
             // Isolate the rail as its own D-pad focus group so content focus never steps into it.
             .focusGroup()
             .then(if (isTV) Modifier.onFocusChanged { focused = it.hasFocus } else Modifier)
-            .statusBarsPadding()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            // Background BEFORE statusBarsPadding so the rail's surface fills the whole height and
+            // extends up into the status bar / display cutout; the padding then insets only the
+            // content below. (Reversed, the padding shrinks the node first and the background stops
+            // abruptly below the notch.)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .statusBarsPadding(),
     ) {
         SourceSwitcher(collapsed = !expanded)
 
