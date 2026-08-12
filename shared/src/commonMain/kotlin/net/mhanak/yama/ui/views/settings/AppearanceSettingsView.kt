@@ -25,6 +25,7 @@ import net.mhanak.yama.ui.components.settings.AppearanceSettings
 @Composable
 fun AppearanceSettingsView(
     onBack: () -> Unit,
+    onOpenHomeLayout: () -> Unit,
     modifier: Modifier = Modifier,
     bottomContentPadding: Dp = 0.dp,
 ) {
@@ -47,7 +48,7 @@ fun AppearanceSettingsView(
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            AppearanceSettings()
+            AppearanceSettings(onOpenHomeLayout = onOpenHomeLayout)
             Spacer(Modifier.height(bottomContentPadding))
         }
     }

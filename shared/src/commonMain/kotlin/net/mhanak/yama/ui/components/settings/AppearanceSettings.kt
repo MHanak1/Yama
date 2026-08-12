@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.isTelevisionDevice
 import net.mhanak.yama.ui.screens.LaunchDestination
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.ui.theme.AlbumTintMode
@@ -41,7 +45,12 @@ import net.mhanak.yama.ui.theme.SeedColorPicker
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppearanceSettings(modifier: Modifier = Modifier) {
+fun AppearanceSettings(
+    // Opens the per-source home-layout editor (the shelf list). Lives here now rather than on the
+    // Home screen's app bar.
+    onOpenHomeLayout: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val appContainer = LocalAppContainer.current
     Column(modifier = modifier) {
 
@@ -149,11 +158,27 @@ fun AppearanceSettings(modifier: Modifier = Modifier) {
             }
         }
 
-        // ── Player ────────────────────────────────────────────────────
-        SettingsSectionHeader("Player")
+        // ── Layout ────────────────────────────────────────────────────
+        // Everything that shapes how screens are arranged: the Home shelves, the full player, and
+        // whether the whole app runs in the D-pad/TV layout.
+        SettingsSectionHeader("Layout")
+        ListItem(
+            headlineContent = { Text("Home screen") },
+            supportingContent = { Text("Choose and reorder the shelves shown on Home") },
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            modifier = Modifier.clickable(onClick = onOpenHomeLayout),
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(
-                "Layout",
+                "Player layout",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
@@ -188,6 +213,18 @@ fun AppearanceSettings(modifier: Modifier = Modifier) {
                     }
                 }
             }
+        }
+        // A real TV reports itself via isTelevisionDevice() and always uses the TV layout, so the
+        // manual opt-in is only offered on non-TV hardware (desktop / a phone with a controller).
+        if (!isTelevisionDevice()) {
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+            ListItem(
+                headlineContent = { Text("Controller / TV layout") },
+                supportingContent = { Text("Use D-pad and controller navigation instead of pointer") },
+                trailingContent = { Switch(checked = appContainer.forceTvMode, onCheckedChange = null) },
+                modifier = Modifier.clickable { appContainer.forceTvMode = !appContainer.forceTvMode },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
         }
 
         // ── Display ───────────────────────────────────────────────────

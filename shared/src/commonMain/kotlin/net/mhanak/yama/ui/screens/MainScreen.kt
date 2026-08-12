@@ -527,6 +527,7 @@ fun MainScreen() {
             detailComposable<AppearanceSettingsRoute> {
                 AppearanceSettingsView(
                     onBack = { navController.popBackStack() },
+                    onOpenHomeLayout = { navController.navigate(HomeLayoutRoute) { launchSingleTop = true } },
                     bottomContentPadding = bottomInset,
                 )
             }
