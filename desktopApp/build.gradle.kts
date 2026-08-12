@@ -40,9 +40,12 @@ compose.desktop {
             // Driven by the release tag in CI (YAMA_VERSION, e.g. "1.2.0"); "1.0.0" for local builds.
             // Must be numeric x.y.z — jpackage/MSI reject suffixes like "-beta" (see RELEASING.md).
             packageVersion = System.getenv("YAMA_VERSION") ?: "1.0.0"
-            description = "Yama — a self-hosted music client"
-            vendor = "Michał Hanak"
-            copyright = "© 2026 Michał Hanak"
+            description = "Yama - Yet Another Music App"
+            // Baked into the Windows MSI `Manufacturer` field, which WiX encodes in code page 1252.
+            // Keep this ASCII: "ł" (U+0142) lives in CP1250, not 1252, and makes light.exe fail with
+            // LGHT0311. (The "©" and em-dash above are fine — both exist in 1252.)
+            vendor = "Michal Hanak"
+            copyright = "© 2026 Michal Hanak"
 
             // Files placed here are copied into the packaged app image and exposed at runtime via the
             // `compose.application.resources.dir` system property. Per-platform subfolders (e.g.
