@@ -44,7 +44,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -181,6 +183,7 @@ fun MainScreen() {
     val destination = navBackStackEntry?.destination
 
     val onHome = destination?.hasRoute<HomeRoute>() == true
+    val onLibrary = destination?.hasRoute<LibraryRoute>() == true
     val onDownloadedMusic = destination?.hasRoute<DownloadedMusicRoute>() == true ||
         destination?.hasRoute<DownloadedAlbumRoute>() == true ||
         destination?.hasRoute<DownloadedTracksRoute>() == true
@@ -423,7 +426,34 @@ fun MainScreen() {
                 // Group the content so it's a single D-pad focus region distinct from the rail. The
                 // contentFocusRequester is the fallback target for screens without a content grid;
                 // entry focus normally goes straight to the grid (see the LaunchedEffect above).
-                .then(if (isTV) Modifier.focusRequester(contentFocusRequester).focusGroup() else Modifier),
+                .then(if (isTV) Modifier.focusRequester(contentFocusRequester).focusGroup() else Modifier)
+                // Slim (bottom-bar) layout only: swipe horizontally to move between Home and Library —
+                // the same two destinations the bottom bar exposes, sliding in the same horizontal
+                // direction as their nav transition. Gated to !hasRail because the wide layout navigates
+                // via the rail (and there its top-level transition is vertical), and to !isTV where the
+                // D-pad drives navigation. A horizontally-scrolling child (e.g. a Home shelf) consumes
+                // the drag first, so this only fires on non-scrolling areas / the vertical library grid.
+                .then(
+                    if (!hasRail && !isTV) {
+                        Modifier.pointerInput(onHome, onLibrary) {
+                            val threshold = 56.dp.toPx()
+                            var total = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { total = 0f },
+                                onDragEnd = {
+                                    // Swipe left (negative) advances Home → Library; swipe right returns.
+                                    if (total <= -threshold && onHome) {
+                                        if (!navController.popBackStack(LibraryRoute, inclusive = false)) {
+                                            navController.navigateTopLevel(LibraryRoute)
+                                        }
+                                    } else if (total >= threshold && onLibrary) {
+                                        navController.navigateTopLevel(HomeRoute)
+                                    }
+                                },
+                            ) { _, dragAmount -> total += dragAmount }
+                        }
+                    } else Modifier,
+                ),
             enterTransition = { topLevelEnter(vertical = hasRail) ?: fadeIn(tween(DETAIL_DURATION)) },
             exitTransition = { topLevelExit(vertical = hasRail) ?: fadeOut(tween(DETAIL_DURATION)) },
             popEnterTransition = { topLevelEnter(vertical = hasRail) ?: fadeIn(tween(DETAIL_DURATION)) },
