@@ -8,8 +8,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,10 +27,13 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -57,11 +62,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalAutofillManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
@@ -73,6 +83,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.LocalIsTvMode
 import net.mhanak.yama.media.sources.SourceType
 import net.mhanak.yama.ui.components.login.LoginErrorCard
 import net.mhanak.yama.ui.components.login.LoginErrorSlot
@@ -92,8 +103,123 @@ import kotlin.collections.emptyList
 // Pass null to hide the button.
 val LocalSetBackAction = compositionLocalOf<((() -> Unit)?) -> Unit> { {} }
 
+// The scroll viewport height while the (TV) keyboard is open over the form (0.dp = closed / no field
+// focused). Read by keepVisibleWhenKeyboardOpen to compute where to scroll the focused field.
+private val LocalKeyboardViewport = compositionLocalOf { 0.dp }
+
+// Each text field reports focus gained/lost here so LoginScreen can count focused fields. On TV a
+// focused field means the keyboard is open, which is what drives the scroll. Provided by LoginScreen.
+private val LocalFieldFocus = compositionLocalOf<(focused: Boolean) -> Unit> { {} }
+
+// Where the focused field comes to rest while the keyboard is open: this fraction of the viewport
+// height down from the top (0.25 = a quarter down, i.e. centred in the top half, clear of a
+// bottom-docked TV keyboard).
+private const val FOCUSED_FIELD_TOP_FRACTION = 0.25f
+
 // The sources offered on the login screen, in display order.
 private val loginSources = listOf(SourceType.Jellyfin, SourceType.Subsonic, SourceType.Local)
+
+/**
+ * Reports this field's focus up to [LoginScreen] (via [LocalFieldFocus]) and, while the keyboard is
+ * open, scrolls the field to a fixed resting spot ([FOCUSED_FIELD_TOP_FRACTION] down the viewport)
+ * so it clears the keyboard.
+ *
+ * The form itself isn't resized — [LoginScreen] just adds trailing scroll slack while editing, and
+ * we scroll the focused field into place with a [BringIntoViewRequester] and a computed target rect
+ * (the field's own built-in bring-into-view only reaches the viewport edge, i.e. still behind the
+ * keyboard). Re-issued one frame after the keyboard opens so the added slack has laid out first.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Modifier.keepVisibleWhenKeyboardOpen(): Modifier {
+    val requester = remember { BringIntoViewRequester() }
+    val reportFocus = LocalFieldFocus.current
+    val viewport = LocalKeyboardViewport.current
+    val density = LocalDensity.current
+    var focused by remember { mutableStateOf(false) }
+    var width by remember { mutableStateOf(0f) }
+    LaunchedEffect(focused, viewport) {
+        if (focused && viewport > 0.dp) {
+            withFrameNanos {} // let the trailing slack (which grew the scroll range) lay out first
+            val v = with(density) { viewport.toPx() }
+            val top = -(FOCUSED_FIELD_TOP_FRACTION * v)
+            // Ask for a viewport-tall region whose top sits FOCUSED_FIELD_TOP_FRACTION *above* this
+            // field. A region exactly the viewport's height has one visible position, so the field
+            // lands at that fraction down the screen — clear of the keyboard, same spot every time —
+            // regardless of which field or how tall the form is.
+            requester.bringIntoView(Rect(0f, top, width, top + v))
+        }
+    }
+    // A field can be disposed while still focused (e.g. switching source tabs), so release its
+    // contribution to the focused-field count on dispose or the scroll trigger would stick.
+    DisposableEffect(Unit) {
+        onDispose { if (focused) reportFocus(false) }
+    }
+    return onSizeChanged { width = it.width.toFloat() }
+        .onFocusChanged { state ->
+            if (state.isFocused != focused) {
+                focused = state.isFocused
+                reportFocus(state.isFocused)
+            }
+        }
+        .bringIntoViewRequester(requester)
+}
+
+/**
+ * A login-form text field: full width, single line, autocorrect off, and — crucially — the only
+ * place [keepVisibleWhenKeyboardOpen] is applied, so the scroll-into-view behaviour is bound to text
+ * fields by construction (never to buttons or other focusables). [contentType] wires autofill.
+ */
+@Composable
+private fun LoginTextField(
+    state: TextFieldState,
+    label: String,
+    imeAction: ImeAction,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+    contentType: ContentType? = null,
+) {
+    OutlinedTextField(
+        state = state,
+        modifier = modifier
+            .fillMaxWidth()
+            .loginFieldContentType(contentType)
+            .tabFocusTraversal()
+            .keepVisibleWhenKeyboardOpen(),
+        label = { Text(label) },
+        placeholder = placeholder?.let { { Text(it) } },
+        // Single line so Enter fires the IME action (submit / advance) instead of inserting a newline.
+        lineLimits = TextFieldLineLimits.SingleLine,
+        keyboardOptions = KeyboardOptions(imeAction = imeAction, autoCorrectEnabled = false),
+        onKeyboardAction = { onAction() },
+    )
+}
+
+/** The [LoginTextField] counterpart for secret input (masked, autofilled as a password). */
+@Composable
+private fun LoginSecureTextField(
+    state: TextFieldState,
+    label: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedSecureTextField(
+        state = state,
+        modifier = modifier
+            .fillMaxWidth()
+            .loginFieldContentType(ContentType.Password)
+            .tabFocusTraversal()
+            .keepVisibleWhenKeyboardOpen(),
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, autoCorrectEnabled = false),
+        onKeyboardAction = { onAction() },
+    )
+}
+
+// Applies the autofill contentType semantics when one is given; a no-op otherwise.
+private fun Modifier.loginFieldContentType(type: ContentType?): Modifier =
+    if (type != null) semantics { contentType = type } else this
 
 /**
  * The standard [CircularProgressIndicator], sized to fit a Button's content slot (the default 40dp
@@ -113,18 +239,45 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
     var selectedIndex by remember { mutableIntStateOf(0) }
     var backAction: (() -> Unit)? by remember { mutableStateOf(null) }
 
-    CompositionLocalProvider(LocalSetBackAction provides { backAction = it }) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .wrapContentWidth()
-                .widthIn(max = 460.dp)
-                .padding(horizontal = 24.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+    // On TV the on-screen keyboard docks over the lower part of the screen but (unlike phones)
+    // reports no usable WindowInsets.ime, so imePadding() below stays 0 and a focused field can end
+    // up hidden behind the keyboard. Fix: while editing, scroll the focused field to a fixed spot in
+    // the top half (see keepVisibleWhenKeyboardOpen), with trailingSlack below giving the scroll the
+    // room to do it. The form itself is never resized.
+    //
+    // The trigger is just "a text field is focused": on TV, focusing a field is what opens the
+    // keyboard, so this tracks it closely without the OS insets (which this TV reports late, only
+    // after the first keystroke). Only text fields carry keepVisibleWhenKeyboardOpen, so navigating
+    // buttons or the source picker doesn't move anything. Phones are unaffected (isTv is false).
+    val isTv = LocalIsTvMode.current
+    var focusedFieldCount by remember { mutableIntStateOf(0) }
+    val keyboardOpen = isTv && focusedFieldCount > 0
+    val scrollState = rememberScrollState()
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // While editing, the focused field is scrolled to FOCUSED_FIELD_TOP_FRACTION down the
+        // screen (see keepVisibleWhenKeyboardOpen). keyboardViewport passes the viewport height the
+        // field modifier needs to compute that scroll; trailingSlack is empty scroll room below the
+        // form so even the bottom field can reach that position (it overflows under the keyboard).
+        // Both are zero when no field is focused, so the form looks exactly as it did before.
+        val keyboardViewport = if (keyboardOpen) maxHeight else 0.dp
+        val trailingSlack = if (keyboardOpen) maxHeight * (1 - FOCUSED_FIELD_TOP_FRACTION) else 0.dp
+        CompositionLocalProvider(
+            LocalSetBackAction provides { backAction = it },
+            LocalKeyboardViewport provides keyboardViewport,
+            LocalFieldFocus provides { focused -> focusedFieldCount += if (focused) 1 else -1 },
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .verticalScroll(scrollState)
+                    .wrapContentWidth()
+                    .widthIn(max = 460.dp)
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
             // Top actions: back (set by a subflow, e.g. Jellyfin login → server picker) and close
             // (only in the "Add Source" modal). Sits above the hero so both corners stay reachable.
             Box(modifier = Modifier.fillMaxWidth().height(48.dp)) {
@@ -179,6 +332,11 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
                         2 -> LocalFilesMain(onDismiss)
                     }
                 }
+            }
+
+            // Empty scroll room so a focused field near the bottom of the form can still scroll up
+            // to FOCUSED_FIELD_TOP_FRACTION while the keyboard is open; zero (a no-op) otherwise.
+            Spacer(modifier = Modifier.height(trailingSlack))
             }
         }
     }
@@ -259,13 +417,11 @@ fun JellyfinServerPicker(onServerSelected: (String) -> Unit = {}) {
         Spacer(modifier = Modifier.height(8.dp))
         val hostState = rememberTextFieldState()
         val connect = { onServerSelected(hostState.text.toString()) }
-        OutlinedTextField(
+        LoginTextField(
             state = hostState,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Server Address") },
-            lineLimits = TextFieldLineLimits.SingleLine,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            onKeyboardAction = { connect() },
+            label = "Server Address",
+            imeAction = ImeAction.Go,
+            onAction = connect,
         )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
@@ -443,22 +599,18 @@ fun JellyfinLogin(address: String, api: ApiClient) {
         }
 
         // Password auth
-        OutlinedTextField(
+        LoginTextField(
             state = usernameState,
-            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Username }.tabFocusTraversal(),
-            label = { Text("Username") },
-            // Single line so Enter is the IME action (advance to password) rather than a newline.
-            lineLimits = TextFieldLineLimits.SingleLine,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            onKeyboardAction = { focusManager.moveFocus(FocusDirection.Next) },
+            label = "Username",
+            imeAction = ImeAction.Next,
+            onAction = { focusManager.moveFocus(FocusDirection.Next) },
+            contentType = ContentType.Username,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedSecureTextField(
+        LoginSecureTextField(
             state = passwordState,
-            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Password }.tabFocusTraversal(),
-            label = { Text("Password") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            onKeyboardAction = { submit() },
+            label = "Password",
+            onAction = submit,
         )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
@@ -520,14 +672,12 @@ private fun SubsonicServerPicker(onServerSelected: (String) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
         val hostState = rememberTextFieldState()
         val connect = { if (hostState.text.isNotBlank()) onServerSelected(hostState.text.toString().trim()) }
-        OutlinedTextField(
+        LoginTextField(
             state = hostState,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Server Address") },
-            placeholder = { Text("https://music.example.com") },
-            lineLimits = TextFieldLineLimits.SingleLine,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            onKeyboardAction = { connect() },
+            label = "Server Address",
+            imeAction = ImeAction.Go,
+            onAction = connect,
+            placeholder = "https://music.example.com",
         )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
@@ -582,21 +732,18 @@ private fun SubsonicLogin(serverUrl: String) {
     ) {
         Text(serverUrl, style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(16.dp))
-        OutlinedTextField(
+        LoginTextField(
             state = usernameState,
-            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Username }.tabFocusTraversal(),
-            label = { Text("Username") },
-            lineLimits = TextFieldLineLimits.SingleLine,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            onKeyboardAction = { focusManager.moveFocus(FocusDirection.Next) },
+            label = "Username",
+            imeAction = ImeAction.Next,
+            onAction = { focusManager.moveFocus(FocusDirection.Next) },
+            contentType = ContentType.Username,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedSecureTextField(
+        LoginSecureTextField(
             state = passwordState,
-            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Password }.tabFocusTraversal(),
-            label = { Text("Password") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            onKeyboardAction = { submit() },
+            label = "Password",
+            onAction = submit,
         )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
