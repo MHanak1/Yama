@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,7 +45,15 @@ fun ItemCard(
     contentModifier: Modifier = Modifier,
     image: @Composable BoxScope.() -> Unit,
 ) {
-    ElevatedCard(modifier = modifier) {
+    ElevatedCard(
+        modifier = modifier,
+        // Keep the ElevatedCard's tonal container fill but drop the drop-shadow, so these cards
+        // sit flat like the rest of the UI. Every interaction state is zeroed so hover/press/focus
+        // (desktop + TV) never re-introduce a shadow.
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 0.dp,
+        ),
+    ) {
         Column(
             modifier = contentModifier
                 .padding(12.dp)
