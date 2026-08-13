@@ -55,6 +55,12 @@ compose.desktop {
             vendor = "Michal Hanak"
             copyright = "© 2026 Michal Hanak"
 
+            // GPLv3 §4 requires a copy of the license to travel with every conveyed binary. jpackage
+            // wires this into the MSI (shown as a click-through EULA in the installer) and the .deb.
+            // The self-contained app image / Linux tarball doesn't pick it up here — the release
+            // workflow adds LICENSE to that archive separately (see .github/workflows/release.yml).
+            licenseFile.set(rootProject.file("LICENSE"))
+
             // Files placed here are copied into the packaged app image and exposed at runtime via the
             // `compose.application.resources.dir` system property. Per-platform subfolders (e.g.
             // `windows-x64/`) are merged with `common/`. The release workflow drops the bundled libvlc

@@ -163,8 +163,11 @@ jobs:
         run: |
           mkdir -p dist
           # Self-contained app image -> tarball (bundled JRE; no Java needed at runtime).
-          tar -C desktopApp/build/compose/binaries/main/app -czf \
-            "dist/yama-${YAMA_VERSION}-linux-x64.tar.gz" Yama
+          # Include LICENSE at the archive root (GPLv3 §4): the app-image format doesn't absorb the
+          # DSL `licenseFile`, so add it here. A second `-C` switches dirs mid-archive.
+          tar -czf "dist/yama-${YAMA_VERSION}-linux-x64.tar.gz" \
+            -C desktopApp/build/compose/binaries/main/app Yama \
+            -C "${GITHUB_WORKSPACE}" LICENSE
           cp desktopApp/build/compose/binaries/main/deb/*.deb "dist/" || true
           cp androidApp/build/outputs/apk/release/*.apk \
             "dist/yama-${YAMA_VERSION}.apk" || cp androidApp/build/outputs/apk/release/*-release-unsigned.apk "dist/yama-${YAMA_VERSION}-unsigned.apk"

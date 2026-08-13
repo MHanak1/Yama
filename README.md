@@ -102,3 +102,13 @@ I do not guarantee it will work on a smartwatch, at least not yet.
 \*I don't own any Apple devices, so it is impossible for me to compile the app any Apple devices. Also, some libraries (like `jellyfin-sdk`) do not support Apple targets.
 
 \*\* TV focus handling still has some bugs to work out.
+
+## License
+
+Yama is free software licensed under the **GNU General Public License v3.0** (GPLv3). See [`LICENSE`](LICENSE) for the full text.
+
+Copyright (C) 2026 Michał Hanak
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+The project is GPLv3 because it links [`vlcj`](https://github.com/caprica/vlcj) (GPLv3) for desktop audio playback. It also uses [`jellyfin-sdk-kotlin`](https://github.com/jellyfin/jellyfin-sdk-kotlin) (LGPLv3);
