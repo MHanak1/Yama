@@ -67,6 +67,7 @@ class LocalPlayer(
                 repeat = engineStatus.repeat,
                 shuffle = engineStatus.shuffle,
                 volume = vol,
+                error = engineStatus.error,
             )
         }.stateIn(scope, SharingStarted.Eagerly, PlayerStatus())
 

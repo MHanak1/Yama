@@ -309,10 +309,13 @@ fun PlayerControls(
                         shape = playShape,
                         interactionSource = playInteraction,
                     ) {
-                        // While the track is buffering, swap the glyph for the app's standard spinner. It
-                        // must be tinted onPrimary (LocalContentColor here) — the indicator's default
-                        // primary colour would be invisible on the primary-filled container.
-                        Crossfade(status.state == PlaybackState.Buffering, label = "playLoading") { loading ->
+                        // While the track is buffering — or stalled on a transient network drop and
+                        // waiting to reconnect — swap the glyph for the app's standard spinner. It must be
+                        // tinted onPrimary (LocalContentColor here) — the indicator's default primary
+                        // colour would be invisible on the primary-filled container.
+                        val loadingState = status.state == PlaybackState.Buffering ||
+                            status.state == PlaybackState.Reconnecting
+                        Crossfade(loadingState, label = "playLoading") { loading ->
                             if (loading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(24.dp * scale),

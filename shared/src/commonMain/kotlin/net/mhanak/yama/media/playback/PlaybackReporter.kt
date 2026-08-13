@@ -218,7 +218,12 @@ class PlaybackReporter(
     }
 
     private companion object {
-        val ACTIVE_STATES = setOf(PlaybackState.Playing, PlaybackState.Paused, PlaybackState.Buffering)
+        // Reconnecting counts as active-but-frozen alongside Buffering: the track is still the current
+        // one, just stalled. Excluding it would fire a spurious stop and reset the scrobble guard, so a
+        // resume past the threshold would double-count the play.
+        val ACTIVE_STATES = setOf(
+            PlaybackState.Playing, PlaybackState.Paused, PlaybackState.Buffering, PlaybackState.Reconnecting,
+        )
         const val PROGRESS_INTERVAL_MS = 5_000L
         // Minimum volume change (fraction) that triggers an out-of-band progress report.
         const val VOLUME_REPORT_DELTA = 0.01f

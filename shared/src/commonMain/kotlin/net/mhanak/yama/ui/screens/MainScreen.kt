@@ -87,6 +87,7 @@ import net.mhanak.yama.ui.components.interaction.rememberIdleMonitor
 import net.mhanak.yama.ui.components.interaction.resetIdleOn
 import net.mhanak.yama.ui.player.FullPlayer
 import net.mhanak.yama.ui.player.NowPlayingBar
+import net.mhanak.yama.ui.player.PlaybackErrorBanner
 import net.mhanak.yama.ui.player.VolumeIndicator
 import net.mhanak.yama.LocalIsTvMode
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -643,6 +644,15 @@ fun MainScreen() {
         VolumeIndicator(
             volume = activeVolume,
             volumeChanged = appContainer.playback.volumeChanged,
+        )
+
+        // Surface a fatal playback fault (missing/rejected/undecodable track, or a reconnect that gave
+        // up) just above the mini-player. Transient network stalls don't come through here — they show
+        // as the play-button spinner and self-recover; only non-recoverable errors set status.error.
+        PlaybackErrorBanner(
+            error = playerStatus.error,
+            peekHeight = playerPeek,
+            onRetry = { player.play() },
         )
     }
 }

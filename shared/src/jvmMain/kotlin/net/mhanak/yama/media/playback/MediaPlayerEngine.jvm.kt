@@ -28,6 +28,15 @@ private const val SEEK_APPLY_ATTEMPTS = 30
 private const val SEEK_VERIFY_DELAY_MS = 100L
 private const val SEEK_LANDED_TOLERANCE_MS = 1_500L
 
+// Reconnect loop for a network stream that errored (libvlc gives no cause, so we retry rather than
+// classify): reopen the stream with exponential backoff, resuming from where it stalled, until it
+// recovers or the attempts are exhausted (then it's surfaced as a fatal error).
+private const val RECONNECT_MAX_ATTEMPTS = 12
+private const val RECONNECT_INITIAL_DELAY_MS = 2_000L
+private const val RECONNECT_MAX_DELAY_MS = 15_000L
+// After reopening, how long to let the stream prove itself before counting the attempt as failed.
+private const val RECONNECT_PROBE_MS = 4_000L
+
 /**
  * Desktop engine over libvlc (via vlcj). Unlike Media3, libvlc plays one media at a time, so the
  * queue is managed here by hand: on the native "finished" event we advance and load the next track.
@@ -64,6 +73,14 @@ actual class MediaPlayerEngine actual constructor() {
     @Volatile private var pendingSeekMs = 0L
     private var seekJob: Job? = null
 
+    // True while a network stream is being retried after an error; overlays state as Reconnecting so the
+    // UI shows a spinner (and we hold position) instead of the "stopped" a raw error would render.
+    @Volatile private var reconnecting = false
+    // A fatal fault message, surfaced once via [EngineStatus.error]. Set for local-file errors and when
+    // the reconnect loop gives up; cleared by the next successful command.
+    @Volatile private var pendingError: String? = null
+    private var reconnectJob: Job? = null
+
     // Built lazily so a missing libvlc only disables playback instead of crashing app launch.
     private val component: AudioPlayerComponent? by lazy {
         // Point JNA at the bundled libvlc (packaged Windows app) before vlcj loads the native library;
@@ -83,6 +100,10 @@ actual class MediaPlayerEngine actual constructor() {
                 }
                 override fun playing(mediaPlayer: MediaPlayer) {
                     applyPendingSeek()
+                    // A successful (re)start clears any in-flight recovery — the reconnect loop watches
+                    // [reconnecting] and bails out once this flips it false.
+                    reconnecting = false
+                    pendingError = null
                     pushState(PlaybackState.Playing, true)
                 }
                 // A freshly-started network stream isn't seekable the instant playing() fires, so a
@@ -91,12 +112,15 @@ actual class MediaPlayerEngine actual constructor() {
                 override fun seekableChanged(mediaPlayer: MediaPlayer, newSeekable: Int) {
                     if (newSeekable != 0) applyPendingSeek()
                 }
-                override fun paused(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Paused, false)
-                override fun stopped(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Paused, false)
+                // Don't let libvlc's stop/pause events (fired as a reconnect attempt tears down the old
+                // media) clobber the Reconnecting spinner.
+                override fun paused(mediaPlayer: MediaPlayer) { if (!reconnecting) pushState(PlaybackState.Paused, false) }
+                override fun stopped(mediaPlayer: MediaPlayer) { if (!reconnecting) pushState(PlaybackState.Paused, false) }
                 override fun error(mediaPlayer: MediaPlayer) {
                     val uri = if (index in queue.indices) queue[index].uri else "<none>"
                     log.error("vlcj playback error at index $index uri=$uri")
-                    pushState(PlaybackState.Idle, false)
+                    // Must not re-enter the player from its own event thread — hop threads first.
+                    scope.launch { onPlaybackError(uri) }
                 }
             }
         }.getOrElse {
@@ -114,7 +138,66 @@ actual class MediaPlayerEngine actual constructor() {
             queueIndex = index,
             repeat = repeat,
             shuffle = shuffle,
+            error = pendingError,
         )
+    }
+
+    /**
+     * Handle a libvlc playback error (already off the native event thread). libvlc reports no cause, so
+     * we split on the URI: a network stream is retried by [startReconnect] (a transient drop that comes
+     * back resumes; a genuinely broken URL exhausts the attempts and becomes fatal), while a local file
+     * error can't be fixed by waiting and is surfaced as fatal at once.
+     */
+    private fun onPlaybackError(uri: String) {
+        if (uri.startsWith("http", ignoreCase = true)) {
+            pushState(PlaybackState.Reconnecting, false)
+            startReconnect()
+        } else {
+            reconnecting = false
+            pendingError = "This track couldn't be played."
+            pushState(PlaybackState.Idle, false)
+        }
+    }
+
+    /**
+     * Retry the current network stream with exponential backoff, resuming from where it stalled. A
+     * single loop guards against duplicate jobs (re-entrant errors during a failed attempt are absorbed
+     * by the [reconnecting] flag). Bails the instant [playing] clears [reconnecting]; gives up as a
+     * fatal error once the attempts are exhausted.
+     */
+    private fun startReconnect() {
+        if (reconnecting) return
+        reconnecting = true
+        pendingError = null
+        val resumeFrom = _status.value.positionMs
+        reconnectJob = scope.launch {
+            var delayMs = RECONNECT_INITIAL_DELAY_MS
+            repeat(RECONNECT_MAX_ATTEMPTS) { attempt ->
+                delay(delayMs)
+                if (!reconnecting) return@launch          // superseded by a manual command
+                val i = index
+                if (i !in queue.indices) return@launch
+                log.info("Reconnect attempt ${attempt + 1}: reopening ${queue[i].uri} from ${resumeFrom}ms")
+                pendingSeekMs = resumeFrom                 // resume near where it stalled
+                playIndex(i)                                // reopen; playing()/error() decide the outcome
+                delay(RECONNECT_PROBE_MS)
+                if (!reconnecting) return@launch           // playing() cleared it → recovered
+                delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
+            }
+            if (reconnecting) {
+                reconnecting = false
+                pendingError = "Couldn't reconnect to play this track."
+                pushState(PlaybackState.Idle, false)
+            }
+        }
+    }
+
+    // Abandon any in-flight recovery — called when a manual command supersedes the stalled item.
+    private fun clearRecovery() {
+        reconnecting = false
+        pendingError = null
+        reconnectJob?.cancel()
+        reconnectJob = null
     }
 
     /**
@@ -180,6 +263,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun setQueue(items: List<PlayableMedia>, startIndex: Int) {
+        clearRecovery()
         queue.clear()
         queue.addAll(items)
         if (items.isEmpty()) {
@@ -193,6 +277,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun loadQueue(items: List<PlayableMedia>, startIndex: Int) {
+        clearRecovery()
         queue.clear()
         queue.addAll(items)
         mediaLoaded = false
@@ -216,6 +301,7 @@ actual class MediaPlayerEngine actual constructor() {
 
     actual fun removeAt(index: Int) {
         if (index !in queue.indices) return
+        if (index == this.index) clearRecovery()
         queue.removeAt(index)
         when {
             index < this.index -> this.index--
@@ -235,6 +321,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun clear() {
+        clearRecovery()
         queue.clear()
         index = -1
         mediaLoaded = false
@@ -244,7 +331,14 @@ actual class MediaPlayerEngine actual constructor() {
 
     actual fun play() {
         val p = player ?: run { log.warn("play() dropped — libvlc engine unavailable"); return }
+        // A manual play while stalled/errored is a retry: reopen the current track from where it stalled.
+        val wasFaulted = reconnecting || pendingError != null
+        clearRecovery()
         when {
+            wasFaulted && index in queue.indices -> {
+                pendingSeekMs = _status.value.positionMs
+                playIndex(index)
+            }
             // Queue was restored via loadQueue but media never started — begin playing now.
             !mediaLoaded && queue.isNotEmpty() -> playIndex(if (index >= 0) index else 0)
             index == -1 && queue.isNotEmpty() -> playIndex(0)
@@ -280,6 +374,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun next() {
+        clearRecovery()
         val saved = repeat
         repeat = RepeatMode.Off // a manual "next" never repeats the current track
         advanceAfterFinish()
@@ -287,6 +382,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun previous() {
+        clearRecovery()
         val p = player ?: return
         if (p.status().time() > 3_000) {
             p.controls().setTime(0)
@@ -296,7 +392,7 @@ actual class MediaPlayerEngine actual constructor() {
         }
     }
 
-    actual fun seekToIndex(index: Int) = playIndex(index)
+    actual fun seekToIndex(index: Int) { clearRecovery(); playIndex(index) }
 
     actual fun setVolume(level: Float) {
         val clamped = level.coerceIn(0f, 1f)

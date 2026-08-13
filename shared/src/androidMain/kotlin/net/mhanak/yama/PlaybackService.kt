@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Looper
 import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.AudioAttributes
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -62,8 +63,23 @@ class PlaybackService : MediaSessionService() {
         val extractorsFactory = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
             .setConstantBitrateSeekingAlwaysEnabled(true)
+        // Buffer further ahead than the ~50s default so a brief network drop is ridden out from the
+        // buffer instead of stalling. Audio is cheap to hold, so we keep up to ~2 min queued and a
+        // 30s back-buffer for instant re-seeks; the playback thresholds are left at their defaults so
+        // startup and post-rebuffer resume stay snappy. Longer outages fall through to the engine's
+        // reconnect-and-resume path (see MediaPlayerEngine.onPlayerError).
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 30_000,
+                /* maxBufferMs = */ 120_000,
+                /* bufferForPlaybackMs = */ DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                /* bufferForPlaybackAfterRebufferMs = */ DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .setBackBuffer(/* backBufferDurationMs = */ 30_000, /* retainBackBufferFromKeyframe = */ true)
+            .build()
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractorsFactory))
+            .setLoadControl(loadControl)
             // Request audio focus and pause on focus loss / when headphones are unplugged.
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)

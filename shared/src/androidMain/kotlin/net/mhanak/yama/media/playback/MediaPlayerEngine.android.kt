@@ -4,6 +4,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.IBinder
 import androidx.media3.common.C
@@ -63,14 +67,34 @@ actual class MediaPlayerEngine actual constructor() {
     // back to in-app gain whenever device-volume control isn't actually available on the player.
     private var useDeviceVolume = true
 
+    private val connectivityManager =
+        MyApplication.appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    // Registered only while [reconnecting], so we hold no system callback during normal playback.
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    // True while a transient network fault has stalled playback (buffer drained with no connection) and
+    // we're waiting to resume from the same position once the network returns. Overlays the player's
+    // STATE_IDLE as [PlaybackState.Reconnecting] so the UI shows a spinner instead of looking stopped.
+    private var reconnecting = false
+    // A fatal (non-recoverable) fault message — surfaced once via [EngineStatus.error]. Waiting won't
+    // fix these (missing file, bad HTTP status, undecodable stream), so playback stays stopped.
+    private var pendingError: String? = null
+
     private val playerListener = object : Media3Player.Listener {
         override fun onEvents(p: Media3Player, events: Media3Player.Events) {
+            // Recovered from a transient stall: once the player leaves STATE_IDLE (a re-prepare took
+            // hold), stop overlaying Reconnecting and drop the network callback we were holding.
+            if (reconnecting && (p as? ExoPlayer)?.playbackState != Media3Player.STATE_IDLE) {
+                reconnecting = false
+                unregisterNetworkCallback()
+            }
             pushStatus()
             (p as? ExoPlayer)?.let { pushVolume(it) }
         }
 
         // ExoPlayer errors silently collapse to STATE_IDLE without this override, making "play failed"
-        // indistinguishable from a normal stop. Log the error code + failing URI so failures are visible.
+        // indistinguishable from a normal stop. Log the error, then split by cause: a transient network
+        // fault holds position and waits for the network to return; anything else is surfaced as fatal.
         override fun onPlayerError(error: PlaybackException) {
             val p = player
             val uri = p?.currentMediaItem?.localConfiguration?.uri?.toString()
@@ -82,7 +106,75 @@ actual class MediaPlayerEngine actual constructor() {
                     "at index $idx uri=$uri: ${error.message}",
                 error,
             )
+            if (error.isTransientNetwork()) {
+                // Hold the queue/position (playWhenReady is retained across the error) and wait for the
+                // network rather than collapsing into an indistinguishable Idle. See [awaitNetworkThenRetry].
+                reconnecting = true
+                pendingError = null
+                awaitNetworkThenRetry()
+            } else {
+                // Non-recoverable by waiting — stop and show a message. playWhenReady is cleared so a
+                // later manual retry (which re-prepares) doesn't inherit a stale "keep playing" intent.
+                reconnecting = false
+                pendingError = error.userMessage()
+                p?.playWhenReady = false
+                unregisterNetworkCallback()
+            }
+            pushStatus()
         }
+    }
+
+    private fun PlaybackException.isTransientNetwork(): Boolean = errorCode in TRANSIENT_NETWORK_CODES
+
+    private fun PlaybackException.userMessage(): String = when (errorCode) {
+        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "This track is unavailable."
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The server couldn't play this track."
+        PlaybackException.ERROR_CODE_IO_NO_PERMISSION,
+        PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED -> "This track can't be accessed."
+        else -> "This track couldn't be played."
+    }
+
+    /**
+     * Register a one-off [ConnectivityManager] callback (if not already waiting) that re-prepares the
+     * player as soon as the device has a network again. ExoPlayer resumes from [ExoPlayer.getCurrentPosition]
+     * on [ExoPlayer.prepare], and playWhenReady is retained across the error, so it picks up right where
+     * the buffer ran dry. The callback is dropped again once recovery is observed (see [onEvents]).
+     */
+    private fun awaitNetworkThenRetry() {
+        val cm = connectivityManager ?: return
+        if (networkCallback != null) return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // Fires on a binder thread — hop to the main thread before touching the player.
+                scope.launch { retryAfterReconnect() }
+            }
+        }
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        runCatching { cm.registerNetworkCallback(request, cb) }
+            .onSuccess { networkCallback = cb }
+            .onFailure { log.warn("Couldn't register network callback for playback recovery", it) }
+    }
+
+    private fun retryAfterReconnect() {
+        val p = player ?: return
+        if (reconnecting && p.playbackState == Media3Player.STATE_IDLE) {
+            log.info("Network available again — re-preparing to resume from ${p.currentPosition}ms")
+            p.prepare()
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        networkCallback?.let { cb -> runCatching { connectivityManager?.unregisterNetworkCallback(cb) } }
+        networkCallback = null
+    }
+
+    // Abandon any in-flight recovery — called when a manual command supersedes the stalled item.
+    private fun clearRecovery() {
+        reconnecting = false
+        pendingError = null
+        unregisterNetworkCallback()
     }
 
     init {
@@ -135,6 +227,7 @@ actual class MediaPlayerEngine actual constructor() {
             .build()
 
     actual fun setQueue(items: List<PlayableMedia>, startIndex: Int) = withPlayer { p ->
+        clearRecovery()
         if (items.isEmpty()) {
             p.clearMediaItems()
             return@withPlayer
@@ -146,6 +239,7 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun loadQueue(items: List<PlayableMedia>, startIndex: Int) = withPlayer { p ->
+        clearRecovery()
         if (items.isEmpty()) {
             p.clearMediaItems()
             return@withPlayer
@@ -171,12 +265,20 @@ actual class MediaPlayerEngine actual constructor() {
     actual fun move(from: Int, to: Int) = withPlayer { p -> p.moveMediaItem(from, to) }
     actual fun clear() = withPlayer { p -> p.clearMediaItems() }
 
-    actual fun play() = withPlayer { p -> p.play(); ensurePolling() }
+    // A manual play while stalled/errored is a retry: re-prepare an idle player so it resumes from the
+    // held position (or the failed track), then play. A healthy player is never in STATE_IDLE here.
+    actual fun play() = withPlayer { p ->
+        if (p.playbackState == Media3Player.STATE_IDLE) { clearRecovery(); p.prepare() }
+        p.play(); ensurePolling()
+    }
     actual fun pause() = withPlayer { p -> p.pause() }
     actual fun seekTo(positionMs: Long) = withPlayer { p -> p.seekTo(positionMs) }
-    actual fun next() = withPlayer { p -> p.seekToNextMediaItem() }
-    actual fun previous() = withPlayer { p -> p.seekToPrevious() }
-    actual fun seekToIndex(index: Int) = withPlayer { p -> p.seekTo(index, 0) }
+    // Skipping tracks abandons recovery of the stalled item; re-prepare if the player was left idle.
+    actual fun next() = withPlayer { p -> clearRecovery(); p.seekToNextMediaItem(); reprepareIfIdle(p) }
+    actual fun previous() = withPlayer { p -> clearRecovery(); p.seekToPrevious(); reprepareIfIdle(p) }
+    actual fun seekToIndex(index: Int) = withPlayer { p -> clearRecovery(); p.seekTo(index, 0); reprepareIfIdle(p) }
+
+    private fun reprepareIfIdle(p: ExoPlayer) { if (p.playbackState == Media3Player.STATE_IDLE) p.prepare() }
 
     actual fun setRepeat(mode: RepeatMode) = withPlayer { p ->
         p.repeatMode = when (mode) {
@@ -233,6 +335,7 @@ actual class MediaPlayerEngine actual constructor() {
 
     actual fun release() {
         pollJob?.cancel()
+        unregisterNetworkCallback()
         player?.removeListener(playerListener)
         player = null
         scope.cancel()
@@ -255,6 +358,9 @@ actual class MediaPlayerEngine actual constructor() {
     private fun pushStatus() {
         val p = player ?: return
         val state = when {
+            // A transient network stall overlays the underlying STATE_IDLE so the UI shows a spinner
+            // (and holds position) instead of the "stopped" that a raw Idle would render.
+            reconnecting -> PlaybackState.Reconnecting
             p.playbackState == Media3Player.STATE_BUFFERING -> PlaybackState.Buffering
             p.playbackState == Media3Player.STATE_ENDED -> {
                 log.debug("Playback ended at index ${p.currentMediaItemIndex}")
@@ -281,6 +387,16 @@ actual class MediaPlayerEngine actual constructor() {
                 else -> RepeatMode.Off
             },
             shuffle = p.shuffleModeEnabled,
+            error = pendingError,
+        )
+    }
+
+    private companion object {
+        // ExoPlayer error codes that mean "the connection dropped" rather than "this track is bad" —
+        // the only ones worth waiting out for the network to return.
+        val TRANSIENT_NETWORK_CODES = intArrayOf(
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
         )
     }
 }

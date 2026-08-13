@@ -86,7 +86,8 @@ class RemoteMediaPlayer(
         // the remote briefly reports a playing item without a queue.
         val playbackState = if (playlist.isEmpty()) Media3Player.STATE_IDLE else when (status.state) {
             PlaybackState.Idle -> Media3Player.STATE_IDLE
-            PlaybackState.Buffering -> Media3Player.STATE_BUFFERING
+            // A remote endpoint reconnecting is buffering as far as the OS surface is concerned.
+            PlaybackState.Buffering, PlaybackState.Reconnecting -> Media3Player.STATE_BUFFERING
             PlaybackState.Ended -> Media3Player.STATE_ENDED
             PlaybackState.Playing, PlaybackState.Paused -> Media3Player.STATE_READY
         }
