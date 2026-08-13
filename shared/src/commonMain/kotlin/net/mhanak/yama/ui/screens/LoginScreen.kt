@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -97,7 +98,10 @@ import net.mhanak.yama.util.tabFocusTraversal
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.quickConnectApi
 import org.jellyfin.sdk.model.api.ServerDiscoveryInfo
-import kotlin.collections.emptyList
+
+// ---------------------------------------------------------------------------
+// Composition locals & constants
+// ---------------------------------------------------------------------------
 
 // Subcomponents call this to show/hide the back button and set its action.
 // Pass null to hide the button.
@@ -118,6 +122,10 @@ private const val FOCUSED_FIELD_TOP_FRACTION = 0.25f
 
 // The sources offered on the login screen, in display order.
 private val loginSources = listOf(SourceType.Jellyfin, SourceType.Subsonic, SourceType.Local)
+
+// ---------------------------------------------------------------------------
+// Text fields & small building blocks
+// ---------------------------------------------------------------------------
 
 /**
  * Reports this field's focus up to [LoginScreen] (via [LocalFieldFocus]) and, while the keyboard is
@@ -233,6 +241,10 @@ private fun ButtonSpinner() {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Login screen entry point
+// ---------------------------------------------------------------------------
+
 @Composable
 @Preview
 fun LoginScreen(onDismiss: (() -> Unit)? = null) {
@@ -278,69 +290,193 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-            // Top actions: back (set by a subflow, e.g. Jellyfin login → server picker) and close
-            // (only in the "Add Source" modal). Sits above the hero so both corners stay reachable.
-            Box(modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                IconButton(
-                    modifier = Modifier.align(Alignment.CenterStart),
-                    onClick = { backAction?.invoke() },
-                    enabled = backAction != null,
-                ) {
-                    if (backAction != null) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-                if (onDismiss != null) {
+                // Top actions: back (set by a subflow, e.g. Jellyfin login → server picker) and close
+                // (only in the "Add Source" modal). Sits above the hero so both corners stay reachable.
+                Box(modifier = Modifier.fillMaxWidth().height(48.dp)) {
                     IconButton(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        onClick = onDismiss,
+                        modifier = Modifier.align(Alignment.CenterStart),
+                        onClick = { backAction?.invoke() },
+                        enabled = backAction != null,
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                        if (backAction != null) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                    if (onDismiss != null) {
+                        IconButton(
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                            onClick = onDismiss,
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
                     }
                 }
-            }
 
-            LoginHeader()
+                LoginHeader()
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            SourcePicker(
-                options = loginSources,
-                selectedIndex = selectedIndex,
-                onSelect = { selectedIndex = it },
-            )
+                SourcePicker(
+                    options = loginSources,
+                    selectedIndex = selectedIndex,
+                    onSelect = { selectedIndex = it },
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Form container — a structured panel matching the app's SourceSwitcher surfaces. Its
-            // height animates as the active form (and its content) changes.
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                AnimatedContent(
-                    targetState = selectedIndex,
-                    modifier = Modifier.fillMaxWidth().padding(20.dp),
-                    label = "sourceForm",
-                ) { targetState ->
-                    when (targetState) {
-                        0 -> JellyfinMain()
-                        1 -> SubsonicMain()
-                        2 -> LocalFilesMain(onDismiss)
+                // Form container — a structured panel matching the app's SourceSwitcher surfaces. Its
+                // height animates as the active form (and its content) changes.
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
+                ) {
+                    AnimatedContent(
+                        targetState = selectedIndex,
+                        modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        label = "sourceForm",
+                    ) { targetState ->
+                        when (targetState) {
+                            0 -> JellyfinMain()
+                            1 -> SubsonicMain()
+                            2 -> LocalFilesMain(onDismiss)
+                        }
                     }
                 }
-            }
 
-            // Empty scroll room so a focused field near the bottom of the form can still scroll up
-            // to FOCUSED_FIELD_TOP_FRACTION while the keyboard is open; zero (a no-op) otherwise.
-            Spacer(modifier = Modifier.height(trailingSlack))
+                // Empty scroll room so a focused field near the bottom of the form can still scroll up
+                // to FOCUSED_FIELD_TOP_FRACTION while the keyboard is open; zero (a no-op) otherwise.
+                Spacer(modifier = Modifier.height(trailingSlack))
             }
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Shared login plumbing
+// ---------------------------------------------------------------------------
+
+private sealed class LoginUiState {
+    data object Idle : LoginUiState()
+    data object Loading : LoginUiState()
+    data class Error(val throwable: Throwable) : LoginUiState()
+}
+
+/** The loading [state] of a login form plus a guarded [submit] that runs it. See [rememberLoginAction]. */
+private class LoginAction(val state: LoginUiState, val submit: () -> Unit)
+
+/**
+ * State machine shared by every credential form: a [LoginUiState] and a [submit] that runs [perform]
+ * exactly once at a time. Taps are ignored while a submit is in flight; success returns to [Idle]
+ * (the caller's [perform] is responsible for navigating away), failures surface as [Error].
+ */
+@Composable
+private fun rememberLoginAction(perform: suspend () -> Unit): LoginAction {
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<LoginUiState>(LoginUiState.Idle) }
+    val submit: () -> Unit = submit@{
+        if (state is LoginUiState.Loading) return@submit
+        scope.launch {
+            state = LoginUiState.Loading
+            state = try {
+                perform()
+                LoginUiState.Idle
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                LoginUiState.Error(e)
+            }
+        }
+    }
+    return LoginAction(state, submit)
+}
+
+/**
+ * Shared "pick a server, then authenticate" scaffold for the Jellyfin and Subsonic tabs. Owns the
+ * selected-server state and wires the back button (via [LocalSetBackAction]) so backing out of the
+ * credential step returns to the picker. [connect] probes the chosen server; its result is passed to
+ * [authenticated] alongside the address once the probe succeeds.
+ */
+@Composable
+private fun <T> ServerAuthFlow(
+    connect: suspend (address: String) -> T,
+    connectErrorTitle: String,
+    picker: @Composable (onServerSelected: (String) -> Unit) -> Unit,
+    authenticated: @Composable (address: String, result: T) -> Unit,
+) {
+    val setBackAction = LocalSetBackAction.current
+    var selectedServer by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) { onDispose { setBackAction(null) } }
+
+    LaunchedEffect(selectedServer) {
+        setBackAction(if (selectedServer.isNotEmpty()) ({ selectedServer = "" }) else null)
+    }
+
+    if (selectedServer.isEmpty()) {
+        picker { selectedServer = it }
+    } else {
+        Async(
+            key = selectedServer,
+            producer = { connect(selectedServer) },
+            error = { t -> LoginErrorCard(error = t, fallbackTitle = connectErrorTitle) },
+        ) { result ->
+            authenticated(selectedServer, result)
+        }
+    }
+}
+
+/**
+ * The username + password + "Log In" step, shared by the Jellyfin and Subsonic flows. [header] fills
+ * the space above the username field — the server URL for Subsonic, Quick Connect for Jellyfin. The
+ * button shows a [ButtonSpinner] while [isSubmitting]; [error] (if any) renders below via [LoginErrorSlot].
+ */
+@Composable
+private fun CredentialsForm(
+    usernameState: TextFieldState,
+    passwordState: TextFieldState,
+    isSubmitting: Boolean,
+    error: Throwable?,
+    onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
+    header: @Composable ColumnScope.() -> Unit = {},
+) {
+    val focusManager = LocalFocusManager.current
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        header()
+        LoginTextField(
+            state = usernameState,
+            label = "Username",
+            imeAction = ImeAction.Next,
+            onAction = { focusManager.moveFocus(FocusDirection.Next) },
+            contentType = ContentType.Username,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        LoginSecureTextField(
+            state = passwordState,
+            label = "Password",
+            onAction = onSubmit,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isSubmitting,
+            onClick = onSubmit,
+        ) {
+            if (isSubmitting) ButtonSpinner() else Text("Log In")
+        }
+        LoginErrorSlot(error = error)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Local Files flow
+// ---------------------------------------------------------------------------
 
 /**
  * The "Local Files" tab of the login screen. There's nothing to authenticate — the local source is
@@ -349,7 +485,7 @@ fun LoginScreen(onDismiss: (() -> Unit)? = null) {
  * managed afterwards in Settings.
  */
 @Composable
-fun LocalFilesMain(onDismiss: (() -> Unit)?) {
+private fun LocalFilesMain(onDismiss: (() -> Unit)?) {
     val appContainer = LocalAppContainer.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -380,35 +516,24 @@ fun LocalFilesMain(onDismiss: (() -> Unit)?) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Jellyfin flow
+// ---------------------------------------------------------------------------
+
 @Composable
-fun JellyfinMain() {
+private fun JellyfinMain() {
     val appContainer = LocalAppContainer.current
-    val setBackAction = LocalSetBackAction.current
-    var selectedServer by remember { mutableStateOf("") }
-
-    DisposableEffect(Unit) {
-        onDispose { setBackAction(null) }
-    }
-
-    LaunchedEffect(selectedServer) {
-        setBackAction(if (selectedServer.isNotEmpty()) ({ selectedServer = "" }) else null)
-    }
-
-    if (selectedServer.isEmpty()) {
-        JellyfinServerPicker(onServerSelected = { selectedServer = it })
-    } else {
-        Async(
-            key = selectedServer,
-            producer = { appContainer.jellyfinSource.connectToAddress(selectedServer) },
-            error = { t -> LoginErrorCard(error = t, fallbackTitle = "Could not connect to server") },
-        ) {
-            JellyfinLogin(selectedServer, appContainer.jellyfinSource.api!!)
-        }
-    }
+    ServerAuthFlow(
+        connect = { appContainer.jellyfinSource.connectToAddress(it) },
+        connectErrorTitle = "Could not connect to server",
+        picker = { onServerSelected -> JellyfinServerPicker(onServerSelected) },
+        // connectToAddress has already primed jellyfinSource.api, so the login step only needs it.
+        authenticated = { _, _ -> JellyfinLogin(appContainer.jellyfinSource.api!!) },
+    )
 }
 
 @Composable
-fun JellyfinServerPicker(onServerSelected: (String) -> Unit = {}) {
+private fun JellyfinServerPicker(onServerSelected: (String) -> Unit) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -432,7 +557,7 @@ fun JellyfinServerPicker(onServerSelected: (String) -> Unit = {}) {
 }
 
 @Composable
-fun JellyfinServers(onServerSelected: (String) -> Unit) {
+private fun JellyfinServers(onServerSelected: (String) -> Unit) {
     val appContainer = LocalAppContainer.current
 
     val servers by remember {
@@ -463,7 +588,7 @@ fun JellyfinServers(onServerSelected: (String) -> Unit) {
 }
 
 @Composable
-fun JellyfinServer(server: ServerDiscoveryInfo, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun JellyfinServer(server: ServerDiscoveryInfo, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
@@ -475,50 +600,23 @@ fun JellyfinServer(server: ServerDiscoveryInfo, onClick: () -> Unit, modifier: M
     }
 }
 
-private sealed class LoginUiState {
-    data object Idle : LoginUiState()
-    data object Loading : LoginUiState()
-    data class Error(val throwable: Throwable) : LoginUiState()
-}
-
 private sealed class QcUiState {
     data object Initiating : QcUiState()
     data class Active(val code: String) : QcUiState()
     data class Error(val throwable: Throwable) : QcUiState()
 }
 
+/**
+ * Quick Connect header for the Jellyfin login form: initiates a QC session automatically, shows the
+ * pairing code to enter in another Jellyfin app, and polls until it's approved. Renders nothing when
+ * the server has Quick Connect disabled.
+ */
 @Composable
-fun JellyfinLogin(address: String, api: ApiClient) {
+private fun QuickConnectSection(api: ApiClient) {
     val appContainer = LocalAppContainer.current
     val jellyfinSource = appContainer.jellyfinSource
-    val scope = rememberCoroutineScope()
-
-    val usernameState = rememberTextFieldState()
-    val passwordState = rememberTextFieldState()
-    val autofillManager = LocalAutofillManager.current
-    val focusManager = LocalFocusManager.current
-
-    var loginState by remember { mutableStateOf<LoginUiState>(LoginUiState.Idle) }
     var qcState by remember { mutableStateOf<QcUiState>(QcUiState.Initiating) }
     var qcInitKey by remember { mutableIntStateOf(0) }
-
-    // Shared by the Log In button and the password field's Enter/IME "Go" action.
-    val submit: () -> Unit = submit@{
-        if (loginState is LoginUiState.Loading) return@submit
-        scope.launch {
-            loginState = LoginUiState.Loading
-            loginState = try {
-                jellyfinSource.login(
-                    username = usernameState.text.toString(),
-                    password = passwordState.text.toString(),
-                )
-                appContainer.selectSource(jellyfinSource)
-                LoginUiState.Idle
-            } catch (e: Exception) {
-                LoginUiState.Error(e)
-            }
-        }
-    }
 
     // Poll the server every 5 s while a QC session is active.
     LaunchedEffect(qcState) {
@@ -539,93 +637,90 @@ fun JellyfinLogin(address: String, api: ApiClient) {
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // Quick Connect — shown at the top, initiated automatically.
-        Async(producer = { api.quickConnectApi.getQuickConnectEnabled().content }, loading = {}) { enabled ->
-            if (enabled) {
-                Column (
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // Kick off (or re-kick off on retry) the QC session.
-                    LaunchedEffect(qcInitKey) {
-                        qcState = QcUiState.Initiating
-                        try {
-                            qcState = QcUiState.Active(jellyfinSource.initiateQuickConnect())
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            qcState = QcUiState.Error(e)
-                        }
+    // Quick Connect — shown at the top, initiated automatically. Only rendered if the server enables it.
+    Async(producer = { api.quickConnectApi.getQuickConnectEnabled().content }, loading = {}) { enabled ->
+        if (enabled) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // Kick off (or re-kick off on retry) the QC session.
+                LaunchedEffect(qcInitKey) {
+                    qcState = QcUiState.Initiating
+                    try {
+                        qcState = QcUiState.Active(jellyfinSource.initiateQuickConnect())
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        qcState = QcUiState.Error(e)
                     }
-
-                    AnimatedContent(
-                        targetState = qcState,
-                        contentAlignment = Alignment.TopCenter,
-                        transitionSpec = {
-                            fadeIn(tween(220, delayMillis = 90)) togetherWith
-                                fadeOut(tween(90)) using
-                                SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> tween(220) })
-                        },
-                        contentKey = { it::class },
-                    ) { qc ->
-                        when (qc) {
-                            QcUiState.Initiating -> CircularProgressIndicator()
-
-                            is QcUiState.Active -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Quick Connect", style = MaterialTheme.typography.titleMedium)
-                                Text(qc.code, style = MaterialTheme.typography.displayMedium)
-                                Text(
-                                    "Enter this code in another Jellyfin app",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-
-                            is QcUiState.Error -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                LoginErrorCard(error = qc.throwable)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(onClick = { qcInitKey++ }) { Text("Retry") }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("— or —", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
+
+                AnimatedContent(
+                    targetState = qcState,
+                    contentAlignment = Alignment.TopCenter,
+                    transitionSpec = {
+                        fadeIn(tween(220, delayMillis = 90)) togetherWith
+                            fadeOut(tween(90)) using
+                            SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> tween(220) })
+                    },
+                    contentKey = { it::class },
+                ) { qc ->
+                    when (qc) {
+                        QcUiState.Initiating -> CircularProgressIndicator()
+
+                        is QcUiState.Active -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Quick Connect", style = MaterialTheme.typography.titleMedium)
+                            Text(qc.code, style = MaterialTheme.typography.displayMedium)
+                            Text(
+                                "Enter this code in another Jellyfin app",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+
+                        is QcUiState.Error -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            LoginErrorCard(error = qc.throwable)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(onClick = { qcInitKey++ }) { Text("Retry") }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("— or —", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
-
-        // Password auth
-        LoginTextField(
-            state = usernameState,
-            label = "Username",
-            imeAction = ImeAction.Next,
-            onAction = { focusManager.moveFocus(FocusDirection.Next) },
-            contentType = ContentType.Username,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        LoginSecureTextField(
-            state = passwordState,
-            label = "Password",
-            onAction = submit,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = loginState !is LoginUiState.Loading,
-            onClick = submit,
-        ) {
-            if (loginState is LoginUiState.Loading) ButtonSpinner() else Text("Log In")
-        }
-        LoginErrorSlot(error = (loginState as? LoginUiState.Error)?.throwable)
     }
 }
 
+@Composable
+private fun JellyfinLogin(api: ApiClient) {
+    val appContainer = LocalAppContainer.current
+    val jellyfinSource = appContainer.jellyfinSource
+
+    val usernameState = rememberTextFieldState()
+    val passwordState = rememberTextFieldState()
+
+    val action = rememberLoginAction {
+        jellyfinSource.login(
+            username = usernameState.text.toString(),
+            password = passwordState.text.toString(),
+        )
+        appContainer.selectSource(jellyfinSource)
+    }
+
+    CredentialsForm(
+        usernameState = usernameState,
+        passwordState = passwordState,
+        isSubmitting = action.state is LoginUiState.Loading,
+        error = (action.state as? LoginUiState.Error)?.throwable,
+        onSubmit = action.submit,
+        header = { QuickConnectSection(api) },
+    )
+}
+
 // ---------------------------------------------------------------------------
-// Subsonic login flow
+// Subsonic flow
 // ---------------------------------------------------------------------------
 
 /**
@@ -634,29 +729,15 @@ fun JellyfinLogin(address: String, api: ApiClient) {
  * LAN discovery (Subsonic has no discovery protocol).
  */
 @Composable
-fun SubsonicMain() {
+private fun SubsonicMain() {
     val appContainer = LocalAppContainer.current
-    val setBackAction = LocalSetBackAction.current
-    var selectedServer by remember { mutableStateOf("") }
-
-    DisposableEffect(Unit) { onDispose { setBackAction(null) } }
-
-    LaunchedEffect(selectedServer) {
-        setBackAction(if (selectedServer.isNotEmpty()) ({ selectedServer = "" }) else null)
-    }
-
-    if (selectedServer.isEmpty()) {
-        SubsonicServerPicker(onServerSelected = { selectedServer = it })
-    } else {
-        Async(
-            key = selectedServer,
-            producer = { appContainer.subsonicSource.connect(selectedServer) },
-            // friendlyLoginError falls through to the (already humanized) SubsonicException message.
-            error = { t -> LoginErrorCard(error = t, fallbackTitle = "Could not reach server") },
-        ) { normalizedUrl ->
-            SubsonicLogin(serverUrl = normalizedUrl)
-        }
-    }
+    ServerAuthFlow(
+        connect = { appContainer.subsonicSource.connect(it) },
+        // friendlyLoginError falls through to the (already humanized) SubsonicException message.
+        connectErrorTitle = "Could not reach server",
+        picker = { onServerSelected -> SubsonicServerPicker(onServerSelected) },
+        authenticated = { _, normalizedUrl -> SubsonicLogin(serverUrl = normalizedUrl) },
+    )
 }
 
 @Composable
@@ -693,66 +774,34 @@ private fun SubsonicServerPicker(onServerSelected: (String) -> Unit) {
 @Composable
 private fun SubsonicLogin(serverUrl: String) {
     val appContainer = LocalAppContainer.current
-    val scope = rememberCoroutineScope()
+    val autofillManager = LocalAutofillManager.current
 
     val usernameState = rememberTextFieldState()
     val passwordState = rememberTextFieldState()
-    val autofillManager = LocalAutofillManager.current
-    val focusManager = LocalFocusManager.current
 
-    var loginState by remember { mutableStateOf<LoginUiState>(LoginUiState.Idle) }
-
-    // Shared by the Log In button and the password field's Enter/IME "Go" action.
-    val submit: () -> Unit = submit@{
-        if (loginState is LoginUiState.Loading) return@submit
-        scope.launch {
-            loginState = LoginUiState.Loading
-            loginState = try {
-                autofillManager?.commit()
-                appContainer.subsonicSource.login(
-                    serverUrl = serverUrl,
-                    username = usernameState.text.toString(),
-                    password = passwordState.text.toString(),
-                )
-                // Switch the active source to Subsonic so App.kt observes
-                // isAuthenticated = true and transitions to MainScreen.
-                // Also clears showLoginScreen for the "Add Source" modal flow.
-                appContainer.selectSource(appContainer.subsonicSource)
-                appContainer.showLoginScreen = false
-                LoginUiState.Idle
-            } catch (e: Exception) {
-                LoginUiState.Error(e)
-            }
-        }
+    val action = rememberLoginAction {
+        autofillManager?.commit()
+        appContainer.subsonicSource.login(
+            serverUrl = serverUrl,
+            username = usernameState.text.toString(),
+            password = passwordState.text.toString(),
+        )
+        // Switch the active source to Subsonic so App.kt observes
+        // isAuthenticated = true and transitions to MainScreen.
+        // Also clears showLoginScreen for the "Add Source" modal flow.
+        appContainer.selectSource(appContainer.subsonicSource)
+        appContainer.showLoginScreen = false
     }
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(serverUrl, style = MaterialTheme.typography.bodySmall)
-        Spacer(modifier = Modifier.height(16.dp))
-        LoginTextField(
-            state = usernameState,
-            label = "Username",
-            imeAction = ImeAction.Next,
-            onAction = { focusManager.moveFocus(FocusDirection.Next) },
-            contentType = ContentType.Username,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        LoginSecureTextField(
-            state = passwordState,
-            label = "Password",
-            onAction = submit,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = loginState !is LoginUiState.Loading,
-            onClick = submit,
-        ) {
-            if (loginState is LoginUiState.Loading) ButtonSpinner() else Text("Log In")
-        }
-        LoginErrorSlot(error = (loginState as? LoginUiState.Error)?.throwable)
-    }
+    CredentialsForm(
+        usernameState = usernameState,
+        passwordState = passwordState,
+        isSubmitting = action.state is LoginUiState.Loading,
+        error = (action.state as? LoginUiState.Error)?.throwable,
+        onSubmit = action.submit,
+        header = {
+            Text(serverUrl, style = MaterialTheme.typography.bodySmall)
+            Spacer(modifier = Modifier.height(16.dp))
+        },
+    )
 }
