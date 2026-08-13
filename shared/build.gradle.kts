@@ -17,6 +17,34 @@ sqldelight {
     }
 }
 
+// ── Generated build metadata ────────────────────────────────────────────────
+// The version string shown in the About screen is generated at build time so it always matches the
+// release. CI exports YAMA_VERSION (derived from the git tag — see .github/workflows/release.yml);
+// local/dev builds with no env fall back to "dev". The generated file lands on commonMain below.
+val yamaVersion: String = System.getenv("YAMA_VERSION")?.takeIf { it.isNotBlank() } ?: "dev"
+
+val generateBuildInfo by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/buildInfo/commonMain/kotlin")
+    val version = yamaVersion
+    inputs.property("version", version)
+    outputs.dir(outputDir)
+    doLast {
+        val pkgDir = outputDir.get().asFile.resolve("net/mhanak/yama")
+        pkgDir.mkdirs()
+        pkgDir.resolve("BuildInfo.kt").writeText(
+            """
+            |package net.mhanak.yama
+            |
+            |/** Generated at build time — do not edit. See shared/build.gradle.kts (generateBuildInfo). */
+            |internal object BuildInfo {
+            |    const val VERSION: String = "$version"
+            |}
+            |
+            """.trimMargin()
+        )
+    }
+}
+
 kotlin {
 
     // Explicitly (re)apply the default source-set hierarchy. Our custom `jvmCommonMain` source set adds
@@ -81,6 +109,11 @@ kotlin {
                 // Ktor OkHttp engine for SubsonicSource (JVM/Android only — engine is platform-specific)
                 implementation(libs.ktor.client.okhttp)
             }
+        }
+        // Register the generated BuildInfo.kt (version string) as a commonMain source. Passing the task
+        // provider to srcDir makes Gradle wire the compile→generate task dependency automatically.
+        commonMain {
+            kotlin.srcDir(generateBuildInfo)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

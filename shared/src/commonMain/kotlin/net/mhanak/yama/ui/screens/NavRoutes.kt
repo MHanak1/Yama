@@ -64,3 +64,8 @@ object DownloadedTracksRoute
 
 @Serializable
 object DownloadsSettingsRoute
+
+/** About screen: app version, license (GPLv3) and open-source attributions. Reached from the
+ *  bottom of the settings list. */
+@Serializable
+object AboutRoute

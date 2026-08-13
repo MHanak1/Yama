@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.screens.AboutRoute
 import net.mhanak.yama.ui.screens.AppearanceSettingsRoute
 import net.mhanak.yama.ui.screens.DownloadsSettingsRoute
 import net.mhanak.yama.ui.screens.LocalLibrarySettingsRoute
@@ -120,6 +122,15 @@ fun SettingsView(
                     title = "Local Library",
                     subtitle = "Music folders & scan settings",
                     onClick = { onNavigate(LocalLibrarySettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingsCategoryCard(
+                    icon = Icons.Outlined.Info,
+                    iconContainerColor = Color.hsv(0f, 0f, 0.75f),
+                    iconContentColor = Color.hsv(0f, 0f, 0.25f),
+                    title = "About",
+                    subtitle = "Version, license & open-source credits",
+                    onClick = { onNavigate(AboutRoute) },
                 )
             }
             Spacer(Modifier.height(bottomContentPadding))
