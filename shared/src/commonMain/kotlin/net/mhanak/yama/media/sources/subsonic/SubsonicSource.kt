@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.mhanak.yama.media.download.CatalogSnapshot
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Artist
@@ -77,6 +79,14 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
     private val starredTrackIds = mutableSetOf<String>()
     private val starredAlbumIds = mutableSetOf<String>()
     private val starredArtistIds = mutableSetOf<String>()
+
+    // --- All-tracks cache (drives the paginated, client-sorted library view) --
+    // Subsonic can't sort songs server-side (search3 takes no sort param), so the "All Tracks"
+    // view fetches every song once, then sorts/slices in memory per requested TrackSortOrder.
+    // Cached because the paginated list re-queries page 0 on every sort change. Invalidated on
+    // refresh() and account switch. Mutex guards the one-shot fetch against concurrent page loads.
+    private var allTracksCache: List<Track>? = null
+    private val allTracksMutex = Mutex()
 
     // --- Init ---------------------------------------------------------------
 
@@ -210,6 +220,9 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
         val currentApi = api ?: return@runRefresh
         val session = sessions.find { it.id == currentAccountId } ?: return@runRefresh
 
+        // Drop the cached all-songs list so the sorted library view re-scans on next open.
+        allTracksCache = null
+
         // 1. Fetch music folders and compute the enabled set
         val folders = currentApi.getMusicFolders()
         _libraries.value = folders.map { MusicLibrary(id = it.id.toString(), name = it.name ?: "Music") }
@@ -320,24 +333,65 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
         return runCatching {
             when {
                 favoritesOnly -> {
-                    currentApi.getStarred2().songs
-                        .map { it.toTrack(currentApi) }
+                    // Starred set is small; sort it in memory to honour the picker here too.
+                    sortTracks(currentApi.getStarred2().songs.map { it.toTrack(currentApi) }, sortBy)
                         .drop(offset).take(limit)
                 }
                 searchTerm != null -> {
+                    // Search relevance is its own ordering — leave the server's ranking intact.
                     currentApi.search3(query = searchTerm, songCount = limit, songOffset = offset)
                         .songs.map { it.toTrack(currentApi) }
                 }
                 sortBy == TrackSortOrder.Random -> {
+                    // getRandomSongs is a fresh shuffle per call, so it can't paginate coherently;
+                    // only page 0 is meaningful (and that's all the shuffle view ever requests).
                     currentApi.getRandomSongs(size = limit).map { it.toTrack(currentApi) }
                 }
                 else -> {
-                    // Empty-query search gives a stable paginated all-songs list on Navidrome.
-                    currentApi.search3(query = "", songCount = limit, songOffset = offset)
-                        .songs.map { it.toTrack(currentApi) }
+                    // Subsonic has no server-side all-songs sort, so fetch the whole library once
+                    // (cached) and sort/slice it in memory.
+                    sortTracks(ensureAllTracks(currentApi), sortBy).drop(offset).take(limit)
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * The full song list, fetched once and cached. Pages through empty-query `search3` (Navidrome's
+     * stable all-songs listing) until a short page signals the end. Double-checked under [allTracksMutex]
+     * so concurrent page-0 loads don't fan out into N full scans. Cleared by [refresh].
+     */
+    private suspend fun ensureAllTracks(currentApi: SubsonicApi): List<Track> {
+        allTracksCache?.let { return it }
+        return allTracksMutex.withLock {
+            allTracksCache?.let { return it }
+            val pageSize = 500
+            val songs = buildList {
+                var pageOffset = 0
+                while (true) {
+                    val page = currentApi.search3(query = "", songCount = pageSize, songOffset = pageOffset).songs
+                    addAll(page)
+                    if (page.size < pageSize) break
+                    pageOffset += page.size
+                }
+            }.map { it.toTrack(currentApi) }
+            songs.also { allTracksCache = it }
+        }
+    }
+
+    /**
+     * Client-side ordering for the all-tracks / favourites views. Sort keys come off the [Track] model:
+     * ReleaseDate uses [Track.year]; RecentlyAdded/RecentlyPlayed compare the ISO-8601 timestamp strings
+     * lexicographically (equivalent to chronological order for the UTC format Subsonic returns). Tracks
+     * missing a key sink to the bottom, newest/highest first.
+     */
+    private fun sortTracks(tracks: List<Track>, sortBy: TrackSortOrder): List<Track> = when (sortBy) {
+        TrackSortOrder.Alphabetical   -> tracks.sortedBy { it.name.lowercase() }
+        TrackSortOrder.ReleaseDate    -> tracks.sortedByDescending { it.year ?: Int.MIN_VALUE }
+        TrackSortOrder.PlayCount      -> tracks.sortedByDescending { it.playCount }
+        TrackSortOrder.RecentlyAdded  -> tracks.sortedByDescending { it.dateAdded ?: "" }
+        TrackSortOrder.RecentlyPlayed -> tracks.sortedByDescending { it.lastPlayed ?: "" }
+        TrackSortOrder.Random         -> tracks.shuffled()
     }
 
     override suspend fun getAlbums(sortBy: AlbumSortOrder, limit: Int, offset: Int): List<Album> {
@@ -356,12 +410,13 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
         }.getOrDefault(emptyList())
     }
 
-    // getAllTracks silently ignores RecentlyPlayed/PlayCount (Subsonic has no such all-songs sort), so
-    // don't advertise the track blocks that rely on them — the picker only offers what we can honour.
+    // getAllTracks now sorts client-side over the cached all-songs list, so MostPlayedTracks
+    // (PlayCount, a base-Subsonic field) is always honourable. RecentlyPlayedTracks depends on the
+    // OpenSubsonic-only `played` timestamp, so only advertise it when the server speaks OpenSubsonic;
+    // otherwise the block would render in an arbitrary order (every track's key is null).
     override val supportedHomeBlocks: Set<HomeBlockKind>
-        get() = super.supportedHomeBlocks - setOf(
-            HomeBlockKind.RecentlyPlayedTracks, HomeBlockKind.MostPlayedTracks,
-        )
+        get() = if (openSubsonic) super.supportedHomeBlocks
+                else super.supportedHomeBlocks - HomeBlockKind.RecentlyPlayedTracks
 
     override suspend fun getTracksForPlaylist(playlistId: String): List<Track> {
         val currentApi = api ?: return emptyList()
@@ -576,6 +631,7 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
         starredTrackIds.clear()
         starredAlbumIds.clear()
         starredArtistIds.clear()
+        allTracksCache = null
         clearRefreshError()
     }
 
@@ -614,6 +670,9 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
             genreIds = genreList,
             favorite = id in starredTrackIds,
             playCount = playCount?.toInt() ?: 0,
+            year = year,
+            dateAdded = created,
+            lastPlayed = played,
         )
     }
 

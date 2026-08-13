@@ -43,6 +43,13 @@ data class Track(
     // (downloads/local). Defaulted for sources that don't supply them.
     val favorite: Boolean = false,
     val playCount: Int = 0,
+    // Sort keys for the all-tracks library orderings. `year` drives ReleaseDate; `dateAdded` and
+    // `lastPlayed` are opaque ISO-8601 UTC timestamp strings (compared lexicographically == chrono
+    // order) driving RecentlyAdded / RecentlyPlayed. Populated by sources that can't sort songs
+    // server-side and must order client-side (Subsonic); defaulted for sources that sort natively.
+    val year: Int? = null,
+    val dateAdded: String? = null,
+    val lastPlayed: String? = null,
 )
 
 data class Playlist(

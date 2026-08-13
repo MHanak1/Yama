@@ -109,6 +109,11 @@ data class SubsonicSongDto(
     val duration: Int? = null,     // seconds
     val starred: String? = null,
     val playCount: Long? = null,
+    /** ISO-8601 UTC timestamps. Opaque here — used only as lexicographically-sortable keys for the
+     * "Recently Added" / "Recently Played" all-tracks orderings (see [SubsonicSource.getAllTracks]).
+     * `played` is an OpenSubsonic addition and may be absent on stricter Subsonic servers. */
+    val created: String? = null,
+    val played: String? = null,   // OpenSubsonic
     /** OpenSubsonic multi-artist list (more complete than single `artistId`). */
     @SerialName("artists") val artistRefs: List<SubsonicArtistRefDto>? = null,
     @SerialName("albumArtist") val albumArtistName: String? = null,

@@ -75,8 +75,10 @@ fun PaginatedTrackList(
     // Reload from the top when the source is refreshed. A pull-to-refresh only re-runs
     // source.refresh(), which repopulates the grid StateFlows — this list reads the backend directly,
     // so without this it would ignore the pull (and any live library-change push). Bumped on each
-    // refresh *start*: getAllTracks always fetches fresh, so the rising edge is enough and avoids the
-    // double reload that keying on the boolean itself would cause.
+    // refresh *start*: the reload re-runs getAllTracks from page 0, which re-fetches from the server
+    // (Subsonic invalidates its cached all-tracks list at refresh start; Jellyfin always hits the
+    // server), so the rising edge is enough and avoids the double reload that keying on the boolean
+    // itself would cause.
     var refreshGen by remember { mutableStateOf(0) }
     LaunchedEffect(source) {
         var first = true
