@@ -9,15 +9,24 @@ import com.sun.jna.ptr.FloatByReference
 import com.sun.jna.ptr.PointerByReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import net.mhanak.yama.util.logger
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.component.AudioPlayerComponent
+
+// Pending-seek retry loop: up to ATTEMPTS × VERIFY_DELAY (~3s) of nudging a just-opened stream until
+// its reported position lands within TOLERANCE of the target.
+private const val SEEK_APPLY_ATTEMPTS = 30
+private const val SEEK_VERIFY_DELAY_MS = 100L
+private const val SEEK_LANDED_TOLERANCE_MS = 1_500L
 
 /**
  * Desktop engine over libvlc (via vlcj). Unlike Media3, libvlc plays one media at a time, so the
@@ -48,6 +57,13 @@ actual class MediaPlayerEngine actual constructor() {
     private var shuffle = false
     private var useDeviceVolume = false
 
+    // A seek target that libvlc can't act on yet because the current track isn't actively playing
+    // and seekable (queue restored-but-not-started, or paused). Applied once the stream reports
+    // seekable, via playing()/seekableChanged(). 0 = none. Touched from the native event thread and
+    // engine coroutines, hence @Volatile.
+    @Volatile private var pendingSeekMs = 0L
+    private var seekJob: Job? = null
+
     // Built lazily so a missing libvlc only disables playback instead of crashing app launch.
     private val component: AudioPlayerComponent? by lazy {
         // Point JNA at the bundled libvlc (packaged Windows app) before vlcj loads the native library;
@@ -65,7 +81,16 @@ actual class MediaPlayerEngine actual constructor() {
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
                     _status.value = _status.value.copy(durationMs = newLength)
                 }
-                override fun playing(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Playing, true)
+                override fun playing(mediaPlayer: MediaPlayer) {
+                    applyPendingSeek()
+                    pushState(PlaybackState.Playing, true)
+                }
+                // A freshly-started network stream isn't seekable the instant playing() fires, so a
+                // restored-queue seek has to wait for this; a resume-from-pause is already seekable and
+                // gets applied by playing() above. newSeekable != 0 means "you can seek now".
+                override fun seekableChanged(mediaPlayer: MediaPlayer, newSeekable: Int) {
+                    if (newSeekable != 0) applyPendingSeek()
+                }
                 override fun paused(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Paused, false)
                 override fun stopped(mediaPlayer: MediaPlayer) = pushState(PlaybackState.Paused, false)
                 override fun error(mediaPlayer: MediaPlayer) {
@@ -92,9 +117,44 @@ actual class MediaPlayerEngine actual constructor() {
         )
     }
 
+    /**
+     * Applies a queued seek to a freshly-started/paused track. libvlc reports isSeekable == true before
+     * a just-opened network stream can actually honour a seek (the setTime gets clamped to ~0), so this
+     * nudges and verifies: setTime, read back the position, and retry until it lands near the target or
+     * we give up. Runs on an engine coroutine — never the native event thread, where re-entering the
+     * player synchronously from a callback deadlocks it (see finished()). Idempotent: extra calls from
+     * playing()/seekableChanged() are coalesced into the single in-flight [seekJob].
+     */
+    private fun applyPendingSeek() {
+        if (pendingSeekMs <= 0 || seekJob?.isActive == true) return
+        seekJob = scope.launch {
+            val target = pendingSeekMs
+            repeat(SEEK_APPLY_ATTEMPTS) {
+                val p = player ?: return@launch
+                if (pendingSeekMs != target) return@launch // superseded by a newer seek or track change
+                if (p.status().isSeekable) {
+                    p.controls().setTime(target)
+                    delay(SEEK_VERIFY_DELAY_MS)
+                    if (abs(p.status().time() - target) < SEEK_LANDED_TOLERANCE_MS) {
+                        pendingSeekMs = 0
+                        log.info("Restored playback position to ${target}ms")
+                        return@launch
+                    }
+                } else {
+                    delay(SEEK_VERIFY_DELAY_MS)
+                }
+            }
+            log.warn("Gave up restoring playback position to ${target}ms — stream never accepted the seek")
+        }
+    }
+
     private fun playIndex(i: Int) {
         val p = player ?: run { log.warn("playIndex($i) dropped — libvlc engine unavailable"); return }
         if (i !in queue.indices) { log.warn("playIndex($i) out of bounds (queue size=${queue.size})"); return }
+        // A pending seek only belongs to the track it was made against; switching tracks discards it.
+        // When we're (re)loading the same track it's kept, and playing() applies it once the stream is
+        // running. (:start-time was tried here but libvlc ignores it for network streams.)
+        if (i != index) pendingSeekMs = 0L
         index = i
         mediaLoaded = true
         p.media().play(queue[i].uri)
@@ -206,7 +266,17 @@ actual class MediaPlayerEngine actual constructor() {
     }
 
     actual fun seekTo(positionMs: Long) {
-        player?.controls()?.setTime(positionMs)
+        // libvlc only honours setTime on a track that's actively playing. When it isn't (restored queue
+        // not yet started, or paused), stash the target and let playIndex/playing() apply it later.
+        if (mediaLoaded && _status.value.isPlaying) {
+            pendingSeekMs = 0L
+            player?.controls()?.setTime(positionMs)
+        } else {
+            pendingSeekMs = positionMs
+        }
+        // Reflect the seek immediately so the progress bar tracks even while paused, where libvlc emits
+        // no timeChanged events.
+        _status.value = _status.value.copy(positionMs = positionMs)
     }
 
     actual fun next() {

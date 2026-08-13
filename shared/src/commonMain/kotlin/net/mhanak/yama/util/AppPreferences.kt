@@ -273,4 +273,13 @@ object AppPreferences {
         if (id == null) settings.remove("saved_queue_current_$sourceType")
         else settings.putString("saved_queue_current_$sourceType", id)
     }
+
+    // Playback position (ms) within the current item, so a resumed queue picks up where it left off.
+    fun savedQueuePosition(sourceType: String): Long =
+        settings.getLong("saved_queue_position_$sourceType", 0L)
+
+    fun setSavedQueuePosition(sourceType: String, positionMs: Long) {
+        if (positionMs <= 0L) settings.remove("saved_queue_position_$sourceType")
+        else settings.putLong("saved_queue_position_$sourceType", positionMs)
+    }
 }
