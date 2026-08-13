@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.components.state.ErrorBox
+import net.mhanak.yama.ui.components.state.LogError
 import net.mhanak.yama.ui.components.state.LoadState
 import net.mhanak.yama.ui.components.library.AsyncImageListCard
 import net.mhanak.yama.ui.components.image.CardImage
@@ -184,6 +185,7 @@ fun CollectionDetailView(
                 }
             }
             is LoadState.Failure -> item {
+                LogError(state.throwable, context = "Collection tracks load failed")
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

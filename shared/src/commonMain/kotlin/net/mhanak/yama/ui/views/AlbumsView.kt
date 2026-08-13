@@ -43,7 +43,7 @@ fun AlbumsView(
         albums.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
         albums.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         albums.isEmpty() && refreshError != null ->
-            LibraryError(refreshError!!.message ?: "Failed to load albums", contentPadding, modifier)
+            LibraryError(refreshError!!, "Failed to load albums", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
             NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(

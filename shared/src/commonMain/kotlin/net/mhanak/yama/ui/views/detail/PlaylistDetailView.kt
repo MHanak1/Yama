@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.components.state.ErrorBox
+import net.mhanak.yama.ui.components.state.LogError
 import net.mhanak.yama.ui.components.state.LoadState
 import net.mhanak.yama.ui.components.detail.DetailPlayActions
 import net.mhanak.yama.ui.components.detail.DetailViewHeader
@@ -115,6 +116,7 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                 }
             }
             is LoadState.Failure -> item {
+                LogError(state.throwable, context = "Playlist tracks load failed")
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

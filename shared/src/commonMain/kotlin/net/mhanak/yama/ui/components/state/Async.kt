@@ -31,7 +31,7 @@ fun <T> Async(
     key: Any? = Unit,
     producer: suspend () -> T,
     loading: @Composable () -> Unit = { LoadingSlot() },
-    error: @Composable (Throwable) -> Unit = { t -> ErrorCard(message = t.message ?: "Unknown error") },
+    error: @Composable (Throwable) -> Unit = { t -> LogError(t); ErrorCard(message = t.message ?: "Unknown error") },
     content: @Composable (T) -> Unit,
 ) {
     var state by remember(key) { mutableStateOf<AsyncState<T>>(AsyncState.Loading) }

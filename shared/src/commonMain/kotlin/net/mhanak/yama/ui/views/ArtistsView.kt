@@ -41,7 +41,7 @@ fun ArtistsView(
         artists.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
         artists.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         artists.isEmpty() && refreshError != null ->
-            LibraryError(refreshError!!.message ?: "Failed to load artists", contentPadding, modifier)
+            LibraryError(refreshError!!, "Failed to load artists", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
             NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(

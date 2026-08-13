@@ -40,7 +40,7 @@ fun PlaylistsView(
         playlists.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
         playlists.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         playlists.isEmpty() && refreshError != null ->
-            LibraryError(refreshError!!.message ?: "Failed to load playlists", contentPadding, modifier)
+            LibraryError(refreshError!!, "Failed to load playlists", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
             NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(

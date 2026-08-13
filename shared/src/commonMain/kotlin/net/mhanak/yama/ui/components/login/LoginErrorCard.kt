@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.components.state.LogError
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -124,6 +125,7 @@ private fun LoginErrorKind.icon(): ImageVector = when (this) {
  */
 @Composable
 fun LoginErrorCard(error: Throwable, modifier: Modifier = Modifier, fallbackTitle: String? = null) {
+    LogError(error, context = "Login error")
     val info = friendlyLoginError(error, fallbackTitle)
     ElevatedCard(
         colors = CardDefaults.elevatedCardColors(

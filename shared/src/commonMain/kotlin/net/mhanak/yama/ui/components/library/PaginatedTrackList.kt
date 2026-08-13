@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.first
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.components.state.ErrorBox
+import net.mhanak.yama.ui.components.state.LogError
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.ui.components.detail.DetailPlayActions
@@ -182,6 +183,7 @@ fun PaginatedTrackList(
         val error = fetchError
         if (error != null) {
             item {
+                LogError(error, context = "Track list load failed")
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

@@ -41,7 +41,7 @@ fun GenresView(
         genres.isEmpty() && isRefreshing -> LibraryLoading(contentPadding, modifier)
         genres.isEmpty() && !reachable -> LibraryOffline(contentPadding, modifier)
         genres.isEmpty() && refreshError != null ->
-            LibraryError(refreshError!!.message ?: "Failed to load genres", contentPadding, modifier)
+            LibraryError(refreshError!!, "Failed to load genres", contentPadding, modifier)
         filtered.isEmpty() && (query.isNotBlank() || favoritesOnly) ->
             NoSearchResults(query = query, contentPadding = contentPadding, modifier = modifier, favoritesOnly = favoritesOnly)
         else -> GridView(

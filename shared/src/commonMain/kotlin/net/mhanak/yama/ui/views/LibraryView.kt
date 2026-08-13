@@ -69,6 +69,7 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.LocalIsTvMode
 import net.mhanak.yama.ui.components.interaction.LocalActiveContentFocus
 import net.mhanak.yama.ui.components.state.ErrorCard
+import net.mhanak.yama.ui.components.state.LogError
 import net.mhanak.yama.ui.components.settings.LibrarySelectionButtons
 import net.mhanak.yama.ui.components.state.playableTracks
 import net.mhanak.yama.ui.components.settings.LibrarySelectionState
@@ -423,12 +424,18 @@ internal fun LibraryLoading(contentPadding: PaddingValues, modifier: Modifier = 
  * the user couldn't retry by pulling.
  */
 @Composable
-internal fun LibraryError(message: String, contentPadding: PaddingValues, modifier: Modifier = Modifier) {
+internal fun LibraryError(
+    error: Throwable,
+    fallbackMessage: String,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    LogError(error, context = "Library load failed")
     Box(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(contentPadding).padding(16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ErrorCard(message = message)
+        ErrorCard(message = error.message ?: fallbackMessage)
     }
 }
 
