@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -99,9 +100,11 @@ fun AppNavRail(
     homeSelected: Boolean,
     selectedTab: LibraryTab?,
     settingsSelected: Boolean,
+    searchSelected: Boolean,
     onHomeClick: () -> Unit,
     onTabClick: (LibraryTab) -> Unit,
     onSettingsClick: () -> Unit,
+    onSearchClick: () -> Unit,
     downloadsSelected: Boolean = false,
     onDownloadsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -191,6 +194,19 @@ fun AppNavRail(
                     )
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Search stands alone in its own group under Home and the library tabs — a full pill.
+            RailItem(
+                selected = searchSelected,
+                onClick = onSearchClick,
+                icon = Icons.Default.Search,
+                label = "Search",
+                expandProgress = expandProgress,
+                shape = RoundedCornerShape(percent = 50),
+                focusRequester = if (searchSelected) selectedItemFocus else null,
+            )
 
             Spacer(Modifier.height(8.dp))
         }

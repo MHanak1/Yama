@@ -108,6 +108,7 @@ import net.mhanak.yama.ui.views.HomeBlockView
 import net.mhanak.yama.ui.views.settings.HomeLayoutView
 import net.mhanak.yama.ui.views.LibraryTab
 import net.mhanak.yama.ui.views.LibraryView
+import net.mhanak.yama.ui.views.SearchView
 import net.mhanak.yama.ui.views.settings.LocalLibrarySettingsView
 import net.mhanak.yama.ui.views.settings.PlaybackSettingsView
 import net.mhanak.yama.ui.views.detail.PlaylistDetailView
@@ -131,8 +132,9 @@ private inline fun <reified T : Any> NavGraphBuilder.detailComposable(
 private fun NavDestination?.topLevelIndex(): Int? = when {
     this == null -> null
     hasRoute<HomeRoute>() -> 0
-    hasRoute<LibraryRoute>() -> 1
-    hasRoute<SettingsRoute>() -> 2
+    hasRoute<SearchRoute>() -> 1
+    hasRoute<LibraryRoute>() -> 2
+    hasRoute<SettingsRoute>() -> 3
     else -> null
 }
 
@@ -186,6 +188,7 @@ fun MainScreen() {
     val destination = navBackStackEntry?.destination
 
     val onHome = destination?.hasRoute<HomeRoute>() == true
+    val onSearch = destination?.hasRoute<SearchRoute>() == true
     val onLibrary = destination?.hasRoute<LibraryRoute>() == true
     val onDownloadedMusic = destination?.hasRoute<DownloadedMusicRoute>() == true ||
         destination?.hasRoute<DownloadedAlbumRoute>() == true ||
@@ -339,8 +342,9 @@ fun MainScreen() {
                 forceExpanded = forceExpanded,
                 homeSelected = onHome,
                 // Highlight the active library tab while browsing the library or a detail screen.
-                selectedTab = if (onHome || onSettings || onDownloadedMusic) null else selectedTab,
+                selectedTab = if (onHome || onSearch || onSettings || onDownloadedMusic) null else selectedTab,
                 settingsSelected = onSettings,
+                searchSelected = onSearch,
                 downloadsSelected = onDownloadedMusic,
                 onHomeClick = {
                     // Re-tapping Home while already there refreshes it (mirrors the Library re-tap).
@@ -352,6 +356,7 @@ fun MainScreen() {
                 },
                 onTabClick = onTabClick,
                 onSettingsClick = { navController.navigateTopLevel(SettingsRoute) },
+                onSearchClick = { navController.navigateTopLevel(SearchRoute) },
                 onDownloadsClick = { navController.navigateTopLevel(DownloadedMusicRoute) },
                 nowPlayingVisible = playerStatus.current != null,
                 onNowPlayingClick = { scope.launch { playerExpansion.animateTo(1f) } },
@@ -361,6 +366,7 @@ fun MainScreen() {
             AppBottomBar(
                 selected = when {
                     onHome -> BottomBarDestination.Home
+                    onSearch -> BottomBarDestination.Search
                     onSettings -> null
                     else -> BottomBarDestination.Library
                 },
@@ -381,7 +387,11 @@ fun MainScreen() {
                                 navController.navigateTopLevel(LibraryRoute)
                             }
                         }
-                        BottomBarDestination.More -> Unit // mock slot
+                        BottomBarDestination.Search -> {
+                            if (navController.currentBackStackEntry?.destination?.hasRoute<SearchRoute>() != true) {
+                                navController.navigateTopLevel(SearchRoute)
+                            }
+                        }
                     }
                 },
             )
@@ -497,6 +507,13 @@ fun MainScreen() {
                     onAlbumArtistClick = { artistId -> navController.navigate(ArtistDetailRoute(artistId)) { launchSingleTop = true } },
                     onGenreClick = { genreId -> navController.navigate(GenreDetailRoute(genreId)) { launchSingleTop = true } },
                     onPlaylistClick = { playlistId -> navController.navigate(PlaylistDetailRoute(playlistId)) { launchSingleTop = true } },
+                )
+            }
+            composable<SearchRoute> {
+                SearchView(
+                    onMenuClick = onMenuClick,
+                    onNavigate = { navController.navigate(it) { launchSingleTop = true } },
+                    bottomContentPadding = bottomInset,
                 )
             }
             composable<SettingsRoute> {

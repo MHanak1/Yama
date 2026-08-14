@@ -3,7 +3,7 @@ package net.mhanak.yama.ui.components.navigation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,8 +23,7 @@ val BottomBarHeight = 80.dp
 enum class BottomBarDestination(val label: String) {
     Home("Home"),
     Library("Library"),
-    /** Mock slot, to be populated later. */
-    More("More"),
+    Search("Search"),
 }
 
 /**
@@ -54,7 +53,7 @@ fun AppBottomBar(
                     val icon = when (dest) {
                         BottomBarDestination.Home -> Icons.Default.Home
                         BottomBarDestination.Library -> Icons.AutoMirrored.Filled.LibraryBooks
-                        BottomBarDestination.More -> Icons.Default.MoreHoriz
+                        BottomBarDestination.Search -> Icons.Default.Search
                     }
                     Icon(icon, contentDescription = dest.label)
                 },

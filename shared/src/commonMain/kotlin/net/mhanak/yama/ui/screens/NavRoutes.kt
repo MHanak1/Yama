@@ -8,6 +8,10 @@ object HomeRoute
 @Serializable
 object LibraryRoute
 
+/** Top-level global search screen: searches tracks, albums, artists, genres and playlists at once. */
+@Serializable
+object SearchRoute
+
 @Serializable
 object SettingsRoute
 

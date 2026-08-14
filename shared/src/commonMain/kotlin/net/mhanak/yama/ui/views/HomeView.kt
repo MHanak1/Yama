@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +45,8 @@ import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.ui.components.home.HomeShelf
+import net.mhanak.yama.ui.components.input.SearchBar
+import net.mhanak.yama.ui.screens.SearchRoute
 import net.mhanak.yama.ui.player.PlaybackTargetSheet
 import net.mhanak.yama.ui.home.activeHomeBlocks
 import net.mhanak.yama.ui.home.homeConfigKey
@@ -110,7 +113,24 @@ fun HomeView(
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     TopAppBar(
-                        title = { Text("Home") },
+                        // A read-only search affordance matching the library's bar; tapping it opens the
+                        // global search screen (Home has no in-place filter, so the real editable field
+                        // lives there). A transparent overlay swallows taps before the text field.
+                        title = {
+                            Box(Modifier.fillMaxWidth()) {
+                                SearchBar(
+                                    query = "",
+                                    onQueryChange = {},
+                                    placeholder = "Search",
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Box(
+                                    Modifier
+                                        .matchParentSize()
+                                        .clickable { onNavigate(SearchRoute) },
+                                )
+                            }
+                        },
                         modifier = Modifier.height(48.dp),
                         navigationIcon = {
                             if (onMenuClick != null) {
