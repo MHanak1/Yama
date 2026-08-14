@@ -23,3 +23,5 @@ actual fun isTelevisionDevice(): Boolean {
 }
 
 actual val defaultUseDeviceVolume: Boolean = true
+
+actual fun supportsSystemTray(): Boolean = false

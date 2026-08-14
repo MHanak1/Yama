@@ -15,6 +15,10 @@ actual fun isTelevisionDevice(): Boolean = false
 
 actual val defaultUseDeviceVolume: Boolean = false
 
+// True if *any* tray backend works here: the modern StatusNotifierItem protocol (Wayland/KDE/GNOME
+// via a host like Waybar) or AWT's X11/Windows/macOS tray. Computed once inside DesktopTray.
+actual fun supportsSystemTray(): Boolean = net.mhanak.yama.platform.DesktopTray.isSupported
+
 // jvmMain
 actual fun getDeviceName(): String =
     InetAddress.getLocalHost().hostName ?: System.getProperty("os.name") ?: "Desktop"

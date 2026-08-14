@@ -31,6 +31,12 @@ object AppPreferences {
         get() = settings.getBoolean("blur_enabled", true)
         set(value) { settings.putBoolean("blur_enabled", value) }
 
+    // Desktop: hide the window to the system tray on close instead of quitting. On by default; gated
+    // by supportsSystemTray() at the use site so it's inert where there's no tray (Android, tray-less desktops).
+    var hideToTrayOnClose: Boolean
+        get() = settings.getBoolean("hide_to_tray_on_close", true)
+        set(value) { settings.putBoolean("hide_to_tray_on_close", value) }
+
     var uiOpacity: Float
         get() = if (blurEnabled) settings.getFloat("ui_opacity", 0.7f) else 1.0f
         set(value) { settings.putFloat("ui_opacity", value) }

@@ -1,0 +1,79 @@
+package net.mhanak.yama.platform
+
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import net.mhanak.yama.util.logger
+import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
+import org.freedesktop.dbus.interfaces.DBus
+
+/** What the tray icon asks the app to do. Delivered on [TrayHandle.events]. */
+enum class TrayEvent { ToggleVisibility, PlayPause, Previous, Next, Quit }
+
+/** Playback snapshot the tray needs to label/enable its transport items. Pushed via [TrayHandle.setPlaybackState]. */
+data class TrayPlaybackState(
+    val isPlaying: Boolean = false,
+    val hasTrack: Boolean = false,
+    val canGoNext: Boolean = false,
+    val canGoPrevious: Boolean = false,
+)
+
+/**
+ * A live tray icon. Callbacks arrive as [events] (emitted from D-Bus/AWT threads, so the app should
+ * collect them on its own UI thread). The app pushes window-visibility changes back via
+ * [setVisibleState] so the menu label ("Show"/"Hide") stays in sync.
+ */
+interface TrayHandle {
+    val events: SharedFlow<TrayEvent>
+    /** Tell the tray whether the window is currently visible (updates the menu label). */
+    fun setVisibleState(visible: Boolean)
+    /** Update the transport items (Play/Pause label, Next/Previous enablement). */
+    fun setPlaybackState(state: TrayPlaybackState)
+    /** Remove the icon and release all resources. */
+    fun dispose()
+}
+
+/**
+ * Desktop system-tray facade. Two backends:
+ *  - **SNI** (`org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` over D-Bus) — the modern
+ *    protocol used on Wayland and by KDE/GNOME(+ext)/Waybar. Preferred whenever a
+ *    `StatusNotifierWatcher` is on the bus, so it works where AWT's X11-only tray cannot.
+ *  - **AWT** (`java.awt.SystemTray`) — the fallback for Windows, macOS and X11 without an SNI host.
+ *
+ * [isSupported] gates the settings UI; it's computed once. [install] picks the best working backend.
+ */
+object DesktopTray {
+    private val log = logger("DesktopTray")
+
+    /** Whether any tray backend is usable here. Computed once (a short D-Bus probe on Linux). */
+    val isSupported: Boolean by lazy { sniWatcherPresent() || awtSupported() }
+
+    /** Installs a tray icon, or returns null if none of the backends could be brought up. */
+    fun install(title: String, iconResource: String = "icon.png"): TrayHandle? {
+        val events = MutableSharedFlow<TrayEvent>(extraBufferCapacity = 8)
+        if (sniWatcherPresent()) {
+            runCatching { return SniTray(title, iconResource, events) }
+                .onFailure { log.warn("SNI tray failed, falling back to AWT", it) }
+        }
+        if (awtSupported()) {
+            runCatching { return AwtTray(title, iconResource, events) }
+                .onFailure { log.warn("AWT tray failed", it) }
+        }
+        return null
+    }
+
+    private fun isLinux() = System.getProperty("os.name").lowercase().contains("linux")
+
+    /** True if a StatusNotifierWatcher owns its well-known name on the session bus. */
+    private fun sniWatcherPresent(): Boolean {
+        if (!isLinux()) return false
+        return runCatching {
+            DBusConnectionBuilder.forSessionBus().build().use { c ->
+                val dbus = c.getRemoteObject("org.freedesktop.DBus", "/org/freedesktop/DBus", DBus::class.java)
+                dbus.NameHasOwner("org.kde.StatusNotifierWatcher")
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun awtSupported(): Boolean =
+        runCatching { java.awt.SystemTray.isSupported() }.getOrDefault(false)
+}

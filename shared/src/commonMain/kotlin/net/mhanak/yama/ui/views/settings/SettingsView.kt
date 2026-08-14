@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
@@ -46,6 +47,8 @@ import net.mhanak.yama.ui.screens.DownloadsSettingsRoute
 import net.mhanak.yama.ui.screens.LocalLibrarySettingsRoute
 import net.mhanak.yama.ui.screens.PlaybackSettingsRoute
 import net.mhanak.yama.ui.screens.ScrobblingSettingsRoute
+import net.mhanak.yama.ui.screens.SystemSettingsRoute
+import net.mhanak.yama.supportsSystemTray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,6 +126,19 @@ fun SettingsView(
                     subtitle = "Music folders & scan settings",
                     onClick = { onNavigate(LocalLibrarySettingsRoute) },
                 )
+                // Desktop-only: window/tray behaviour. Absent on Android and on desktops with no
+                // working tray, since there's nothing to configure there.
+                if (supportsSystemTray()) {
+                    Spacer(Modifier.height(8.dp))
+                    SettingsCategoryCard(
+                        icon = Icons.Default.Computer,
+                        iconContainerColor = Color.hsv(260f, 0.6f, 1f),
+                        iconContentColor = Color.hsv(260f, 1f, 0.4f),
+                        title = "System",
+                        subtitle = "Tray & window behaviour",
+                        onClick = { onNavigate(SystemSettingsRoute) },
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(
                     icon = Icons.Outlined.Info,

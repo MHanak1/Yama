@@ -50,6 +50,10 @@ object ScrobblingSettingsRoute
 @Serializable
 object LocalLibrarySettingsRoute
 
+/** Desktop-only settings (currently: hide-to-tray on close). Gated by supportsSystemTray(). */
+@Serializable
+object SystemSettingsRoute
+
 /** Top-level screen: downloads home — a managed list of downloaded albums. */
 @Serializable
 object DownloadedMusicRoute
