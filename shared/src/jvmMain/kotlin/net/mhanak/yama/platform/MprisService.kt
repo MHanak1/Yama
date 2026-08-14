@@ -2,9 +2,12 @@ package net.mhanak.yama.platform
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import net.mhanak.yama.media.model.Lyrics
+import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.LocalPlayer
 import net.mhanak.yama.media.playback.PlaybackState
 import net.mhanak.yama.media.playback.PlayerStatus
@@ -30,7 +33,14 @@ private const val IFACE_PLAYER = "org.mpris.MediaPlayer2.Player"
  * No-ops silently on non-Linux platforms or when the session bus is unavailable (e.g. headless SSH).
  * Transport is discovered at runtime via ServiceLoader from dbus-java-transport-native-unixsocket.
  */
-class MprisService(private val player: LocalPlayer) {
+class MprisService(
+    private val player: LocalPlayer,
+    /**
+     * Resolves the plain-text lyrics for a track id, mirroring the UI's own
+     * `activeMusicSource.getLyrics(id)`. Optional — when null, MPRIS simply omits `xesam:asText`.
+     */
+    private val lyricsProvider: (suspend (trackId: String) -> Lyrics)? = null,
+) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var conn: DBusConnection? = null
     private val log = logger("MprisService")
@@ -41,7 +51,7 @@ class MprisService(private val player: LocalPlayer) {
             val c = DBusConnectionBuilder.forSessionBus().build()
             conn = c
             c.requestBusName(MPRIS_SERVICE)
-            val handler = MprisHandler(c, player)
+            val handler = MprisHandler(c, player, scope, lyricsProvider)
             c.exportObject(MPRIS_PATH, handler)
             scope.launch { player.status.collect { handler.onStatusChanged(it) } }
         }.onFailure {
@@ -80,9 +90,17 @@ interface MprisPlayer : DBusInterface {
 private class MprisHandler(
     private val conn: DBusConnection,
     private val player: LocalPlayer,
+    private val scope: CoroutineScope,
+    private val lyricsProvider: (suspend (trackId: String) -> Lyrics)?,
 ) : MprisRoot, MprisPlayer, Properties {
 
     @Volatile private var status = PlayerStatus()
+
+    // Plain-text lyrics for the current track, resolved asynchronously after each track change.
+    // [lyricsTrackId] guards against a stale fetch landing after the user has skipped on.
+    @Volatile private var lyrics: String? = null
+    @Volatile private var lyricsTrackId: String? = null
+    private var lyricsJob: Job? = null
 
     override fun isRemote() = false
     override fun getObjectPath() = MPRIS_PATH
@@ -156,9 +174,14 @@ private class MprisHandler(
         status = new
         val changed = mutableMapOf<String, Variant<*>>()
 
+        // On a track change, drop the previous track's lyrics before emitting Metadata (so the first
+        // emit never carries stale text) and kick off an async fetch that emits again once it lands.
+        val trackChanged = new.current?.id != old.current?.id
+        if (trackChanged) refreshLyrics(new.current)
+
         if (new.isPlaying != old.isPlaying || new.state != old.state)
             changed["PlaybackStatus"] = Variant(new.playbackStatus(), "s")
-        if (new.current?.id != old.current?.id || new.durationMs != old.durationMs)
+        if (trackChanged || new.durationMs != old.durationMs)
             changed["Metadata"] = Variant(new.metadata(), "a{sv}")
         new.volume?.let { v -> if (v != old.volume) changed["Volume"] = Variant(v.toDouble(), "d") }
         if (new.repeat != old.repeat)
@@ -174,12 +197,39 @@ private class MprisHandler(
         }
 
         if (changed.isEmpty()) return
+        emitChanged(changed)
+    }
+
+    /** Fetch the new track's lyrics off the status-collector's path; re-emit Metadata once resolved. */
+    private fun refreshLyrics(track: Track?) {
+        lyricsJob?.cancel()
+        lyrics = null
+        lyricsTrackId = track?.id
+        val provider = lyricsProvider ?: return
+        val id = track?.id ?: return
+        lyricsJob = scope.launch {
+            val text = runCatching { provider(id).toPlainText() }.getOrNull()
+            // A slow fetch may resolve after the user has already skipped on — ignore it if so.
+            if (text.isNullOrBlank() || lyricsTrackId != id) return@launch
+            lyrics = text
+            emitChanged(mapOf("Metadata" to Variant(status.metadata(), "a{sv}")))
+        }
+    }
+
+    private fun emitChanged(changed: Map<String, Variant<*>>) {
         runCatching {
             conn.sendMessage(
                 Properties.PropertiesChanged(MPRIS_PATH, IFACE_PLAYER, changed, emptyList())
             )
         }
     }
+
+    /** Flatten any timed/unsynced lyrics to a single newline-joined string; null when there are none. */
+    private fun Lyrics.toPlainText(): String? = when (this) {
+        is Lyrics.Timed -> lines.joinToString("\n") { it.text }
+        is Lyrics.Unsynced -> lines.joinToString("\n")
+        Lyrics.None -> null
+    }?.takeUnless { it.isBlank() }
 
     private fun rootProps(): Map<String, Variant<*>> = mapOf(
         "CanQuit" to Variant(false, "b"),
@@ -241,6 +291,9 @@ private class MprisHandler(
             }
             track.album?.let { put("xesam:album", Variant(it, "s")) }
             track.imageUrl?.let { put("mpris:artUrl", Variant(it, "s")) }
+            // xesam:asText is the standard MPRIS/xesam field for a track's lyrics (full plain text).
+            // Only attach it when it belongs to *this* track — an async fetch may still be in flight.
+            lyrics?.takeIf { lyricsTrackId == track.id }?.let { put("xesam:asText", Variant(it, "s")) }
         }
     }
 

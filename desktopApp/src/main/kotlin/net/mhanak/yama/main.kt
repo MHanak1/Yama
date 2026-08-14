@@ -28,7 +28,13 @@ fun main() {
     application {
         // Created once and must survive recomposition (the content recomposes whenever the window's
         // visibility changes), so they're remembered rather than rebuilt each pass.
-        val mpris = remember { MprisService(AppContainer.shared.playback.local).also { it.start() } }
+        val mpris = remember {
+            MprisService(
+                AppContainer.shared.playback.local,
+                // Resolve lyrics through the active source, same seam the full player uses.
+                lyricsProvider = { id -> AppContainer.shared.activeMusicSource.getLyrics(id) },
+            ).also { it.start() }
+        }
         val tray = remember { DesktopTray.install(title = "Yama") }  // null where no tray backend works
 
         // The window can be hidden (to tray) without ending the process, so its visibility is state.
