@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.Player
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.ui.components.state.LocalAvailability
 
 /**
@@ -88,6 +89,9 @@ fun DetailPlayActions(
             icon = Icons.Filled.PlayArrow,
             filled = true,
             modifier = Modifier.weight(1f),
+            // TV D-pad: registered so a cold detail-screen entry lands here (the header composes first,
+            // so this is the registry's first item). Track rows override once one is focused. See TvFocus.kt.
+            focusKey = "play",
             onPlay = { act(false) { playNow(it) } },
             onPlayNext = { act(false) { playNext(it) } },
             onAddToQueue = { act(false) { addToQueue(it) } },
@@ -119,6 +123,8 @@ private fun PlayActionButton(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     modifier: Modifier = Modifier,
+    // TV D-pad: registry key for this button (null = untracked). Applied before combinedClickable.
+    focusKey: String? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     // Anchor the menu at the cursor for right-clicks, top-start for long-presses.
@@ -134,6 +140,7 @@ private fun PlayActionButton(
             contentColor = colors.contentColor,
             modifier = Modifier
                 .fillMaxWidth()
+                .contentFocusItem(focusKey)
                 .combinedClickable(
                     onClick = onPlay,
                     onLongClick = {

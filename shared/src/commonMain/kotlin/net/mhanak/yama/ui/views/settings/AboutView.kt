@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.BuildInfo
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 
 private const val REPO_URL = "https://github.com/MHanak1/Yama"
 private const val LICENSE_URL = "https://github.com/MHanak1/Yama/blob/main/LICENSE"
@@ -74,6 +75,7 @@ fun AboutView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -154,6 +156,7 @@ fun AboutView(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(bottomContentPadding))
+        }
         }
     }
 }

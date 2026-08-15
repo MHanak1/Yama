@@ -56,6 +56,9 @@ fun SearchBar(
     // TV only: called when the user presses D-pad down while the search bar is focused. Return true
     // to consume the event (focus was redirected), false to fall through to the default moveFocus.
     onFocusDown: (() -> Boolean)? = null,
+    // TV only: called on D-pad left. A focused text field otherwise consumes left for the caret and
+    // never exits, so hosts pass this to redirect left to the sidebar. Return true to consume.
+    onFocusLeft: (() -> Boolean)? = null,
     // When set, render a read-only shortcut (no text field) that invokes this on tap / D-pad select.
     onClick: (() -> Unit)? = null,
 ) {
@@ -102,6 +105,12 @@ fun SearchBar(
                     if (handled) true else focusManager.moveFocus(FocusDirection.Down)
                 }
                 Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Up)
+                // Left/right normally move the caret; when a host provides onFocusLeft (TV), redirect
+                // left out to the sidebar instead — a single-line field has no useful caret travel there.
+                Key.DirectionLeft -> {
+                    val handled = onFocusLeft?.invoke() == true
+                    if (handled) true else false
+                }
                 else -> false
             }
         },

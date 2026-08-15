@@ -37,6 +37,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.HomeBlockKind
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 import net.mhanak.yama.ui.home.homeConfigKey
 import net.mhanak.yama.ui.home.resolveHomeBlocks
 import net.mhanak.yama.util.AppPreferences
@@ -96,6 +97,7 @@ fun HomeLayoutView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 12.dp),
@@ -139,6 +141,7 @@ fun HomeLayoutView(
                     }
                 }
             }
+        }
         }
     }
 

@@ -87,6 +87,8 @@ import yama.shared.generated.resources.album
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.LocalIsTvMode
 import net.mhanak.yama.ui.components.image.BlurredBackgroundImage
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
+import net.mhanak.yama.ui.components.interaction.tvFocusContainer
 import net.mhanak.yama.ui.theme.glassSource
 import net.mhanak.yama.ui.theme.DynamicColorTheme
 import net.mhanak.yama.ui.platform.ImmersiveMode
@@ -132,6 +134,7 @@ fun FullPlayer(
     val track = status.current
     val scope = rememberCoroutineScope()
     val playPauseFocus = remember { FocusRequester() }
+    val zone = LocalTvZoneFocus.current
     val density = LocalDensity.current
     val peekHeightPx = with(density) { peekHeight.toPx() }
     // Minimum upward swipe (in px) that opens the queue when the player is fully expanded.
@@ -170,8 +173,13 @@ fun FullPlayer(
         lyrics = appContainer.activeMusicSource.getLyrics(id)
     }
 
-    // Move D-pad focus into the controls when the player opens (so TV remotes can drive it).
-    LaunchedEffect(Unit) { runCatching { playPauseFocus.requestFocus() } }
+    // Move D-pad focus into the controls when the player opens, and whenever the chrome returns from the
+    // idle "zen" view — the AnimatedVisibility exit removes the focused control, so re-focus play/pause
+    // so the D-pad has a target again (any key first resets the idle monitor, bringing the chrome back).
+    LaunchedEffect(controlsHidden) { if (!controlsHidden) runCatching { playPauseFocus.requestFocus() } }
+    // When the queue sheet (which traps its own D-pad focus) closes over the still-open player, pull
+    // focus back into the transport so the remote keeps working.
+    LaunchedEffect(showQueue) { if (!showQueue && !controlsHidden) runCatching { playPauseFocus.requestFocus() } }
 
     // Recolour the whole player to the current artwork (album uuid as the shared cache key), animating
     // to the new scheme when the track changes. Honours the user's "Tint UI with album colours" setting.
@@ -181,7 +189,12 @@ fun FullPlayer(
         enabled = appContainer.albumTintMode.tintsPlayer,
     ) {
     Surface(
-        modifier = modifier.fillMaxSize().glassSource(zIndex = 2f).resetIdleOn(idleMonitor).graphicsLayer {
+        // TV: trap D-pad focus inside the full player (it covers the rail/bars but sits outside the
+        // four-zone NavHost subtree, so nothing else keeps focus here), and return focus to the
+        // now-playing bar when it collapses. Initial/zen focus is handled by the LaunchedEffect above.
+        modifier = modifier.fillMaxSize().glassSource(zIndex = 2f)
+            .tvFocusContainer(onDismissRestore = { zone?.focusNowPlaying() })
+            .resetIdleOn(idleMonitor).graphicsLayer {
             val f = playerExpansion.value
             // The sheet rests with its top at the bar line (peekHeight up from the bottom) and slides
             // up to fully cover the screen as f goes 0 → 1. It also fades in over just the first

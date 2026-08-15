@@ -68,6 +68,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onSizeChanged
@@ -444,6 +446,11 @@ private fun CredentialsForm(
     header: @Composable ColumnScope.() -> Unit = {},
 ) {
     val focusManager = LocalFocusManager.current
+    // TV: land focus on the username field when the form appears, so a remote user can start typing
+    // without first hunting for the field (which also opens the on-screen keyboard). No-op off TV.
+    val isTV = LocalIsTvMode.current
+    val usernameFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { if (isTV) runCatching { usernameFocus.requestFocus() } }
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -455,6 +462,7 @@ private fun CredentialsForm(
             imeAction = ImeAction.Next,
             onAction = { focusManager.moveFocus(FocusDirection.Next) },
             contentType = ContentType.Username,
+            modifier = Modifier.focusRequester(usernameFocus),
         )
         Spacer(modifier = Modifier.height(8.dp))
         LoginSecureTextField(

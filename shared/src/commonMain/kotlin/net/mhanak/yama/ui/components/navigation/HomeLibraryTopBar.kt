@@ -27,11 +27,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.LocalIsTvMode
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
 import net.mhanak.yama.ui.components.input.SearchBar
 import net.mhanak.yama.ui.components.input.SegmentedButtonRow
 import net.mhanak.yama.ui.theme.glassEffect
@@ -91,8 +96,33 @@ fun HomeLibraryTopBar(
             if (searchActive) runCatching { searchFocusRequester.requestFocus() }
         }
     }
+    val isTV = LocalIsTvMode.current
+    val zone = LocalTvZoneFocus.current
+    // TV: the search field is attached to searchFocusRequester in every mode (below), so it is the
+    // deterministic entry target for this zone — both when a neighbour calls focusSearch() and when
+    // focus enters spatially (onEnter). Left redirects out to the read-only Home pill's exit path.
+    val fieldFocusMod = if (searchFocusRequester != null) Modifier.focusRequester(searchFocusRequester) else Modifier
+    // TV: the read-only Home pill is a plain focusable, so its D-pad left/down exit via the group's
+    // onExit here. The live text field consumes left/down itself, so those are handled inside SearchBar
+    // (onFocusLeft/onFocusDown) — both routes land on the same zone actions.
+    val onFieldFocusLeft: (() -> Boolean)? = if (isTV && zone != null) ({ zone.focusSidebar(); true }) else null
     Box(
         modifier = modifier
+            .then(
+                if (isTV && zone != null) Modifier
+                    .focusProperties {
+                        onEnter = { searchFocusRequester?.let { runCatching { it.requestFocus() } } }
+                        onExit = {
+                            when (requestedFocusDirection) {
+                                FocusDirection.Left -> zone.focusSidebar()
+                                FocusDirection.Down -> zone.restoreContent()
+                                else -> {}
+                            }
+                        }
+                    }
+                    .focusGroup()
+                else Modifier,
+            )
             .fillMaxWidth()
             .glassEffect(MaterialTheme.colorScheme.surface),
     ) {
@@ -106,11 +136,12 @@ fun HomeLibraryTopBar(
                             // Home: a read-only shortcut that opens the dedicated search screen. Rendered
                             // as a clickable (non-text-field) pill so it works with TV D-pad select and
                             // never opens a keyboard here — typing happens on the search screen itself.
+                            // Still carries the entry requester so the top-bar zone lands here on Home.
                             SearchBar(
                                 query = "",
                                 onQueryChange = {},
                                 placeholder = searchPlaceholder,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
                                 onClick = onSearchTap,
                             )
                         }
@@ -121,11 +152,9 @@ fun HomeLibraryTopBar(
                                 query = query,
                                 onQueryChange = onQueryChange,
                                 placeholder = searchPlaceholder,
-                                modifier = Modifier.fillMaxWidth().then(
-                                    if (searchFocusRequester != null) Modifier.focusRequester(searchFocusRequester)
-                                    else Modifier,
-                                ),
+                                modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
                                 onFocusDown = onSearchFocusDown,
+                                onFocusLeft = onFieldFocusLeft,
                             )
                         }
                         else -> {
@@ -134,8 +163,9 @@ fun HomeLibraryTopBar(
                                 query = query,
                                 onQueryChange = onQueryChange,
                                 placeholder = searchPlaceholder,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
                                 onFocusDown = onSearchFocusDown,
+                                onFocusLeft = onFieldFocusLeft,
                             )
                         }
                     }

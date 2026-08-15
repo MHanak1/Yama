@@ -365,9 +365,6 @@ fun PlayerControls(
 
             if (showTertiaryControls) {
                 Spacer(Modifier.height(16.dp * scale))
-                val loopUp = playPauseFocusRequester?.let { focus ->
-                    Modifier.focusProperties { down = focus }
-                } ?: Modifier
 
                 Row(
                     Modifier.fillMaxWidth(),
@@ -402,7 +399,9 @@ fun PlayerControls(
                     ToggleButton(
                         checked = showLyrics,
                         onCheckedChange = { onToggleLyrics() },
-                        modifier = Modifier.focusRequester(bottomCenterFocus).then(loopUp).size(48.dp * scale),
+                        // No down override: like cast/queue, D-pad down stays on this row rather than
+                        // jumping back up to play/pause (the tertiary row is the bottom of the controls).
+                        modifier = Modifier.focusRequester(bottomCenterFocus).size(48.dp * scale),
                         shapes = ToggleButtonDefaults.shapes(),
                         colors = toggleColors,
                         contentPadding = PaddingValues(0.dp),
@@ -417,7 +416,7 @@ fun PlayerControls(
                         kind = FavoritableKind.Track,
                         itemId = status.current?.id,
                         initial = status.current?.favorite,
-                        modifier = loopUp.size(48.dp * scale),
+                        modifier = Modifier.size(48.dp * scale),
                         iconSize = 24.dp * scale,
                         emphasized = true,
                     )

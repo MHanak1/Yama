@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 import net.mhanak.yama.ui.components.settings.LocalLibrarySettings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,6 +42,7 @@ fun LocalLibrarySettingsView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -49,6 +51,7 @@ fun LocalLibrarySettingsView(
         ) {
             LocalLibrarySettings()
             Spacer(Modifier.height(bottomContentPadding))
+        }
         }
     }
 }

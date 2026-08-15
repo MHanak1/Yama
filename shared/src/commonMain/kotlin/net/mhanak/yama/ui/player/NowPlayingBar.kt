@@ -41,7 +41,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import net.mhanak.yama.LocalIsTvMode
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -84,11 +93,14 @@ fun NowPlayingBar(
     modifier: Modifier = Modifier,
     tall: Boolean = false,
     peekHeight: Dp = 0.dp,
-    // TV only: called when the user presses D-pad up from the bar. Should call
-    // ContentFocusRegistry.requestRestore() to return focus to the active content grid. Null off TV.
-    onExitUp: (() -> Unit)? = null,
+    // TV only: the whole-bar focus target. Neighbouring zones call this leaf directly to enter the bar,
+    // and the bar's onEnter redirects spatial entry here too, so focus always lands on the whole bar
+    // (not pause/next). Null off TV.
+    entryFocusRequester: FocusRequester? = null,
 ) {
     val track = status.current ?: return
+    val isTV = LocalIsTvMode.current
+    val zone = LocalTvZoneFocus.current
     val baseHeight = if (tall) MiniPlayerTallHeight else MiniPlayerHeight
     val density = LocalDensity.current
     val baseHeightPx = with(density) { baseHeight.toPx() }
@@ -108,15 +120,32 @@ fun NowPlayingBar(
 
     Column(
         modifier
-            // Make the bar a focus group so D-pad up from any control exits into the content grid
-            // rather than getting stuck on the bar. Other directions keep their defaults (left → rail).
-            // focusProperties must precede focusGroup so onExit applies to the bar's own focus target.
+            // Make the bar a deterministic focus zone. onEnter lands spatial entry on the whole-bar row
+            // (not pause/next); onExit routes Up back to the content grid and Left to the rail. Other
+            // directions (Right → pause → next within the row) keep the Row's default traversal.
+            // focusProperties must precede focusGroup so onEnter/onExit apply to the bar's own node.
             .then(
-                if (onExitUp != null) Modifier
+                if (isTV && zone != null) Modifier
                     .focusProperties {
-                        onExit = { if (requestedFocusDirection == FocusDirection.Up) onExitUp() }
+                        onEnter = { entryFocusRequester?.let { runCatching { it.requestFocus() } } }
+                        // Left exits to the sidebar (always present at the left edge, so the default
+                        // directional search reliably triggers onExit). Up is handled by the key
+                        // interceptor below instead — onExit only fires when the search finds a candidate
+                        // above, and a sparse content screen (e.g. a short Settings list that doesn't span
+                        // the bar's width) can leave the beam empty, stranding focus on the bar.
+                        onExit = {
+                            if (requestedFocusDirection == FocusDirection.Left) zone.focusSidebar()
+                        }
                     }
                     .focusGroup()
+                    .onPreviewKeyEvent { event ->
+                        // D-pad up from anywhere in the bar returns focus to the content, regardless of
+                        // whether a spatial candidate exists above. The bar has no internal up-move
+                        // (info row / pause / next share one row), so intercepting up here is unambiguous.
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
+                            zone.restoreContent(); true
+                        } else false
+                    }
                 else Modifier,
             )
             .fillMaxWidth()
@@ -200,6 +229,12 @@ fun NowPlayingBar(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                // The whole-bar focus target: focusRequester precedes clickable so the requester
+                // resolves to this (focusable) row and entering the bar lands here, not on pause/next.
+                .then(
+                    if (isTV && entryFocusRequester != null) Modifier.focusRequester(entryFocusRequester)
+                    else Modifier,
+                )
                 .clickable { scope.launch { playerExpansion.animateTo(1f) } }
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

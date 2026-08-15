@@ -31,6 +31,7 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.ui.components.downloads.DownloadItemMenu
 import net.mhanak.yama.ui.components.downloads.DownloadTrackRow
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 
 /**
  * Dedicated management view for one downloaded album: its downloaded tracks with per-track actions, and
@@ -84,6 +85,7 @@ fun DownloadedAlbumView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
@@ -120,6 +122,7 @@ fun DownloadedAlbumView(
                     }
                 }
             }
+        }
         }
     }
 }

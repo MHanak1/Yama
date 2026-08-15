@@ -41,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.ui.screens.AboutRoute
 import net.mhanak.yama.ui.screens.AppearanceSettingsRoute
 import net.mhanak.yama.ui.screens.DownloadsSettingsRoute
@@ -73,6 +75,7 @@ fun SettingsView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -151,6 +154,7 @@ fun SettingsView(
             }
             Spacer(Modifier.height(bottomContentPadding))
         }
+        }
     }
 }
 
@@ -165,7 +169,9 @@ private fun SettingsCategoryCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        // TV D-pad: keyed by title so entry lands on the first category and back-from-subpage restores
+        // the one just visited. contentFocusItem precedes the card's internal clickable node.
+        modifier = Modifier.contentFocusItem(title).fillMaxWidth(),
     ) {
         ListItem(
             leadingContent = {

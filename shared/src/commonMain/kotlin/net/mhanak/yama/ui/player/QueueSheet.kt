@@ -46,8 +46,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import net.mhanak.yama.ui.components.interaction.tvFocusContainer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +87,10 @@ fun QueueSheet(
 
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
+    // TV: focus the current-track row on open and trap D-pad focus in the sheet (it covers the full
+    // player behind it). Focus returns to the player's controls via FullPlayer's own re-focus effect
+    // when this sheet closes. See tvFocusContainer / TvFocus.kt.
+    val entryFocus = remember { FocusRequester() }
 
     val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
         val fromIndex = entries.indexOfFirst { it.uid == from.key }
@@ -123,7 +130,8 @@ fun QueueSheet(
             Modifier
                 .fillMaxWidth()
                 .glassEffect(sheetContainerColor, sheetShape)
-                .glassSource(zIndex = 3f),
+                .glassSource(zIndex = 3f)
+                .tvFocusContainer(entry = entryFocus),
         ) {
             Box(
                 Modifier
@@ -150,6 +158,8 @@ fun QueueSheet(
                             track = entry.track,
                             isCurrent = entry.isCurrent,
                             isDragging = isDragging,
+                            // The current row is scrolled into view on open, so it's the entry target.
+                            modifier = if (entry.isCurrent) Modifier.focusRequester(entryFocus) else Modifier,
                             onClick = { player.skipTo(entries.indexOfFirst { it.uid == entry.uid }) },
                             onRemove = {
                                 val at = entries.indexOfFirst { it.uid == entry.uid }

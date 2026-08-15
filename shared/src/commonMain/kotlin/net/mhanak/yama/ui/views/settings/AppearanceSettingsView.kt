@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 import net.mhanak.yama.ui.components.settings.AppearanceSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,6 +43,7 @@ fun AppearanceSettingsView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -50,6 +52,7 @@ fun AppearanceSettingsView(
         ) {
             AppearanceSettings(onOpenHomeLayout = onOpenHomeLayout)
             Spacer(Modifier.height(bottomContentPadding))
+        }
         }
     }
 }

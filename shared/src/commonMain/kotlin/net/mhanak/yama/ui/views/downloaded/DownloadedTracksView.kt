@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.ui.components.downloads.DownloadTrackRow
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 import net.mhanak.yama.media.sources.local.Retention
 
 /**
@@ -95,6 +96,7 @@ fun DownloadedTracksView(
                 )
             }
         } else {
+            ContentFocusHost(Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
@@ -110,6 +112,7 @@ fun DownloadedTracksView(
                         onKeep = { sourceKey?.let { manager.keepDownloaded(it, track.id) } },
                     )
                 }
+            }
             }
         }
     }

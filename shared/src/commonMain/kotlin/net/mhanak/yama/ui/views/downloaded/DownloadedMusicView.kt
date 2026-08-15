@@ -55,6 +55,8 @@ import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.ui.components.downloads.DownloadAlbumRow
 import net.mhanak.yama.ui.components.downloads.downloadJobsSection
 import net.mhanak.yama.ui.components.input.isInFlight
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.media.sources.local.Retention
 import net.mhanak.yama.util.formatFileSize
 import org.jetbrains.compose.resources.painterResource
@@ -131,6 +133,7 @@ fun DownloadedMusicView(
             )
         },
     ) { innerPadding ->
+        ContentFocusHost(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
@@ -144,6 +147,7 @@ fun DownloadedMusicView(
                     subtitle = "Downloaded tracks, with cached shown on request",
                     icon = Icons.AutoMirrored.Filled.QueueMusic,
                     onClick = onTracksClick,
+                    focusKey = "nav_tracks",
                 )
             }
             item {
@@ -152,6 +156,7 @@ fun DownloadedMusicView(
                     subtitle = "Quality, Wi-Fi only, cache, offline plays",
                     icon = Icons.Default.Settings,
                     onClick = onSettingsClick,
+                    focusKey = "nav_settings",
                 )
             }
             item { HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
@@ -191,9 +196,11 @@ fun DownloadedMusicView(
                             sourceKey?.let { manager.redownloadAlbumStored(it, album.id, quality) }
                         },
                         onRemove = { sourceKey?.let { manager.removeAlbum(it, album.id) } },
+                        focusKey = "album_${album.id}",
                     )
                 }
             }
+        }
         }
     }
 
@@ -233,7 +240,7 @@ private fun StaleBanner(count: Int, onUpdateAll: () -> Unit) {
 }
 
 @Composable
-private fun NavRow(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+private fun NavRow(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, focusKey: String? = null) {
     ListItem(
         leadingContent = { Icon(icon, contentDescription = null) },
         headlineContent = { Text(title) },
@@ -241,7 +248,7 @@ private fun NavRow(title: String, subtitle: String, icon: androidx.compose.ui.gr
         trailingContent = {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         },
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.contentFocusItem(focusKey).clickable(onClick = onClick),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 }

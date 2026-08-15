@@ -1,16 +1,23 @@
 package net.mhanak.yama.ui.components.interaction
 
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import net.mhanak.yama.LocalIsTvMode
@@ -52,7 +59,14 @@ import net.mhanak.yama.LocalIsTvMode
  *   navigate-to-detail → back round-trip and the same item is restored.
  */
 @Stable
-class ContentFocusRegistry(private val savedKey: MutableState<String?>) {
+class ContentFocusRegistry(
+    private val savedKey: MutableState<String?>,
+    // Optional focus target used by [requestRestore] when no keyed items are registered — lets a screen
+    // with no per-item focus keys (e.g. a settings form) still land entry inside its content group
+    // instead of on the app-bar back button. Typically the content group's own FocusRequester, whose
+    // first focusable is the first control. Null for the grid/list case, which always has items.
+    private val emptyFallback: FocusRequester? = null,
+) {
     // Maintains insertion order (composition order ≈ visual order) so firstOrNull() gives the top item.
     private val items = LinkedHashMap<String, FocusRequester>()
 
@@ -75,8 +89,44 @@ class ContentFocusRegistry(private val savedKey: MutableState<String?>) {
      */
     fun requestRestore() {
         val key = savedKey.value
-        val fr = (if (key != null) items[key] else null) ?: items.values.firstOrNull() ?: return
+        val fr = (if (key != null) items[key] else null)
+            ?: items.values.firstOrNull()
+            ?: emptyFallback
+            ?: return
         runCatching { fr.requestFocus() }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen-level content-focus host (for non-grid content screens)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Wraps a content screen's scroll container so it participates in the TV entry/restore model with a
+ * single line, without needing a hand-rolled [ContentFocusRegistry]. On TV it:
+ *  - creates a per-screen registry (savedKey [rememberSaveable] so a keyed row is restored on back),
+ *  - registers it as the active screen's content focus target,
+ *  - provides [LocalContentFocusRegistry] so rows can opt into restore via [Modifier.contentFocusItem],
+ *  - marks its Box a focus group and makes that group the registry's empty-list fallback, so even a
+ *    screen with no keyed rows lands entry on its first control (not the app-bar back button).
+ *
+ * Off TV this is a plain [Box] with [modifier] and adds nothing.
+ */
+@Composable
+fun ContentFocusHost(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    if (!LocalIsTvMode.current) {
+        Box(modifier) { content() }
+        return
+    }
+    val savedKey = rememberSaveable { mutableStateOf<String?>(null) }
+    val groupFocus = remember { FocusRequester() }
+    val registry = remember { ContentFocusRegistry(savedKey, emptyFallback = groupFocus) }
+    RegisterActiveContentFocus(registry)
+    CompositionLocalProvider(LocalContentFocusRegistry provides registry) {
+        Box(modifier.focusRequester(groupFocus).focusGroup()) { content() }
     }
 }
 
@@ -124,6 +174,50 @@ fun RegisterActiveContentFocus(registry: ContentFocusRegistry) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Zone coordinator (one per MainScreen) — deterministic 4-zone D-pad transitions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Holds the concrete leaf entry actions for the four TV focus zones so any zone's [onExit] handler
+ * can hand focus to a neighbour deterministically, instead of relying on Compose's spatial focus
+ * search (which picks the nearest focusable and so lands non-deterministically between the top bar,
+ * content and player bar).
+ *
+ * Transitions call **leaf** requesters directly rather than a neighbour's focus *group*: a documented
+ * CMP gotcha (see this file's header) is that a programmatic requestFocus() on a group skips its
+ * onEnter and lands on the first focusable, so we never bounce through a group's onEnter.
+ *
+ *  - [sidebar] is attached to whichever rail item matches the active screen (AppNavRail).
+ *  - [search] is attached to the shared top bar's search field (HomeLibraryTopBar), in every mode.
+ *  - [nowPlaying] is attached to the now-playing bar's whole-bar row (NowPlayingBar).
+ *  - [restoreContent] restores the active grid's last-focused item (or first item cold), falling back
+ *    to the content group when a screen has no registry — the single rule the nav-entry effect, the
+ *    player-bar up-exit and the search-bar down-exit all share.
+ */
+@Stable
+class TvZoneFocus(
+    val sidebar: FocusRequester,
+    val search: FocusRequester,
+    val nowPlaying: FocusRequester,
+    private val activeContent: ActiveContentFocus,
+    private val contentFallback: FocusRequester,
+) {
+    fun focusSidebar() { runCatching { sidebar.requestFocus() } }
+    fun focusSearch() { runCatching { search.requestFocus() } }
+    fun focusNowPlaying() { runCatching { nowPlaying.requestFocus() } }
+
+    /** Restore the active screen's last-focused content item, or focus the content group if none. */
+    fun restoreContent() {
+        val registry = activeContent.registry
+        if (registry != null) registry.requestRestore()
+        else runCatching { contentFallback.requestFocus() }
+    }
+}
+
+/** Provided by [net.mhanak.yama.ui.screens.MainScreen] so the four zones can reach each other. */
+val LocalTvZoneFocus = compositionLocalOf<TvZoneFocus?> { null }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Per-screen local (provided by GridView / ListView to their items)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -133,6 +227,43 @@ fun RegisterActiveContentFocus(registry: ContentFocusRegistry) {
  * [ContentFocusRegistry] without an explicit parameter thread.
  */
 val LocalContentFocusRegistry = compositionLocalOf<ContentFocusRegistry?> { null }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overlay focus containment (full player, sheets, dialogs, popups)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * TV focus containment for an overlay (full player, bottom sheet, dialog, dropdown) — the pattern
+ * generalised from the hand-rolled version in
+ * [net.mhanak.yama.ui.components.settings.SourceSwitcher]. Overlays render *outside* the four-zone
+ * NavHost subtree, so nothing otherwise pulls D-pad focus into them or keeps it there. Apply this to
+ * the overlay's root/content node. On TV it:
+ *  - focuses [entry] once when the overlay appears (so the popup claims D-pad focus instead of letting
+ *    events fall through to the content behind — the failure the SourceSwitcher workaround describes),
+ *  - traps focus inside via `onExit = { cancelFocus() }` so D-pad can't wander onto the covered content,
+ *  - calls [onDismissRestore] when the overlay leaves composition, so focus returns to its opener.
+ *
+ * Off TV it is a no-op. [entry] must be attached to a focusable inside the overlay via
+ * [Modifier.focusRequester]; pass null to only trap/restore without moving focus on open.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun Modifier.tvFocusContainer(
+    entry: FocusRequester? = null,
+    onDismissRestore: (() -> Unit)? = null,
+): Modifier {
+    if (!LocalIsTvMode.current) return this
+    if (entry != null) {
+        LaunchedEffect(Unit) { runCatching { entry.requestFocus() } }
+    }
+    if (onDismissRestore != null) {
+        DisposableEffect(Unit) { onDispose { onDismissRestore() } }
+    }
+    // focusProperties must precede focusGroup so onExit applies to the container's own focus target.
+    return this
+        .focusProperties { onExit = { cancelFocus() } }
+        .focusGroup()
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-item modifier

@@ -41,6 +41,7 @@ import net.mhanak.yama.util.StreamingQuality
 import net.mhanak.yama.util.formatFileSize
 import net.mhanak.yama.ui.components.image.CardImage
 import net.mhanak.yama.ui.components.input.QualityPickerDialog
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 
 /** A downloaded album as a management list row: artwork, name, artist • N tracks • quality • size, a
  *  "Stale" chip when its content changed upstream, and an overflow menu (change quality / remove).
@@ -52,6 +53,8 @@ fun DownloadAlbumRow(
     onClick: () -> Unit,
     onChangeQuality: (StreamingQuality) -> Unit,
     onRemove: () -> Unit,
+    // TV D-pad: registry key (null = untracked) so the hub restores the album row after opening it.
+    focusKey: String? = null,
 ) {
     val tracks = if (album.trackCount == 1) "1 track" else "${album.trackCount} tracks"
     val quality = album.quality?.shortLabel ?: "Mixed"
@@ -84,7 +87,7 @@ fun DownloadAlbumRow(
                 onRemove = onRemove,
             )
         },
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.contentFocusItem(focusKey).clickable(onClick = onClick),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 }

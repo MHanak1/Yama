@@ -51,7 +51,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -81,6 +83,8 @@ import net.mhanak.yama.ui.components.navigation.HomeLibraryTopBar
 import net.mhanak.yama.ui.platform.KeepScreenOn
 import net.mhanak.yama.ui.components.interaction.ActiveContentFocus
 import net.mhanak.yama.ui.components.interaction.LocalActiveContentFocus
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
+import net.mhanak.yama.ui.components.interaction.TvZoneFocus
 import net.mhanak.yama.ui.platform.PlatformBackHandler
 import net.mhanak.yama.ui.platform.PlatformDeviceWakeEffect
 import net.mhanak.yama.ui.platform.PlatformUserInteractionEffect
@@ -224,6 +228,21 @@ fun MainScreen() {
     // no focusRestorer, no global flag). Falls back to contentFocusRequester for non-content
     // screens (Home, Settings) that have no registry. See TvFocus.kt.
     val activeContentFocus = remember { ActiveContentFocus() }
+    // Entry leaves for the two zones that own their focus target inside child composables. sidebarEntry
+    // is attached to the active rail item (AppNavRail); nowPlayingEntry to the whole-bar row
+    // (NowPlayingBar). Bundled with the existing search/content requesters into the zone coordinator so
+    // each zone's onExit can hand focus to a neighbour deterministically (see TvZoneFocus / TvFocus.kt).
+    val sidebarEntry = remember { FocusRequester() }
+    val nowPlayingEntry = remember { FocusRequester() }
+    val tvZoneFocus = remember {
+        TvZoneFocus(
+            sidebar = sidebarEntry,
+            search = searchFocusRequester,
+            nowPlaying = nowPlayingEntry,
+            activeContent = activeContentFocus,
+            contentFallback = contentFocusRequester,
+        )
+    }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val destination = navBackStackEntry?.destination
 
@@ -368,7 +387,10 @@ fun MainScreen() {
     Box(Modifier.fillMaxSize().resetIdleOn(idleMonitor)) {
     // Provided to the content (NavHost) subtree only — overlays drawn below (full player, sheets)
     // sit outside it, so their lists never register as the screen's entry-focus target.
-    CompositionLocalProvider(LocalActiveContentFocus provides activeContentFocus) {
+    CompositionLocalProvider(
+        LocalActiveContentFocus provides activeContentFocus,
+        LocalTvZoneFocus provides tvZoneFocus,
+    ) {
     AdaptiveNavigationLayout(
         playerActive = playerStatus.current != null,
         // On TV, pressing up from the now-playing bar returns focus to the content grid (or the
@@ -379,13 +401,9 @@ fun MainScreen() {
                 playerExpansion = playerExpansion,
                 tall = tall,
                 peekHeight = playerPeek,
-                // On TV, D-pad up from the bar returns focus to the content grid (or the NavHost
-                // group fallback for non-content screens), not into limbo above the bar.
-                onExitUp = if (isTV) ({
-                    val r = activeContentFocus.registry
-                    if (r != null) r.requestRestore()
-                    else runCatching { contentFocusRequester.requestFocus() }
-                }) else null,
+                // On TV the whole-bar row is the zone's focus target; the bar itself routes D-pad up
+                // back to the content grid and left to the rail via LocalTvZoneFocus (see NowPlayingBar).
+                entryFocusRequester = if (isTV) nowPlayingEntry else null,
             )
         },
         rail = { forceExpanded ->
@@ -411,6 +429,7 @@ fun MainScreen() {
                 onDownloadsClick = { navController.navigateTopLevel(DownloadedMusicRoute) },
                 nowPlayingVisible = playerStatus.current != null,
                 onNowPlayingClick = { scope.launch { playerExpansion.animateTo(1f) } },
+                sidebarEntry = if (isTV) sidebarEntry else null,
             )
         },
         bottomBar = {
@@ -499,7 +518,32 @@ fun MainScreen() {
                 // Group the content so it's a single D-pad focus region distinct from the rail. The
                 // contentFocusRequester is the fallback target for screens without a content grid;
                 // entry focus normally goes straight to the grid (see the LaunchedEffect above).
-                .then(if (isTV) Modifier.focusRequester(contentFocusRequester).focusGroup() else Modifier)
+                // The onExit handlers make the content zone's boundaries deterministic: onExit fires
+                // only when focus actually leaves this group in a direction (i.e. at a grid edge), so
+                // Up/Down still move row-to-row inside the grid and only cross a zone at the boundary.
+                // focusProperties must precede focusGroup so onExit applies to the group's own node.
+                .then(
+                    if (isTV) Modifier
+                        .focusRequester(contentFocusRequester)
+                        .focusProperties {
+                            onExit = {
+                                when (requestedFocusDirection) {
+                                    // Left from the leftmost column → the active rail item.
+                                    FocusDirection.Left -> tvZoneFocus.focusSidebar()
+                                    // Up from the top row → the search field, but only where the shared
+                                    // search bar exists; detail screens keep Up internal.
+                                    FocusDirection.Up ->
+                                        if (onHome || onLibrary || onSearch) tvZoneFocus.focusSearch()
+                                    // Down from the bottom row → the now-playing bar, when one is shown.
+                                    FocusDirection.Down ->
+                                        if (playerStatus.current != null) tvZoneFocus.focusNowPlaying()
+                                    else -> {}
+                                }
+                            }
+                        }
+                        .focusGroup()
+                    else Modifier,
+                )
                 // Slim (bottom-bar) layout only: swipe horizontally to move between Home and Library —
                 // the same two destinations the bottom bar exposes, sliding in the same horizontal
                 // direction as their nav transition. Gated to !hasRail because the wide layout navigates

@@ -41,10 +41,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -112,8 +114,13 @@ fun AppNavRail(
     // to the full-screen player (the rail doesn't dock a panel there).
     nowPlayingVisible: Boolean = false,
     onNowPlayingClick: () -> Unit = {},
+    // TV only: the leaf focus target for the active rail item. Neighbouring zones (content, top bar,
+    // now-playing) call this directly to enter the sidebar, and the rail's onEnter redirects here too,
+    // so entering the rail always lands on the item for the current screen. Null off TV.
+    sidebarEntry: FocusRequester? = null,
 ) {
     val isTV = LocalIsTvMode.current
+    val zone = LocalTvZoneFocus.current
     // TV: rail starts collapsed and expands while focused. Non-TV: width-driven only.
     var focused by remember { mutableStateOf(false) }
     val expanded = if (isTV) focused else forceExpanded
@@ -129,8 +136,10 @@ fun AppNavRail(
         (EXPANDED_RAIL_WIDTH.value - NAV_RAIL_WIDTH.value)).coerceIn(0f, 1f)
 
     // Attached to whichever item matches the current screen; entering the rail from content (D-pad
-    // left) lands here rather than on the spatially-closest item.
-    val selectedItemFocus = remember { FocusRequester() }
+    // left) lands here rather than on the spatially-closest item. On TV this is the shared sidebarEntry
+    // so neighbouring zones can target it directly; off TV a local requester keeps existing behaviour.
+    val fallbackItemFocus = remember { FocusRequester() }
+    val selectedItemFocus = sidebarEntry ?: fallbackItemFocus
 
     Column(
         modifier = modifier
@@ -138,11 +147,13 @@ fun AppNavRail(
             .width(railWidth)
             //.glassEffect(MaterialTheme.colorScheme.surfaceContainerLow)
             // Entering the rail (D-pad left from content) lands on the item matching the current
-            // screen. focusProperties must precede focusGroup so onEnter applies to the rail's own
-            // focus target rather than its child items.
+            // screen; exiting right hands focus back to the content zone (its restore/first item),
+            // never to the top or player bars. focusProperties must precede focusGroup so onEnter/onExit
+            // apply to the rail's own focus target rather than its child items.
             .then(
                 if (isTV) Modifier.focusProperties {
                     onEnter = { runCatching { selectedItemFocus.requestFocus() } }
+                    onExit = { if (requestedFocusDirection == FocusDirection.Right) zone?.restoreContent() }
                 } else Modifier,
             )
             // Isolate the rail as its own D-pad focus group so content focus never steps into it.

@@ -4,17 +4,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -22,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.components.home.HomeShelf
+import net.mhanak.yama.ui.components.interaction.ContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.LocalContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.RegisterActiveContentFocus
 import net.mhanak.yama.ui.home.activeHomeBlocks
 import net.mhanak.yama.ui.home.homeConfigKey
 import net.mhanak.yama.ui.platform.PullToRefreshContainer
@@ -67,6 +74,14 @@ fun HomeView(
     val key = remember(source) { homeConfigKey(source) }
     val blocks = remember(source, reachable) { activeHomeBlocks(source) }
 
+    // TV D-pad focus: one registry for the whole Home screen (shelf cards register per-item via
+    // contentFocusItem). savedKey is rememberSaveable so the card the user left on is restored after a
+    // navigate-to-detail → back round-trip; a cold entry lands on the first shelf's first card. Mirrors
+    // GridView/ListView so Home is no longer the one content screen that falls back to the group. See TvFocus.kt.
+    val savedFocusKey = rememberSaveable { mutableStateOf<String?>(null) }
+    val focusRegistry = remember { ContentFocusRegistry(savedFocusKey) }
+    RegisterActiveContentFocus(focusRegistry)
+
     // Fast path on the store: a no-op when the data already matches this source + block set (the
     // navigate-back case), so returning to Home is instant. Reloads when the block set changes.
     LaunchedEffect(key, blocks) { store.load(appContainer, key, blocks, force = false) }
@@ -90,10 +105,14 @@ fun HomeView(
                 if (store.isLoading) CircularProgressIndicator()
             }
         } else {
+            CompositionLocalProvider(LocalContentFocusRegistry provides focusRegistry) {
             Column(
                 modifier = Modifier
                     .glassSource(zIndex = 1f)
                     .fillMaxSize()
+                    // Group the shelves as one D-pad region (parity with GridView); left from a shelf's
+                    // first card then propagates out to the content-zone left-exit → sidebar.
+                    .focusGroup()
                     .verticalScroll(rememberScrollState())
                     .padding(top = topContentPadding + 8.dp, bottom = bottomContentPadding + 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -104,12 +123,16 @@ fun HomeView(
                         HomeShelf(
                             title = kind.title,
                             data = data,
+                            // Namespaced per shelf so ids that recur across shelves (an album in both
+                            // "recently added" and "random") don't collide in the shared registry.
+                            focusKeyPrefix = kind.name,
                             onSeeMore = { onNavigate(HomeBlockRoute(kind.name)) },
                             onAlbumClick = { onNavigate(AlbumDetailRoute(it)) },
                             onGenreClick = { onNavigate(GenreDetailRoute(it)) },
                         )
                     }
                 }
+            }
             }
         }
     }

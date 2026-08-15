@@ -25,10 +25,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import net.mhanak.yama.LocalIsTvMode
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
 
 // How long a fatal-error banner stays up before auto-hiding. The underlying [error] stays in the
 // player status until the next command overwrites it, so this is purely how long the user sees it.
@@ -49,11 +52,18 @@ fun BoxScope.PlaybackErrorBanner(error: String?, peekHeight: Dp, onRetry: () -> 
     // Latch the latest non-null error into a transient visible message. Keyed on the error string, so a
     // new fault re-shows the banner (and resets the auto-hide timer) while recomposition doesn't.
     var shown by remember { mutableStateOf<String?>(null) }
+    // TV: if the user D-pad-navigated onto the Retry button and the banner then auto-hides, focus would
+    // drop into limbo. Track whether Retry holds focus and, on auto-hide, hand focus back to the content.
+    val isTV = LocalIsTvMode.current
+    val zone = LocalTvZoneFocus.current
+    var retryFocused by remember { mutableStateOf(false) }
     LaunchedEffect(error) {
         if (error != null) {
             shown = error
             delay(ERROR_VISIBLE_MS)
+            val wasFocused = retryFocused
             shown = null
+            if (isTV && wasFocused) zone?.restoreContent()
         }
     }
 
@@ -83,7 +93,10 @@ fun BoxScope.PlaybackErrorBanner(error: String?, peekHeight: Dp, onRetry: () -> 
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { shown = null; onRetry() }) { Text("Retry") }
+                TextButton(
+                    onClick = { shown = null; onRetry() },
+                    modifier = Modifier.onFocusChanged { retryFocused = it.isFocused },
+                ) { Text("Retry") }
             }
         }
     }

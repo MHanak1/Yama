@@ -39,12 +39,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.MutableStateFlow
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
+import net.mhanak.yama.ui.components.interaction.tvFocusContainer
 import net.mhanak.yama.ui.theme.glassEffect
 import net.mhanak.yama.ui.theme.glassSource
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
@@ -79,6 +83,11 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
     val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     val sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
 
+    // TV: pull D-pad focus into the sheet on open (onto "This device") and trap it there; restore
+    // content focus when it closes. See tvFocusContainer / TvFocus.kt.
+    val zone = LocalTvZoneFocus.current
+    val entryFocus = remember { FocusRequester() }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
@@ -90,7 +99,8 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .glassEffect(sheetContainerColor, sheetShape)
-                .glassSource(zIndex = 3f),
+                .glassSource(zIndex = 3f)
+                .tvFocusContainer(entry = entryFocus, onDismissRestore = { zone?.restoreContent() }),
         ) {
             Box(
                 Modifier
@@ -130,6 +140,7 @@ fun PlaybackTargetSheet(onDismiss: () -> Unit) {
                     onLongClick = if (viewedTarget != null) {
                         { showLocalTransferDialog = true }
                     } else null,
+                    modifier = Modifier.focusRequester(entryFocus),
                 )
 
                 targets.forEach { target ->
@@ -219,6 +230,7 @@ private fun TargetRow(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     subtitle: String? = null,
+    modifier: Modifier = Modifier,
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     ListItem(
@@ -231,7 +243,9 @@ private fun TargetRow(
             { Icon(Icons.Filled.Check, contentDescription = "Selected", tint = tint) }
         } else null,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        // Caller's modifier (e.g. the entry FocusRequester) precedes combinedClickable so it resolves
+        // to the clickable node.
+        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
     )
 }
 
