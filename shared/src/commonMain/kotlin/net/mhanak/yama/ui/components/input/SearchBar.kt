@@ -1,6 +1,7 @@
 package net.mhanak.yama.ui.components.input
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,6 +40,11 @@ import net.mhanak.yama.ui.theme.LocalUiOpacity
  * Compact pill-shaped search field. Built on [BasicTextField] (rather than M3's `OutlinedTextField`,
  * which forces a 56.dp min height and won't vertically center when shrunk) so the content stays
  * centered at an arbitrary [height] and the corners are fully rounded.
+ *
+ * When [onClick] is non-null the bar renders as a *read-only shortcut* instead: a focusable, clickable
+ * pill that looks identical but is not a text field — so it opens no keyboard and, crucially, TV D-pad
+ * *select* fires [onClick] (used by Home's field, which just opens the dedicated search screen). A real
+ * text field would trap D-pad focus and open the IME with no way to trigger navigation.
  */
 @Composable
 fun SearchBar(
@@ -50,9 +56,32 @@ fun SearchBar(
     // TV only: called when the user presses D-pad down while the search bar is focused. Return true
     // to consume the event (focus was redirected), false to fall through to the default moveFocus.
     onFocusDown: (() -> Boolean)? = null,
+    // When set, render a read-only shortcut (no text field) that invokes this on tap / D-pad select.
+    onClick: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
+    if (onClick != null) {
+        Row(
+            modifier = modifier
+                .height(height)
+                .clip(RoundedCornerShape(percent = 50))
+                .background(colors.secondaryContainer.copy(alpha = LocalUiOpacity.current))
+                .clickable(onClick = onClick)
+                .padding(start = 14.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null, tint = colors.onSurfaceVariant)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                placeholder,
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        return
+    }
     BasicTextField(
         value = query,
         onValueChange = onQueryChange,

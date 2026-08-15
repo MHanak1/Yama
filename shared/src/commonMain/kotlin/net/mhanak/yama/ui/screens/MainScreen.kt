@@ -3,6 +3,7 @@ package net.mhanak.yama.ui.screens
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -145,6 +146,8 @@ private fun NavDestination?.topLevelIndex(): Int? = when {
     else -> null
 }
 
+private fun NavDestination?.isSearch(): Boolean = this?.hasRoute<SearchRoute>() == true
+
 // Slide between top-level destinations (Home/Library/Settings) — later destinations enter from
 // the trailing edge. [vertical] (true on rail layouts) slides up/down to mirror the wide library
 // tab switch; otherwise it slides left/right. Returns null when either side is a detail screen,
@@ -153,6 +156,15 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.topLevelEnter(vert
     val from = initialState.destination.topLevelIndex() ?: return null
     val to = targetState.destination.topLevelIndex() ?: return null
     if (from == to) return null
+    // Search shares the hoisted search bar with Home/Library and animates as an overlay *on top* of
+    // them (both sides being top-level here guarantees we never override a detail screen's slide-over):
+    //  - Entering Search: unfold the body in from under the stationary bar (fade + small downward
+    //    settle), the same way from Home or Library — no left/right direction.
+    //  - Leaving Search: the revealed Home/Library sits perfectly still, so it gets *no* enter motion.
+    if (targetState.destination.isSearch()) {
+        return fadeIn(tween(DETAIL_DURATION)) + slideInVertically(tween(DETAIL_DURATION)) { d -> -d / 12 }
+    }
+    if (initialState.destination.isSearch()) return EnterTransition.None
     val dir = if (to > from) 1 else -1
     val fade = fadeIn(tween(DETAIL_DURATION))
     return if (vertical) slideInVertically(tween(DETAIL_DURATION)) { d -> dir * d } + fade
@@ -163,6 +175,15 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.topLevelExit(verti
     val from = initialState.destination.topLevelIndex() ?: return null
     val to = targetState.destination.topLevelIndex() ?: return null
     if (from == to) return null
+    // Mirror of topLevelEnter (Search is the only moving element; Home/Library stay put):
+    //  - Leaving Search: fold the body out on top (fade + settle up); the screen beneath is stationary.
+    //  - Entering Search over Home/Library: hold the outgoing screen at full opacity, unmoved, until the
+    //    transition ends (a delayed snap, not a fade), so it reads as a still backdrop under the search
+    //    body rather than dimming away.
+    if (initialState.destination.isSearch()) {
+        return fadeOut(tween(DETAIL_DURATION)) + slideOutVertically(tween(DETAIL_DURATION)) { d -> -d / 12 }
+    }
+    if (targetState.destination.isSearch()) return fadeOut(snap(delayMillis = DETAIL_DURATION))
     val dir = if (to > from) 1 else -1
     val fade = fadeOut(tween(DETAIL_DURATION))
     return if (vertical) slideOutVertically(tween(DETAIL_DURATION)) { d -> -dir * d } + fade
@@ -190,8 +211,14 @@ fun MainScreen() {
     var query by remember { mutableStateOf("") }
     var favoritesOnly by remember { mutableStateOf(false) }
     var showTargets by remember { mutableStateOf(false) }
+    // The global-search query, hoisted here (separate from the library's inline [query] filter) so the
+    // shared top bar owns the field across Home → Search and only the body swaps beneath it. Persists
+    // while browsing away from Search so returning restores the last search rather than a blank field.
+    var searchQuery by remember { mutableStateOf("") }
     val isTV = LocalIsTvMode.current
     val contentFocusRequester = remember { FocusRequester() }
+    // Focus target handed to the shared bar's Search field so the keyboard opens on entering Search.
+    val searchFocusRequester = remember { FocusRequester() }
     // The active screen's grid registers its ContentFocusRegistry here. The focus effect below
     // calls registry.requestRestore() to land on the saved leaf item directly (no group redirect,
     // no focusRestorer, no global flag). Falls back to contentFocusRequester for non-content
@@ -301,12 +328,14 @@ fun MainScreen() {
         }.first { it >= Lifecycle.State.RESUMED }
         // Request focus on the exact previously-focused item via ContentFocusRegistry.requestRestore()
         // (direct leaf requestFocus — no group redirect, no focusRestorer, no global flag). Falls
-        // back to the NavHost group for screens with no content grid (Home/Settings).
+        // back to the NavHost group for screens with no content grid (Home/Settings). Search is the
+        // exception: its registry exists (so D-pad-down reaches results) but entry focus belongs on the
+        // search field so the keyboard opens and the user can type immediately.
         val registry = activeContentFocus.registry
-        if (registry != null) {
-            registry.requestRestore()
-        } else {
-            runCatching { contentFocusRequester.requestFocus() }
+        when {
+            onSearch -> runCatching { searchFocusRequester.requestFocus() }
+            registry != null -> registry.requestRestore()
+            else -> runCatching { contentFocusRequester.requestFocus() }
         }
     }
 
@@ -547,9 +576,12 @@ fun MainScreen() {
                 )
             }
             composable<SearchRoute> {
+                // Body only — the search field lives in the hoisted HomeLibraryTopBar below, so this
+                // reserves the bar's height at the top and reads the hoisted [searchQuery].
                 SearchView(
-                    onMenuClick = onMenuClick,
+                    query = searchQuery,
                     onNavigate = { navController.navigate(it) { launchSingleTop = true } },
+                    topContentPadding = sharedBarHeight,
                     bottomContentPadding = bottomInset,
                 )
             }
@@ -669,17 +701,22 @@ fun MainScreen() {
         // the favourites button and (narrow) segmented tab row animate in/out via AnimatedVisibility
         // rather than being replaced. Shown only on these two destinations; every other screen keeps its
         // own top bar inside the NavHost.
-        if (onHome || onLibrary) {
+        if (onHome || onLibrary || onSearch) {
             HomeLibraryTopBar(
                 onLibrary = onLibrary,
+                searchActive = onSearch,
+                searchFocusRequester = searchFocusRequester,
                 onMenuClick = onMenuClick,
-                query = query,
-                onQueryChange = { query = it },
+                // On Search the field drives the global-search query; on Library it drives the inline
+                // filter. (On Home it's read-only, so these are unused there.)
+                query = if (onSearch) searchQuery else query,
+                onQueryChange = if (onSearch) ({ searchQuery = it }) else ({ query = it }),
                 searchPlaceholder = if (onLibrary) "Search ${selectedTab.label.lowercase()}" else "Search",
-                // Home's field is a read-only shortcut to the search screen; Library's is an inline filter.
+                // Home's field is a read-only shortcut to the search screen; Library/Search are live inputs.
                 onSearchTap = if (onHome) ({ navController.navigateTopLevel(SearchRoute) }) else null,
-                // TV: D-pad down from the search field drops into the active library grid.
-                onSearchFocusDown = if (isTV && onLibrary) ({
+                // TV: D-pad down from the search field drops into the active library grid or the search
+                // results (both register their items with the active ContentFocusRegistry).
+                onSearchFocusDown = if (isTV && (onLibrary || onSearch)) ({
                     val r = activeContentFocus.registry
                     if (r != null) { r.requestRestore(); true } else false
                 }) else null,

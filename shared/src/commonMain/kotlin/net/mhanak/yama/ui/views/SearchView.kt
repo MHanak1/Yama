@@ -1,21 +1,14 @@
 package net.mhanak.yama.ui.views
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -23,43 +16,39 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.ui.components.card.ItemCard
 import net.mhanak.yama.ui.components.image.CardImage
-import net.mhanak.yama.ui.components.input.SearchBar
+import net.mhanak.yama.ui.components.interaction.ContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.LocalContentFocusRegistry
+import net.mhanak.yama.ui.components.interaction.RegisterActiveContentFocus
+import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.ui.components.library.TrackListCard
 import net.mhanak.yama.ui.components.library.adaptiveCardWidth
 import net.mhanak.yama.ui.screens.AlbumDetailRoute
 import net.mhanak.yama.ui.screens.ArtistDetailRoute
 import net.mhanak.yama.ui.screens.GenreDetailRoute
 import net.mhanak.yama.ui.screens.PlaylistDetailRoute
-import net.mhanak.yama.ui.theme.glassEffect
+import net.mhanak.yama.ui.theme.glassSource
 import net.mhanak.yama.util.fuzzyFilterSort
 import net.mhanak.yama.util.fuzzyScore
 import org.jetbrains.compose.resources.painterResource
@@ -76,51 +65,53 @@ private const val CARD_LIMIT = 12
 private const val TRACK_FETCH = 30
 
 /**
- * Global search: one query, results across tracks, albums, artists, genres and playlists at once,
- * laid out as stacked sections (tracks as full rows, the rest as horizontal card shelves).
+ * Global search *body*: one query, results across tracks, albums, artists, genres and playlists at
+ * once, laid out as stacked sections (tracks as full rows, the rest as horizontal card shelves).
+ *
+ * The search field itself lives in the shared, hoisted [net.mhanak.yama.ui.components.navigation.HomeLibraryTopBar]
+ * (rendered once in [net.mhanak.yama.ui.screens.MainScreen] and overlaid above this body), so the same
+ * bar element persists across Home → Search and only this body animates in beneath it. This view is
+ * therefore given the live [query] rather than owning it, and reserves [topContentPadding] for the bar.
  *
  * Tracks are fetched from the active source (server-backed, with [net.mhanak.yama.coordinators.CatalogReader]'s
  * offline fallback) on a debounced query, then re-ranked client-side for ordering consistency. The
  * other types filter the already-loaded browse flows in memory via [fuzzyFilterSort] — the same data
  * the library grid tabs read, so nothing extra is fetched.
- *
- * [onMenuClick] is non-null only on the slim layout (opens the modal nav rail), mirroring [HomeView].
  */
 @Composable
 fun SearchView(
-    onMenuClick: (() -> Unit)?,
+    query: String,
     onNavigate: (Any) -> Unit,
     modifier: Modifier = Modifier,
+    topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
 ) {
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
 
-    var query by remember { mutableStateOf("") }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
-    // Debounced, source-backed track search. collectLatest cancels the in-flight delay+fetch when the
-    // query changes again, so the 250ms delay *is* the debounce — a fresh keystroke restarts it. Keyed
-    // on [source] so switching backends re-runs the current query against the new one.
-    LaunchedEffect(source) {
-        snapshotFlow { query.trim() }.collectLatest { q ->
-            if (q.isBlank()) {
-                tracks = emptyList()
-                return@collectLatest
-            }
-            delay(250)
-            val fetched = runCatching {
-                appContainer.catalog.getAllTracks(
-                    limit = TRACK_FETCH, offset = 0,
-                    sortBy = TrackSortOrder.Alphabetical, searchTerm = q,
-                )
-            }.getOrDefault(emptyList())
-            // Re-rank (don't filter) the backend's matches so ordering is consistent with the fuzzy
-            // in-memory sections; the server decided recall, we only reorder.
-            tracks = fetched.sortedByDescending { t ->
-                (listOf(t.name, t.album ?: "") + (t.artists ?: emptyList()))
-                    .mapNotNull { fuzzyScore(q, it) }.maxOrNull() ?: -1
-            }
+    // Debounced, source-backed track search. The effect is keyed on [query], so a fresh keystroke
+    // cancels the previous run mid-delay and restarts it — the 250ms delay *is* the debounce. Also
+    // keyed on [source] so switching backends re-runs the current query against the new one.
+    LaunchedEffect(source, query) {
+        val q = query.trim()
+        if (q.isBlank()) {
+            tracks = emptyList()
+            return@LaunchedEffect
+        }
+        delay(250)
+        val fetched = runCatching {
+            appContainer.catalog.getAllTracks(
+                limit = TRACK_FETCH, offset = 0,
+                sortBy = TrackSortOrder.Alphabetical, searchTerm = q,
+            )
+        }.getOrDefault(emptyList())
+        // Re-rank (don't filter) the backend's matches so ordering is consistent with the fuzzy
+        // in-memory sections; the server decided recall, we only reorder.
+        tracks = fetched.sortedByDescending { t ->
+            (listOf(t.name, t.album ?: "") + (t.artists ?: emptyList()))
+                .mapNotNull { fuzzyScore(q, it) }.maxOrNull() ?: -1
         }
     }
 
@@ -149,41 +140,29 @@ fun SearchView(
     val allEmpty = trackMatches.isEmpty() && albumSection.items.isEmpty() && artistSection.items.isEmpty() &&
         genreSection.items.isEmpty() && playlistSection.items.isEmpty()
 
-    val focusRequester = remember { FocusRequester() }
-    // Auto-focus the field on entry so the keyboard opens and the user can type immediately.
-    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    // Padding that reserves the hoisted search bar's height at the top and the mini-player at the bottom.
+    val edgePadding = PaddingValues(top = topContentPadding, bottom = bottomContentPadding)
 
-    Scaffold(
-        modifier = modifier,
-        contentWindowInsets = WindowInsets.systemBars.only(WindowInsetsSides.Vertical),
-        topBar = {
-            Box(Modifier.fillMaxWidth().glassEffect(MaterialTheme.colorScheme.surface)) {
-                Row(
-                    modifier = Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (onMenuClick != null) {
-                        IconButton(onClick = onMenuClick) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    }
-                    SearchBar(
-                        query = query,
-                        onQueryChange = { query = it },
-                        placeholder = "Search",
-                        modifier = Modifier.weight(1f).focusRequester(focusRequester),
-                    )
-                }
-            }
-        },
-    ) { innerPadding ->
-        val listPadding = PaddingValues(
-            top = innerPadding.calculateTopPadding() + 8.dp,
-            bottom = bottomContentPadding + 16.dp,
-        )
+    // TV D-pad: results register per-item FocusRequesters here (see [contentFocusItem]) so D-pad-down
+    // from the hoisted search bar can land focus on the first result. The shared bar drives this via
+    // MainScreen's onSearchFocusDown → registry.requestRestore(). Off TV this is inert.
+    val savedFocusKey = rememberSaveable { mutableStateOf<String?>(null) }
+    val focusRegistry = remember { ContentFocusRegistry(savedFocusKey) }
+    RegisterActiveContentFocus(focusRegistry)
+
+    CompositionLocalProvider(LocalContentFocusRegistry provides focusRegistry) {
+    // Opaque screen background (matching a normal screen's base) so the results/hint stay readable
+    // while the transition holds the Home/Library screen stationary behind this one — without it the
+    // transparent body would render over that still backdrop. glassSource makes the hoisted bar frost
+    // this content as it scrolls under it, the same as Home/Library (zIndex=1, above the app backdrop).
+    Box(
+        modifier.fillMaxSize()
+            .glassSource(zIndex = 1f)
+            .background(MaterialTheme.colorScheme.background),
+    ) {
         when {
-            query.isBlank() -> HintBox(innerPadding, "Search tracks, albums, artists and more")
-            allEmpty -> NoSearchResults(query = query, contentPadding = innerPadding)
+            query.isBlank() -> HintBox(edgePadding, "Search tracks, albums, artists and more")
+            allEmpty -> NoSearchResults(query = query, contentPadding = edgePadding)
             else -> BoxWithConstraints(Modifier.fillMaxSize()) {
                 val cardWidth = adaptiveCardWidth(maxWidth)
 
@@ -199,6 +178,7 @@ fun SearchView(
                                 tracks = trackMatches,
                                 index = index,
                                 player = appContainer.playback.viewed,
+                                focusKey = "track_${track.id}",
                                 modifier = Modifier.padding(horizontal = 16.dp),
                                 image = { CardImage(imageUrl = track.imageUrl) },
                             )
@@ -209,6 +189,7 @@ fun SearchView(
                         item(key = "r_artists") {
                             CardRow(artistSection.items, resetKey = query, key = { it.id }) { artist ->
                                 SearchCard(
+                                    focusKey = "artist_${artist.id}",
                                     title = artist.name,
                                     subtitle = null,
                                     imageUrl = artist.imageUrl,
@@ -225,6 +206,7 @@ fun SearchView(
                         item(key = "r_albums") {
                             CardRow(albumSection.items, resetKey = query, key = { it.id }) { album ->
                                 SearchCard(
+                                    focusKey = "album_${album.id}",
                                     title = album.name,
                                     subtitle = album.albumArtist,
                                     imageUrl = album.imageUrl,
@@ -241,6 +223,7 @@ fun SearchView(
                         item(key = "r_genres") {
                             CardRow(genreSection.items, resetKey = query, key = { it.id }) { genre ->
                                 SearchCard(
+                                    focusKey = "genre_${genre.id}",
                                     title = genre.name,
                                     subtitle = null,
                                     imageUrl = genre.imageUrl,
@@ -257,6 +240,7 @@ fun SearchView(
                         item(key = "r_playlists") {
                             CardRow(playlistSection.items, resetKey = query, key = { it.id }) { playlist ->
                                 SearchCard(
+                                    focusKey = "playlist_${playlist.id}",
                                     title = playlist.name,
                                     subtitle = null,
                                     imageUrl = playlist.imageUrl,
@@ -275,13 +259,17 @@ fun SearchView(
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = listPadding,
+                    contentPadding = PaddingValues(
+                        top = topContentPadding + 8.dp,
+                        bottom = bottomContentPadding + 16.dp,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     ordered.forEach { it.content(this) }
                 }
             }
         }
+    }
     }
 }
 
@@ -339,9 +327,12 @@ private fun <T> CardRow(
     }
 }
 
-/** A fixed-width result card — mirrors HomeShelf's ShelfCard so search matches the library grid look. */
+/** A fixed-width result card — mirrors HomeShelf's ShelfCard so search matches the library grid look.
+ *  [focusKey] registers the card with the screen's [ContentFocusRegistry] for TV D-pad navigation
+ *  (contentFocusItem must precede the clickable so the focus target and click surface are one node). */
 @Composable
 private fun SearchCard(
+    focusKey: String,
     title: String,
     subtitle: String?,
     imageUrl: String?,
@@ -354,7 +345,7 @@ private fun SearchCard(
         title = title,
         subtitle = subtitle,
         modifier = Modifier.width(width),
-        contentModifier = Modifier.clickable(onClick = onClick),
+        contentModifier = Modifier.contentFocusItem(focusKey).clickable(onClick = onClick),
         image = { CardImage(imageUrl = imageUrl, imageHash = imageHash, imageFallback = fallback) },
     )
 }
