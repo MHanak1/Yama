@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.plus
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
@@ -52,6 +53,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -73,6 +76,7 @@ import net.mhanak.yama.ui.components.navigation.AdaptiveNavigationLayout
 import net.mhanak.yama.ui.components.navigation.AppBottomBar
 import net.mhanak.yama.ui.components.navigation.AppNavRail
 import net.mhanak.yama.ui.components.navigation.BottomBarDestination
+import net.mhanak.yama.ui.components.navigation.HomeLibraryTopBar
 import net.mhanak.yama.ui.platform.KeepScreenOn
 import net.mhanak.yama.ui.components.interaction.ActiveContentFocus
 import net.mhanak.yama.ui.components.interaction.LocalActiveContentFocus
@@ -88,7 +92,10 @@ import net.mhanak.yama.ui.components.interaction.resetIdleOn
 import net.mhanak.yama.ui.player.FullPlayer
 import net.mhanak.yama.ui.player.NowPlayingBar
 import net.mhanak.yama.ui.player.PlaybackErrorBanner
+import net.mhanak.yama.ui.player.PlaybackTargetSheet
 import net.mhanak.yama.ui.player.VolumeIndicator
+import net.mhanak.yama.media.playback.RemotePlaybackProvider
+import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.LocalIsTvMode
 import androidx.compose.foundation.layout.statusBarsPadding
 import net.mhanak.yama.ui.components.library.PaginatedTrackList
@@ -177,6 +184,12 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
     val navController = rememberNavController()
     var selectedTab by remember { mutableStateOf(LibraryTab.Albums) }
+    // Hoisted state for the shared Home/Library top bar (rendered as an overlay in the content lambda
+    // below): the library's inline search query, its favourites filter, and the cast target-picker
+    // trigger. They live here so the bar can persist — stationary — across the Home ⇄ Library switch.
+    var query by remember { mutableStateOf("") }
+    var favoritesOnly by remember { mutableStateOf(false) }
+    var showTargets by remember { mutableStateOf(false) }
     val isTV = LocalIsTvMode.current
     val contentFocusRequester = remember { FocusRequester() }
     // The active screen's grid registers its ContentFocusRegistry here. The focus effect below
@@ -314,6 +327,15 @@ fun MainScreen() {
         }
     }
 
+    // Go to Home. Pop to HomeRoute if it's already in the back stack (e.g., after opening an album from
+    // a Home shelf) rather than navigateTopLevel — whose saveState+restoreState would restore that saved
+    // detail screen instead of the Home landing page. Mirrors onTabClick's handling for the library.
+    val goHome: () -> Unit = {
+        if (!navController.popBackStack(HomeRoute, inclusive = false)) {
+            navController.navigateTopLevel(HomeRoute)
+        }
+    }
+
     Box(Modifier.fillMaxSize().resetIdleOn(idleMonitor)) {
     // Provided to the content (NavHost) subtree only — overlays drawn below (full player, sheets)
     // sit outside it, so their lists never register as the screen's entry-focus target.
@@ -351,7 +373,7 @@ fun MainScreen() {
                     if (navController.currentBackStackEntry?.destination?.hasRoute<HomeRoute>() == true) {
                         scope.launch { appContainer.homeContent.refreshActive(appContainer) }
                     } else {
-                        navController.navigateTopLevel(HomeRoute)
+                        goHome()
                     }
                 },
                 onTabClick = onTabClick,
@@ -376,7 +398,7 @@ fun MainScreen() {
                             if (navController.currentBackStackEntry?.destination?.hasRoute<HomeRoute>() == true) {
                                 scope.launch { appContainer.homeContent.refreshActive(appContainer) }
                             } else {
-                                navController.navigateTopLevel(HomeRoute)
+                                goHome()
                             }
                         }
                         BottomBarDestination.Library -> {
@@ -434,6 +456,13 @@ fun MainScreen() {
         val startDestination = remember {
             if (AppPreferences.launchDestination == LaunchDestination.Library) LibraryRoute else HomeRoute
         }
+        // Height reserved for the shared, stationary Home/Library top bar (built below). Measured from
+        // the bar itself — it grows on narrow Library as the segmented tab row expands in — and seeded
+        // with a status-bar + app-bar estimate so the first Home/Library frame doesn't jump.
+        val density = LocalDensity.current
+        val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        var sharedBarHeight by remember { mutableStateOf(statusTop + 64.dp) }
+        Box(Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
             startDestination = startDestination,
@@ -462,7 +491,7 @@ fun MainScreen() {
                                             navController.navigateTopLevel(LibraryRoute)
                                         }
                                     } else if (total >= threshold && onLibrary) {
-                                        navController.navigateTopLevel(HomeRoute)
+                                        goHome()
                                     }
                                 },
                             ) { _, dragAmount -> total += dragAmount }
@@ -476,8 +505,8 @@ fun MainScreen() {
         ) {
             composable<HomeRoute> {
                 HomeView(
-                    onMenuClick = onMenuClick,
                     onNavigate = { navController.navigate(it) { launchSingleTop = true } },
+                    topContentPadding = sharedBarHeight,
                     bottomContentPadding = bottomInset,
                 )
             }
@@ -498,15 +527,23 @@ fun MainScreen() {
             }
             composable<LibraryRoute> {
                 LibraryView(
-                    // Rail-driven tab on medium/wide; self-managed segmented switcher on slim.
-                    externalTab = if (hasRail) selectedTab else null,
-                    onMenuClick = onMenuClick,
+                    selectedTab = selectedTab,
+                    // Narrow reports pager swipes back up; wide is rail-driven so this is unused there.
+                    onTabChanged = { selectedTab = it },
+                    // Swipeable pager on slim; rail-driven vertical AnimatedContent on medium/wide.
+                    usePager = !hasRail,
+                    query = query,
+                    favoritesOnly = favoritesOnly,
+                    topContentPadding = sharedBarHeight,
                     bottomContentPadding = bottomInset,
                     onAlbumClick = { albumId -> navController.navigate(AlbumDetailRoute(albumId)) { launchSingleTop = true } },
                     onArtistClick = { artistId -> navController.navigate(ArtistDetailRoute(artistId)) { launchSingleTop = true } },
                     onAlbumArtistClick = { artistId -> navController.navigate(ArtistDetailRoute(artistId)) { launchSingleTop = true } },
                     onGenreClick = { genreId -> navController.navigate(GenreDetailRoute(genreId)) { launchSingleTop = true } },
                     onPlaylistClick = { playlistId -> navController.navigate(PlaylistDetailRoute(playlistId)) { launchSingleTop = true } },
+                    // Slim: swiping right past the leftmost tab (which the pager can't page) pops Home,
+                    // mirroring the Home → Library swipe handled by the top-level detector above.
+                    onSwipeToHome = goHome,
                 )
             }
             composable<SearchRoute> {
@@ -626,6 +663,42 @@ fun MainScreen() {
                 )
             }
         }
+
+        // The single Home/Library top bar, hoisted out of the NavHost and overlaid above the content so
+        // it stays stationary while only the body slides between Home and Library. It morphs by route:
+        // the favourites button and (narrow) segmented tab row animate in/out via AnimatedVisibility
+        // rather than being replaced. Shown only on these two destinations; every other screen keeps its
+        // own top bar inside the NavHost.
+        if (onHome || onLibrary) {
+            HomeLibraryTopBar(
+                onLibrary = onLibrary,
+                onMenuClick = onMenuClick,
+                query = query,
+                onQueryChange = { query = it },
+                searchPlaceholder = if (onLibrary) "Search ${selectedTab.label.lowercase()}" else "Search",
+                // Home's field is a read-only shortcut to the search screen; Library's is an inline filter.
+                onSearchTap = if (onHome) ({ navController.navigateTopLevel(SearchRoute) }) else null,
+                // TV: D-pad down from the search field drops into the active library grid.
+                onSearchFocusDown = if (isTV && onLibrary) ({
+                    val r = activeContentFocus.registry
+                    if (r != null) { r.requestRestore(); true } else false
+                }) else null,
+                favoritesOnly = favoritesOnly,
+                onToggleFavorites = { favoritesOnly = !favoritesOnly },
+                canFavoriteFilter = (appContainer.activeMusicSource as? FavoriteCapable)
+                    ?.supportsFavorites(selectedTab.favoritableKind) == true,
+                canCast = appContainer.activeMusicSource is RemotePlaybackProvider,
+                isCasting = appContainer.playback.viewedTarget != null,
+                onCastClick = { showTargets = true },
+                showTabs = onLibrary && !hasRail,
+                selectedTab = selectedTab,
+                onTabSelected = onTabClick,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .onSizeChanged { sharedBarHeight = with(density) { it.height.toDp() } },
+            )
+        }
+        }
     }
     }
 
@@ -679,5 +752,11 @@ fun MainScreen() {
             peekHeight = playerPeek,
             onRetry = { player.play() },
         )
+
+        // Cast / "Play on" target picker, opened from the shared Home/Library top bar's cast button.
+        // Hoisted here (with the bar's state) so it no longer lives inside either view.
+        if (showTargets) {
+            PlaybackTargetSheet(onDismiss = { showTargets = false })
+        }
     }
 }
