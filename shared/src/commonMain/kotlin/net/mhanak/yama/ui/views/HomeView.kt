@@ -88,6 +88,23 @@ fun HomeView(
     // navigate-back case), so returning to Home is instant. Reloads when the block set changes.
     LaunchedEffect(key, blocks) { store.load(appContainer, key, blocks, force = false) }
 
+    // The local-files catalog is built by a background scan that usually finishes *after* Home has
+    // already loaded its (empty) shelves, so — unlike the reactive Library view — Home would otherwise
+    // stay blank until a manual refresh. Force one reload each time a local scan completes. Gated to the
+    // local source so remote sources don't reload their shelves (a network round trip) on every refresh;
+    // skipped while the store is already reloading so pull-to-refresh isn't doubled.
+    if (source === appContainer.localSource) {
+        LaunchedEffect(source, key, blocks) {
+            var wasScanning = source.isRefreshing.value
+            source.isRefreshing.collect { scanning ->
+                if (wasScanning && !scanning && !store.isLoading) {
+                    store.load(appContainer, key, blocks, force = true)
+                }
+                wasScanning = scanning
+            }
+        }
+    }
+
     PullToRefreshContainer(
         // Show the pull indicator only for reloads over existing content; a first load (empty data)
         // gets the centered spinner below instead, so the two never stack.

@@ -78,13 +78,21 @@ fun SourceSwitcher(modifier: Modifier = Modifier, collapsed: Boolean = false, on
     var expanded by remember { mutableStateOf(false) }
 
     val activeSource = appContainer.activeMusicSource
+    // The local source offers an implicit account, but it isn't a usable identity until the user has
+    // pointed it at a folder — so hide it from the switcher while unconfigured (unless it's somehow the
+    // active source, in which case keep it visible rather than stranding the user with no way back).
+    val localSource = appContainer.localSource
+    val localFolders by localSource.folders.collectAsState()
     // Build the flat account list from all sources in registration order. Each entry pairs an
     // account with its owning source so a click can call selectAccount on the right source.
-    val allEntries: List<Pair<MusicSource, SourceAccount>> = remember(appContainer.sources) {
-        appContainer.sources.flatMap { source ->
-            (source as? AccountedSource)?.accounts.orEmpty().map { source to it }
+    val allEntries: List<Pair<MusicSource, SourceAccount>> =
+        remember(appContainer.sources, localFolders.isEmpty(), activeSource) {
+            appContainer.sources
+                .filter { it !== localSource || localFolders.isNotEmpty() || it === activeSource }
+                .flatMap { source ->
+                    (source as? AccountedSource)?.accounts.orEmpty().map { source to it }
+                }
         }
-    }
     val activeAccountedSource = activeSource as? AccountedSource
     val activeAccount = activeAccountedSource?.accounts?.firstOrNull { it.id == activeAccountedSource.currentAccountId }
 

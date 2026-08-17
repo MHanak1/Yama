@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.mhanak.yama.getAppDataDir
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Artist
@@ -41,6 +43,16 @@ import java.security.MessageDigest
  * IDs are stable content hashes (track = hash(path), album = hash(albumArtist+album), artist/genre =
  * hash(name)) so detail navigation, favourites and queue restore survive rescans.
  */
+
+/**
+ * Progress of the tag-reading phase of a [LocalSource] scan: [done] of [total] files ingested. Used to
+ * drive a determinate first-run scanning indicator. [fraction] is null (→ indeterminate) when [total]
+ * is 0, so the UI never divides by zero on an empty folder set.
+ */
+data class ScanProgress(val done: Int, val total: Int) {
+    val fraction: Float? get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else null
+}
+
 class LocalSource(
     private val store: LocalLibraryStore,
     private val artworkDir: File,
@@ -79,6 +91,13 @@ class LocalSource(
     private val _folders = MutableStateFlow<List<String>>(emptyList())
     val folders: StateFlow<List<String>> = _folders.asStateFlow()
 
+    // Live progress of the tag-reading phase of a scan, or null when no scan is ingesting files.
+    // Published per file in [refresh] so a first-run "scanning" screen can show a determinate bar; the
+    // preceding directory walk ([scanAudioFiles]) reports nothing (total unknown), so the UI shows an
+    // indeterminate spinner until this turns non-null.
+    private val _scanProgress = MutableStateFlow<ScanProgress?>(null)
+    val scanProgress: StateFlow<ScanProgress?> = _scanProgress.asStateFlow()
+
     // In-memory mirror of the stored rows + derived albums, so browse queries are plain lookups and
     // never re-read the store or re-hash. Rebuilt on every emit.
     @Volatile private var rows: List<StoredTrack> = emptyList()
@@ -99,7 +118,13 @@ class LocalSource(
 
     override suspend fun refresh() = refresh(forceAll = false)
 
-    private suspend fun refresh(forceAll: Boolean) = runRefresh {
+    // Serialises scans. Nothing stops several refreshes overlapping — init fires one, and every
+    // addFolder/rescan fires another — and concurrent runs would interleave their per-file progress
+    // writes into [_scanProgress] (the "bar jitters between two points" bug). The lock also keeps
+    // store.replaceAll from racing. A queued second scan is incremental, so it settles almost instantly.
+    private val refreshMutex = Mutex()
+
+    private suspend fun refresh(forceAll: Boolean) = refreshMutex.withLock { runRefresh {
         if (forceAll) artworkDir.listFiles()?.forEach { it.delete() }
         artworkDir.mkdirs()
         val files = scanAudioFiles(_folders.value)
@@ -109,20 +134,25 @@ class LocalSource(
         val albumArt = HashMap<String, String>()
 
         val result = ArrayList<StoredTrack>(files.size)
-        for (f in files) {
-            val prev = existingByPath[f.path]
-            if (prev != null && prev.lastModified == f.lastModified) {
-                // Unchanged — reuse the row as-is (incremental skip) and seed the art cache.
-                result += prev
-                if (prev.albumId != null && prev.artworkPath != null) albumArt.putIfAbsent(prev.albumId, prev.artworkPath)
-                continue
+        try {
+            for ((index, f) in files.withIndex()) {
+                _scanProgress.value = ScanProgress(done = index, total = files.size)
+                val prev = existingByPath[f.path]
+                if (prev != null && prev.lastModified == f.lastModified) {
+                    // Unchanged — reuse the row as-is (incremental skip) and seed the art cache.
+                    result += prev
+                    if (prev.albumId != null && prev.artworkPath != null) albumArt.putIfAbsent(prev.albumId, prev.artworkPath)
+                    continue
+                }
+                result += ingest(f, albumArt)
             }
-            result += ingest(f, albumArt)
+            store.replaceAll(SOURCE_KEY, result)
+            deriveAndEmit(result)
+        } finally {
+            // Clear progress even if a file throws mid-scan, so a stuck bar can't outlive the pass.
+            _scanProgress.value = null
         }
-
-        store.replaceAll(SOURCE_KEY, result)
-        deriveAndEmit(result)
-    }
+    } }
 
     /** Read one file's tags (falling back to the filename) and build its [StoredTrack] row. */
     private fun ingest(f: AudioFile, albumArt: HashMap<String, String>): StoredTrack {

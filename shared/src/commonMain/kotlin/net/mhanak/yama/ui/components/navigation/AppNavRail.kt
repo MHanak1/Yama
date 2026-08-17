@@ -109,6 +109,9 @@ fun AppNavRail(
     onSearchClick: () -> Unit,
     downloadsSelected: Boolean = false,
     onDownloadsClick: () -> Unit = {},
+    // Whether the active source supports offline downloads; hides the Downloads footer entry when it
+    // doesn't (e.g. the local-files source, which is already fully on-device).
+    downloadsVisible: Boolean = true,
     modifier: Modifier = Modifier,
     // The "Now playing" entry is shown only while something is playing. On TV this is the entry point
     // to the full-screen player (the rail doesn't dock a panel there).
@@ -236,16 +239,18 @@ fun AppNavRail(
                     ),
                 )
             }
-            add(
-                RailEntry(
-                    selected = downloadsSelected,
-                    onClick = onDownloadsClick,
-                    icon = Icons.Default.Download,
-                    label = "Downloads",
-                    badgeCount = activeDownloads.count { it.state.isInFlight },
-                    focusRequester = if (downloadsSelected) selectedItemFocus else null,
-                ),
-            )
+            if (downloadsVisible) {
+                add(
+                    RailEntry(
+                        selected = downloadsSelected,
+                        onClick = onDownloadsClick,
+                        icon = Icons.Default.Download,
+                        label = "Downloads",
+                        badgeCount = activeDownloads.count { it.state.isInFlight },
+                        focusRequester = if (downloadsSelected) selectedItemFocus else null,
+                    ),
+                )
+            }
             add(
                 RailEntry(
                     selected = settingsSelected,

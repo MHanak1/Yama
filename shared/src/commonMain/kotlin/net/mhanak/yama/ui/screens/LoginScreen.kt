@@ -495,6 +495,11 @@ private fun CredentialsForm(
 @Composable
 private fun LocalFilesMain(onDismiss: (() -> Unit)?) {
     val appContainer = LocalAppContainer.current
+    val folders by appContainer.localSource.folders.collectAsState()
+    // On platforms with a folder picker there's nothing to scan until the user adds at least one
+    // folder, so gate "proceed" on that. Where there's no picker (auto-indexed library) folders aren't
+    // a user-facing concept, so never block.
+    val canProceed = !supportsDirectoryPicker || folders.isNotEmpty()
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxWidth(),
@@ -514,12 +519,13 @@ private fun LocalFilesMain(onDismiss: (() -> Unit)?) {
         Spacer(modifier = Modifier.height(16.dp))
         Button(
             modifier = Modifier.fillMaxWidth(),
+            enabled = canProceed,
             onClick = {
                 appContainer.selectSource(appContainer.localSource)
                 onDismiss?.invoke()
             },
         ) {
-            Text("Use Local Library")
+            Text(if (canProceed) "Use Local Library" else "Add a folder to continue")
         }
     }
 }

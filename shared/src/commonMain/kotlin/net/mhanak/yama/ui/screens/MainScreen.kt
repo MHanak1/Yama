@@ -81,6 +81,7 @@ import net.mhanak.yama.ui.components.navigation.AppNavRail
 import net.mhanak.yama.ui.components.navigation.BottomBarDestination
 import net.mhanak.yama.ui.components.navigation.HomeLibraryTopBar
 import net.mhanak.yama.ui.platform.KeepScreenOn
+import net.mhanak.yama.ui.components.local.LocalLibraryScanningOverlay
 import net.mhanak.yama.ui.components.interaction.ActiveContentFocus
 import net.mhanak.yama.ui.components.interaction.LocalActiveContentFocus
 import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
@@ -101,6 +102,7 @@ import net.mhanak.yama.ui.player.PlaybackTargetSheet
 import net.mhanak.yama.ui.player.VolumeIndicator
 import net.mhanak.yama.media.playback.RemotePlaybackProvider
 import net.mhanak.yama.media.sources.FavoriteCapable
+import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.LocalIsTvMode
 import androidx.compose.foundation.layout.statusBarsPadding
 import net.mhanak.yama.ui.components.library.PaginatedTrackList
@@ -253,6 +255,10 @@ fun MainScreen() {
     val onDownloadedMusic = destination?.hasRoute<DownloadedMusicRoute>() == true ||
         destination?.hasRoute<DownloadedAlbumRoute>() == true ||
         destination?.hasRoute<DownloadedTracksRoute>() == true
+    // Downloads only make sense for sources that persist offline copies (OfflineCapable). The local
+    // source is already fully on-device, so its Downloads entry is hidden. Snapshot-backed read, so it
+    // re-evaluates when the active source changes.
+    val downloadsAvailable = appContainer.activeMusicSource is OfflineCapable
     val onSettings = destination?.hasRoute<SettingsRoute>() == true ||
         destination?.hasRoute<AppearanceSettingsRoute>() == true ||
         destination?.hasRoute<PlaybackSettingsRoute>() == true ||
@@ -419,6 +425,7 @@ fun MainScreen() {
                 settingsSelected = onSettings,
                 searchSelected = onSearch,
                 downloadsSelected = onDownloadedMusic,
+                downloadsVisible = downloadsAvailable,
                 onHomeClick = {
                     // Re-tapping Home while already there refreshes it (mirrors the Library re-tap).
                     if (navController.currentBackStackEntry?.destination?.hasRoute<HomeRoute>() == true) {
@@ -477,19 +484,22 @@ fun MainScreen() {
             Spacer(Modifier.weight(1f))
             val activeDownloads by appContainer.downloadManager.downloads.collectAsState()
             val activeDownloadCount = activeDownloads.count { it.state.isInFlight }
-            NavigationDrawerItem(
-                label = { Text("Downloads") },
-                icon = { Icon(Icons.Default.Download, contentDescription = null) },
-                badge = if (activeDownloadCount > 0) {
-                    { Text("$activeDownloadCount") }
-                } else null,
-                selected = onDownloadedMusic,
-                onClick = {
-                    onClose()
-                    navController.navigateTopLevel(DownloadedMusicRoute)
-                },
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-            )
+            // Hidden for sources without offline downloads (mirrors the nav rail gating above).
+            if (downloadsAvailable) {
+                NavigationDrawerItem(
+                    label = { Text("Downloads") },
+                    icon = { Icon(Icons.Default.Download, contentDescription = null) },
+                    badge = if (activeDownloadCount > 0) {
+                        { Text("$activeDownloadCount") }
+                    } else null,
+                    selected = onDownloadedMusic,
+                    onClick = {
+                        onClose()
+                        navController.navigateTopLevel(DownloadedMusicRoute)
+                    },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
             NavigationDrawerItem(
                 label = { Text("Settings") },
                 icon = { Icon(Icons.Default.Settings, contentDescription = null) },
@@ -843,5 +853,10 @@ fun MainScreen() {
         if (showTargets) {
             PlaybackTargetSheet(onDismiss = { showTargets = false })
         }
+
+        // First-run scanning screen for the local source. Self-gates (active local source + scan in
+        // flight + folders set + nothing indexed yet), so it's dropped in unconditionally and covers
+        // the empty library until the first albums land.
+        LocalLibraryScanningOverlay()
     }
 }
