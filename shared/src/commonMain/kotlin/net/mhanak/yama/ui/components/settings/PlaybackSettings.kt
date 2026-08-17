@@ -3,33 +3,20 @@ package net.mhanak.yama.ui.components.settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
-import net.mhanak.yama.util.StreamingQuality
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaybackSettings(modifier: Modifier = Modifier) {
     val appContainer = LocalAppContainer.current
@@ -57,41 +44,12 @@ fun PlaybackSettings(modifier: Modifier = Modifier) {
         if (appContainer.activeMusicSource.supportsStreamingQuality) {
             HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
             SettingsSectionHeader("Streaming")
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                var expanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = it },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    OutlinedTextField(
-                        value = appContainer.streamingQuality.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        singleLine = true,
-                        label = { Text("Streaming quality") },
-                        supportingText = { Text("Applies from the next track") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                        modifier = Modifier
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false },
-                    ) {
-                        StreamingQuality.entries.forEach { quality ->
-                            DropdownMenuItem(
-                                text = { Text(quality.label) },
-                                onClick = {
-                                    appContainer.streamingQuality = quality
-                                    expanded = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+            QualityDropdown(
+                label = "Streaming quality",
+                selected = appContainer.streamingQuality,
+                onSelect = { appContainer.streamingQuality = it },
+                supportingText = "Applies from the next track",
+            )
         }
         // The Controller / TV layout toggle moved to Settings → Appearance → Layout.
         Spacer(Modifier.height(8.dp))

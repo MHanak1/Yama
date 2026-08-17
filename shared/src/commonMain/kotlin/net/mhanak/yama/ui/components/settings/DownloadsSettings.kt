@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.media.sources.OfflineCapable
-import net.mhanak.yama.ui.components.input.QualityPickerDialog
 
 /**
  * Settings for the offline/downloads layer (see DOWNLOADS_PLAN.md): the default download quality, the
@@ -42,14 +41,13 @@ fun DownloadsSettings(
     val appContainer = LocalAppContainer.current
     val downloadKey = (appContainer.activeMusicSource as? OfflineCapable)?.downloadSourceKey()
     var confirmClear by remember { mutableStateOf(false) }
-    var showQuality by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {
         SettingsSectionHeader("Downloading")
-        SettingsRow(
-            title = "Default download quality",
-            subtitle = appContainer.downloadQuality.label,
-            onClick = { showQuality = true },
+        QualityDropdown(
+            label = "Default download quality",
+            selected = appContainer.downloadQuality,
+            onSelect = { appContainer.downloadQuality = it },
         )
         SettingToggle(
             title = "Background downloads",
@@ -98,15 +96,6 @@ fun DownloadsSettings(
             )
         }
         Spacer(Modifier.height(8.dp))
-    }
-
-    if (showQuality) {
-        QualityPickerDialog(
-            title = "Default download quality",
-            current = appContainer.downloadQuality,
-            onDismiss = { showQuality = false },
-            onPick = { appContainer.downloadQuality = it },
-        )
     }
 
     if (confirmClear && downloadKey != null) {
