@@ -11,6 +11,9 @@ import javax.swing.UIManager
 
 actual val supportsDirectoryPicker: Boolean = true
 
+// Desktop stores absolute paths, which are already readable — show them verbatim.
+actual fun folderDisplayName(path: String): String = path
+
 @Composable
 actual fun rememberDirectoryPicker(onResult: (String?) -> Unit): () -> Unit {
     val scope = rememberCoroutineScope()

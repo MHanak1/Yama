@@ -15,12 +15,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Local-files source: read on-device audio. READ_MEDIA_AUDIO on API 33+, the legacy
-         storage read permission below it (capped so it isn't requested where it's unused). -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+    <!-- Local-files source reads on-device audio via SAF (the user picks folders through the system
+         tree picker), so no READ_MEDIA_AUDIO / READ_EXTERNAL_STORAGE runtime permission is needed —
+         the persisted tree-Uri grant is the access grant. -->
 
     <application
         android:name=".MyApplication"

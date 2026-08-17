@@ -17,3 +17,12 @@ expect fun readTrackTags(path: String): TrackTags?
  * here is cheap. Desktop reads via jaudiotagger; Android has no dependency-free embedded-lyric reader.
  */
 expect fun readEmbeddedLyrics(path: String): String?
+
+/**
+ * Read a `.lrc` sidecar sitting next to the audio file at [path] — same basename, `.lrc` extension —
+ * or null when there is none (or it can't be read). Desktop reads the sibling [java.io.File] directly;
+ * Android resolves the sibling document within the audio file's SAF tree (addressable now that the
+ * local source is folder-based). The raw text goes through [parseLrc], so a synced `.lrc` yields
+ * [net.mhanak.yama.media.model.Lyrics.Timed]. Called lazily by [LocalSource.getLyrics].
+ */
+expect fun readSidecarLyrics(path: String): String?

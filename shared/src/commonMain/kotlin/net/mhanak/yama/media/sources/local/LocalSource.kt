@@ -327,16 +327,13 @@ class LocalSource(
     override suspend fun getLyrics(trackId: String): Lyrics {
         val row = store.get(trackId) ?: return Lyrics.None
 
-        // 1. Sidecar .lrc next to the audio file (same basename), desktop only — Android paths are
-        // opaque content:// URIs with no addressable sibling. Preferred when present, as a sidecar is
-        // usually curated/synced.
-        if ("://" !in row.path) {
-            val file = File(row.path)
-            val lrc = File(file.parentFile, file.nameWithoutExtension + ".lrc")
-            if (lrc.exists()) {
-                runCatching { parseLrc(lrc.readText()) }.getOrNull()
-                    ?.takeIf { it != Lyrics.None }?.let { return it }
-            }
+        // 1. Sidecar .lrc next to the audio file (same basename). Preferred, as a sidecar is usually
+        // curated/synced. Platform-agnostic: desktop reads the sibling File, Android the sibling SAF
+        // document (see readSidecarLyrics). The text may be timestamped → parseLrc yields Timed.
+        val sidecar = runCatching { readSidecarLyrics(row.path) }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (sidecar != null) {
+            val parsed = parseLrc(sidecar)
+            if (parsed != Lyrics.None) return parsed
         }
 
         // 2. Embedded lyric tag (USLT/LYRICS). The raw text may itself be LRC-formatted, so run it

@@ -33,13 +33,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.ui.platform.folderDisplayName
 import net.mhanak.yama.ui.platform.rememberDirectoryPicker
 import net.mhanak.yama.ui.platform.supportsDirectoryPicker
 
 /**
  * Settings section for the local-files source: list of watched folders with add/remove, plus a
- * manual rescan. On platforms without a folder picker (Android, which indexes the whole MediaStore)
- * it shows an explanatory note instead of folder management.
+ * manual rescan. Both desktop and Android offer a folder picker (a native chooser / the SAF tree
+ * picker); the explanatory-note branch is a fallback for any future platform without one.
  */
 @Composable
 fun LocalLibrarySettings(modifier: Modifier = Modifier) {
@@ -86,7 +87,7 @@ fun LocalLibrarySettings(modifier: Modifier = Modifier) {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     ) {
                         Text(
-                            folder,
+                            folderDisplayName(folder),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

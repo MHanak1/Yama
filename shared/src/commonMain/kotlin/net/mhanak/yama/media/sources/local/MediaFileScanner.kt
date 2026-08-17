@@ -9,15 +9,16 @@ val AudioExtensions = setOf(
 
 /**
  * Platform default music folder(s) to seed the watch list on first run. Desktop → the user's home
- * "Music" folder. Android has no folder concept (it indexes via the system MediaStore, which already
- * spans all audio), so it returns empty.
+ * "Music" folder. Android → empty (the user picks folders via the SAF tree picker, so there's nothing
+ * to auto-seed).
  */
 expect fun defaultMusicFolders(): List<String>
 
 /**
- * Enumerate audio files for indexing. Genuinely platform-specific: desktop does a plain filesystem
- * walk of the watched [folders] (see [walkAudioFiles]); Android queries the MediaStore so it respects
- * scoped storage (the [folders] argument is unused there).
+ * Enumerate audio files for indexing from the watched [folders]. Genuinely platform-specific: desktop
+ * does a plain filesystem walk of folder paths (see [walkAudioFiles]); Android walks each folder's SAF
+ * tree Uri via DocumentsContract, respecting scoped storage. Either way [folders] is what the picker
+ * returned (absolute paths on desktop, tree Uris on Android).
  */
 expect fun scanAudioFiles(folders: List<String>): List<AudioFile>
 
