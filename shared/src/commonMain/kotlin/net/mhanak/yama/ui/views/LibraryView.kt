@@ -200,7 +200,10 @@ fun LibraryView(
     var allSelectedFavorite by remember { mutableStateOf(false) }
     LaunchedEffect(selection.selectedIds.toList(), selectionFavKind, appContainer.activeMusicSource) {
         val source = appContainer.activeMusicSource
-        val ids = selection.selectedIds
+        // Snapshot the selection before iterating: isFavorite() suspends per item, and the user can
+        // add/remove selections on the main thread during those suspension points. Iterating the live
+        // SnapshotStateList across a suspend point throws ConcurrentModificationException.
+        val ids = selection.selectedIds.toList()
         val fav = source as? FavoriteCapable
         allSelectedFavorite =
             selectionFavKind != null && ids.isNotEmpty() && fav != null &&
