@@ -37,6 +37,7 @@ import net.mhanak.yama.session.SubsonicSession
 import net.mhanak.yama.session.SubsonicSessionRepository
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.StreamingQuality
+import net.mhanak.yama.util.prettyServerUrl
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -116,7 +117,9 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
                 id = session.id,
                 sourceType = SourceType.Subsonic,
                 name = session.username,
-                subtitle = session.serverUrl,
+                // Standard Subsonic advertises no friendly instance name, so serverName is effectively
+                // always null here — fall through to the scheme-stripped URL like Jellyfin's fallback.
+                subtitle = session.serverName ?: prettyServerUrl(session.serverUrl),
                 // Subsonic avatar URLs carry per-request salted auth params — embedding a fixed
                 // salt here would make the URL stable, but Coil would cache a potentially stale
                 // avatar across password changes. Returning null is safer; the switcher falls back

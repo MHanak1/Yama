@@ -32,6 +32,7 @@ import net.mhanak.yama.session.JellyfinSession
 import net.mhanak.yama.session.JellyfinSessionRepository
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.StreamingQuality
+import net.mhanak.yama.util.prettyServerUrl
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.artistsApi
@@ -116,13 +117,35 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
     private fun JellyfinSession.toSourceAccount() = SourceAccount(
         id = id,
         sourceType = SourceType.Jellyfin,
-        name = userName ?: serverUrl,
-        subtitle = serverName ?: serverUrl,
+        name = userName ?: prettyServerUrl(serverUrl),
+        // Prefer the friendly name the server advertises; fall back to a scheme-stripped URL. The name
+        // is fetched asynchronously (see backfillServerName), so this shows the URL until it lands.
+        subtitle = serverName ?: prettyServerUrl(serverUrl),
         avatarUrl = userId?.let { uid ->
             "${serverUrl.trimEnd('/')}/Users/$uid/Images/Primary"
         },
         stableKey = sessionKey(this),
     )
+
+    /**
+     * Fetch the server's advertised name and persist it onto the stored session, if it changed. Runs
+     * fire-and-forget on every session activation (login, restore, switch) so both freshly-added and
+     * legacy sessions — persisted back when serverName was always null — get backfilled. Uses the
+     * unauthenticated public system-info endpoint; a failure (offline, old server) silently leaves the
+     * existing value in place. Reassigning `sessions` recomposes the switcher once the name lands.
+     */
+    private fun backfillServerName(sessionId: String) {
+        val currentApi = api ?: return
+        scope.launch {
+            val name = runCatching { currentApi.systemApi.getPublicSystemInfo().content.serverName }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() } ?: return@launch
+            val session = sessions.find { it.id == sessionId } ?: return@launch
+            if (session.serverName == name) return@launch
+            sessionRepository.save(session.copy(serverName = name))
+            sessions = sessionRepository.loadAll()
+        }
+    }
 
     // -------------------------------------------------------------------------------------
 
@@ -265,6 +288,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         currentSessionId = sessionId
         isAuthenticated = true
         socket.bind(newApi)
+        backfillServerName(sessionId)
         scope.launch { runCatching { refresh() } }
     }
 
@@ -317,6 +341,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         currentSessionId = sessionId
         isAuthenticated = true
         socket.bind(client)
+        backfillServerName(sessionId)
         scope.launch { runCatching { refresh() } }
     }
 
@@ -346,6 +371,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         currentSessionId = session.id
         isAuthenticated = true
         api?.let { socket.bind(it) }
+        backfillServerName(session.id)
         scope.launch {
             clearLibrary()
             runCatching { refresh() }
@@ -878,6 +904,7 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
         currentSessionId = session.id
         isAuthenticated = true
         api?.let { socket.bind(it) }
+        backfillServerName(session.id)
         scope.launch { runCatching { refresh() } }
     }
 }
