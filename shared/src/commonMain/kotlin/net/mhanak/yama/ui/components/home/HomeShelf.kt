@@ -2,7 +2,6 @@ package net.mhanak.yama.ui.components.home
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,7 +29,6 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.components.card.ItemCard
 import net.mhanak.yama.ui.components.image.CardImage
 import net.mhanak.yama.ui.components.interaction.contentFocusItem
-import net.mhanak.yama.ui.components.library.adaptiveCardWidth
 import net.mhanak.yama.ui.home.HomeBlockData
 import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
@@ -52,6 +50,13 @@ import yama.shared.generated.resources.folder
 fun HomeShelf(
     title: String,
     data: HomeBlockData,
+    // Card width, measured once by the caller off the shelf area's width along the shared library
+    // curve ([adaptiveCardWidth]) so cards scale up on larger screens exactly like the library grid —
+    // but without the grid's integer column-clamp, so the shelf shows a fractional number of cards (a
+    // peek of the next one). Hoisted out of a per-shelf BoxWithConstraints: all shelves are full-width
+    // and so share one width, and a BoxWithConstraints per shelf re-ran its subcomposition for every
+    // shelf on every frame while the rail's width animated — the source of Home's rail-animation jank.
+    cardWidth: Dp,
     onSeeMore: () -> Unit,
     onAlbumClick: (String) -> Unit,
     onGenreClick: (String) -> Unit,
@@ -65,66 +70,60 @@ fun HomeShelf(
     // user left on scrolls back into view and refocuses.
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
-    // Size the cards off the shelf's own width along the shared library curve ([adaptiveCardWidth]),
-    // so they scale up on larger screens exactly like the library grid — but without the grid's
-    // integer column-clamp, so the shelf shows a fractional number of cards (a peek of the next one).
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-        val cardWidth = adaptiveCardWidth(maxWidth)
-        Column(Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
-                IconButton(onClick = onSeeMore) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "See more")
-                }
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = onSeeMore) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "See more")
             }
+        }
 
-            LazyRow(
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when (data) {
-                    is HomeBlockData.Albums -> items(data.albums, key = { it.id }) { album ->
-                        ShelfCard(
-                            title = album.name,
-                            subtitle = album.albumArtist,
-                            imageUrl = album.imageUrl,
-                            imageHash = album.imageHash,
-                            fallback = painterResource(Res.drawable.album),
-                            width = cardWidth,
-                            focusKey = shelfFocusKey(focusKeyPrefix, album.id),
-                            onClick = { onAlbumClick(album.id) },
-                        )
-                    }
-                    is HomeBlockData.Genres -> items(data.genres, key = { it.id }) { genre ->
-                        ShelfCard(
-                            title = genre.name,
-                            subtitle = null,
-                            imageUrl = genre.imageUrl,
-                            imageHash = genre.imageHash,
-                            fallback = painterResource(Res.drawable.folder),
-                            width = cardWidth,
-                            focusKey = shelfFocusKey(focusKeyPrefix, genre.id),
-                            onClick = { onGenreClick(genre.id) },
-                        )
-                    }
-                    is HomeBlockData.Tracks -> itemsIndexed(data.tracks, key = { _, t -> t.id }) { index, track ->
-                        ShelfCard(
-                            title = track.name,
-                            subtitle = track.artists?.joinToString(", ") ?: track.album,
-                            imageUrl = track.imageUrl,
-                            imageHash = null,
-                            fallback = painterResource(Res.drawable.album),
-                            width = cardWidth,
-                            focusKey = shelfFocusKey(focusKeyPrefix, track.id),
-                            // Play the whole shelf as a queue, starting at the tapped track.
-                            onClick = { player.playNow(data.tracks, index) },
-                        )
-                    }
+        LazyRow(
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (data) {
+                is HomeBlockData.Albums -> items(data.albums, key = { it.id }) { album ->
+                    ShelfCard(
+                        title = album.name,
+                        subtitle = album.albumArtist,
+                        imageUrl = album.imageUrl,
+                        imageHash = album.imageHash,
+                        fallback = painterResource(Res.drawable.album),
+                        width = cardWidth,
+                        focusKey = shelfFocusKey(focusKeyPrefix, album.id),
+                        onClick = { onAlbumClick(album.id) },
+                    )
+                }
+                is HomeBlockData.Genres -> items(data.genres, key = { it.id }) { genre ->
+                    ShelfCard(
+                        title = genre.name,
+                        subtitle = null,
+                        imageUrl = genre.imageUrl,
+                        imageHash = genre.imageHash,
+                        fallback = painterResource(Res.drawable.folder),
+                        width = cardWidth,
+                        focusKey = shelfFocusKey(focusKeyPrefix, genre.id),
+                        onClick = { onGenreClick(genre.id) },
+                    )
+                }
+                is HomeBlockData.Tracks -> itemsIndexed(data.tracks, key = { _, t -> t.id }) { index, track ->
+                    ShelfCard(
+                        title = track.name,
+                        subtitle = track.artists?.joinToString(", ") ?: track.album,
+                        imageUrl = track.imageUrl,
+                        imageHash = null,
+                        fallback = painterResource(Res.drawable.album),
+                        width = cardWidth,
+                        focusKey = shelfFocusKey(focusKeyPrefix, track.id),
+                        // Play the whole shelf as a queue, starting at the tapped track.
+                        onClick = { player.playNow(data.tracks, index) },
+                    )
                 }
             }
         }

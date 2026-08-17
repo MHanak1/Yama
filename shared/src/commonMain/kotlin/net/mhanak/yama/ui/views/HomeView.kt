@@ -2,6 +2,7 @@ package net.mhanak.yama.ui.views
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.focusGroup
@@ -29,6 +30,7 @@ import net.mhanak.yama.ui.components.home.HomeShelf
 import net.mhanak.yama.ui.components.interaction.ContentFocusRegistry
 import net.mhanak.yama.ui.components.interaction.LocalContentFocusRegistry
 import net.mhanak.yama.ui.components.interaction.RegisterActiveContentFocus
+import net.mhanak.yama.ui.components.library.adaptiveCardWidth
 import net.mhanak.yama.ui.home.activeHomeBlocks
 import net.mhanak.yama.ui.home.homeConfigKey
 import net.mhanak.yama.ui.platform.PullToRefreshContainer
@@ -106,30 +108,39 @@ fun HomeView(
             }
         } else {
             CompositionLocalProvider(LocalContentFocusRegistry provides focusRegistry) {
-            Column(
-                modifier = Modifier
-                    .glassSource(zIndex = 1f)
-                    .fillMaxSize()
-                    // Group the shelves as one D-pad region (parity with GridView); left from a shelf's
-                    // first card then propagates out to the content-zone left-exit → sidebar.
-                    .focusGroup()
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = topContentPadding + 8.dp, bottom = bottomContentPadding + 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                blocks.forEach { kind ->
-                    val data = store.data[kind]
-                    if (data != null && !data.isEmpty) {
-                        HomeShelf(
-                            title = kind.title,
-                            data = data,
-                            // Namespaced per shelf so ids that recur across shelves (an album in both
-                            // "recently added" and "random") don't collide in the shared registry.
-                            focusKeyPrefix = kind.name,
-                            onSeeMore = { onNavigate(HomeBlockRoute(kind.name)) },
-                            onAlbumClick = { onNavigate(AlbumDetailRoute(it)) },
-                            onGenreClick = { onNavigate(GenreDetailRoute(it)) },
-                        )
+            // Measure the shelf area's width once here and derive the shared card width, rather than
+            // letting each HomeShelf run its own BoxWithConstraints. All shelves are full-width, so they
+            // resolve to the same width anyway — and a per-shelf BoxWithConstraints re-ran its
+            // subcomposition for every shelf on every frame while the rail's width animates (Home is a
+            // plain measured Column, so every shelf re-measures each frame), the source of the jank.
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val cardWidth = adaptiveCardWidth(maxWidth)
+                Column(
+                    modifier = Modifier
+                        .glassSource(zIndex = 1f)
+                        .fillMaxSize()
+                        // Group the shelves as one D-pad region (parity with GridView); left from a shelf's
+                        // first card then propagates out to the content-zone left-exit → sidebar.
+                        .focusGroup()
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = topContentPadding + 8.dp, bottom = bottomContentPadding + 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    blocks.forEach { kind ->
+                        val data = store.data[kind]
+                        if (data != null && !data.isEmpty) {
+                            HomeShelf(
+                                title = kind.title,
+                                data = data,
+                                cardWidth = cardWidth,
+                                // Namespaced per shelf so ids that recur across shelves (an album in both
+                                // "recently added" and "random") don't collide in the shared registry.
+                                focusKeyPrefix = kind.name,
+                                onSeeMore = { onNavigate(HomeBlockRoute(kind.name)) },
+                                onAlbumClick = { onNavigate(AlbumDetailRoute(it)) },
+                                onGenreClick = { onNavigate(GenreDetailRoute(it)) },
+                            )
+                        }
                     }
                 }
             }

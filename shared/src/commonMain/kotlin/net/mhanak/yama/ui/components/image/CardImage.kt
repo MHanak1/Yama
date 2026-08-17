@@ -74,8 +74,14 @@ fun BoxScope.CardImage(
                 if (edge <= 0) return@onSizeChanged
                 // Record the slot's initial size as the baseline (no explicit request → Coil's own
                 // resolver handles the first load); only bump to an explicit size once it grows past it.
-                if (firstPx == 0) firstPx = edge
-                else if (edge > firstPx && edge > reqPx) reqPx = edge
+                if (firstPx == 0) { firstPx = edge; return@onSizeChanged }
+                // Grow-only, with a 15% hysteresis band measured against the size we've already decoded:
+                // re-decode only once the slot exceeds it by ≥15%. The nav-rail collapse only widens
+                // cards ~10%, so it stays on the existing bitmap (imperceptible upscale) rather than
+                // re-decoding every frame of that animation; a genuine window enlargement still crosses
+                // the band and sharpens. Shrinking never downgrades a bitmap already on screen.
+                val decoded = if (reqPx > 0) reqPx else firstPx
+                if (edge >= decoded * 1.15f) reqPx = edge
             },
         model = request,
         contentDescription = null,
