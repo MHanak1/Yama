@@ -1,6 +1,5 @@
 package net.mhanak.yama.ui.components.input
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -23,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -34,7 +32,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import net.mhanak.yama.ui.theme.LocalUiOpacity
+import net.mhanak.yama.ui.theme.glassEffect
 
 /**
  * Compact pill-shaped search field. Built on [BasicTextField] (rather than M3's `OutlinedTextField`,
@@ -66,10 +64,11 @@ fun SearchBar(
     val focusManager = LocalFocusManager.current
     if (onClick != null) {
         Row(
+            // Real glass (not a flat fill) so the read-only pill samples the same content layer as the
+            // segmented tab buttons and reads as the exact same colour — see the live field below.
             modifier = modifier
                 .height(height)
-                .clip(RoundedCornerShape(percent = 50))
-                .background(colors.secondaryContainer.copy(alpha = LocalUiOpacity.current))
+                .glassEffect(colors.secondaryContainer, RoundedCornerShape(percent = 50))
                 .clickable(onClick = onClick)
                 .padding(start = 14.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -116,10 +115,13 @@ fun SearchBar(
         },
         decorationBox = { innerTextField ->
             Row(
+                // Its own glass object rather than a translucent background painted over the top bar's
+                // frost. Because a glassEffect samples the raw content sources directly (it has no
+                // ancestor hazeSource, same as the segmented buttons) — not the bar's already-frosted
+                // output — the field ends up the identical colour to the segmented button.
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(colors.secondaryContainer.copy(alpha = LocalUiOpacity.current))
+                    .glassEffect(colors.secondaryContainer, RoundedCornerShape(percent = 50))
                     .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

@@ -56,6 +56,10 @@ import net.mhanak.yama.ui.views.LibraryTab
  * - The search field has three modes: a read-only shortcut to the search screen on Home ([onSearchTap]
  *   set), an inline live filter on Library ([onSearchTap] null, [searchActive] false), and the live,
  *   auto-focused global-search input on Search ([searchActive] true → [query]/[onQueryChange] drive it).
+ *
+ * Only the search row carries the frosted [glassEffect] surface; the segmented tab row is a sibling
+ * *below* that glass Box, so it sits directly over the blurred content (each tab keeps its own glass)
+ * rather than being enveloped by the bar's surface tint.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,90 +127,101 @@ fun HomeLibraryTopBar(
                     .focusGroup()
                 else Modifier,
             )
-            .fillMaxWidth()
-            .glassEffect(MaterialTheme.colorScheme.surface),
+            .fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.statusBarsPadding()) {
-            TopAppBar(
-                // The search field lives in the title slot so it fills the space between the menu
-                // button (if any) and the trailing actions.
-                title = {
-                    when {
-                        onSearchTap != null -> {
-                            // Home: a read-only shortcut that opens the dedicated search screen. Rendered
-                            // as a clickable (non-text-field) pill so it works with TV D-pad select and
-                            // never opens a keyboard here — typing happens on the search screen itself.
-                            // Still carries the entry requester so the top-bar zone lands here on Home.
-                            SearchBar(
-                                query = "",
-                                onQueryChange = {},
-                                placeholder = searchPlaceholder,
-                                modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
-                                onClick = onSearchTap,
-                            )
-                        }
-                        searchActive -> {
-                            // Search: the same field, now live and auto-focused. Because it is the very
-                            // same SearchBar element that was the Home shortcut, the hand-off is seamless.
-                            SearchBar(
-                                query = query,
-                                onQueryChange = onQueryChange,
-                                placeholder = searchPlaceholder,
-                                modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
-                                onFocusDown = onSearchFocusDown,
-                                onFocusLeft = onFieldFocusLeft,
-                            )
-                        }
-                        else -> {
-                            // Library: a live inline filter for the active tab.
-                            SearchBar(
-                                query = query,
-                                onQueryChange = onQueryChange,
-                                placeholder = searchPlaceholder,
-                                modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
-                                onFocusDown = onSearchFocusDown,
-                                onFocusLeft = onFieldFocusLeft,
-                            )
-                        }
-                    }
-                },
-                modifier = Modifier.height(64.dp),
-                navigationIcon = {
-                    if (onMenuClick != null) {
-                        IconButton(onClick = onMenuClick) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    }
-                },
-                actions = {
-                    // Slides in when entering Library (and the source supports favouriting this tab),
-                    // slides away when returning to Home — this is the "animate away the favourites
-                    // button" behaviour. Defaults expand/shrink horizontally inside the actions Row.
-                    AnimatedVisibility(visible = onLibrary && canFavoriteFilter) {
-                        IconButton(onClick = onToggleFavorites) {
-                            Icon(
-                                if (favoritesOnly) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                                contentDescription = if (favoritesOnly) "Showing favourites only" else "Show favourites only",
-                                tint = if (favoritesOnly) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                    if (canCast) {
-                        IconButton(onClick = onCastClick) {
-                            Icon(
-                                if (isCasting) Icons.Filled.Speaker else Icons.Outlined.Speaker,
-                                contentDescription = "Play on another device",
-                                tint = if (isCasting) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                windowInsets = WindowInsets(0, 0, 0, 0),
-            )
+        Column {
+            // Glass wraps only the search row so the frosted surface stops at its bottom edge. The
+            // segmented tab row (below, outside this Box) then sits directly over the blurred content —
+            // each tab keeps its own glass — rather than being enveloped by the bar's surface tint.
+            // That envelopment was the regression introduced in 5b4095b.
+            Box(modifier = Modifier.fillMaxWidth().glassEffect(MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.statusBarsPadding()) {
+                    TopAppBar(
+                        // The search field lives in the title slot so it fills the space between the
+                        // menu button (if any) and the trailing actions.
+                        title = {
+                            when {
+                                onSearchTap != null -> {
+                                    // Home: a read-only shortcut that opens the dedicated search screen.
+                                    // Rendered as a clickable (non-text-field) pill so it works with TV
+                                    // D-pad select and never opens a keyboard here — typing happens on the
+                                    // search screen itself. Still carries the entry requester so the
+                                    // top-bar zone lands here on Home.
+                                    SearchBar(
+                                        query = "",
+                                        onQueryChange = {},
+                                        placeholder = searchPlaceholder,
+                                        modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
+                                        onClick = onSearchTap,
+                                    )
+                                }
+                                searchActive -> {
+                                    // Search: the same field, now live and auto-focused. Because it is the
+                                    // very same SearchBar element that was the Home shortcut, the hand-off
+                                    // is seamless.
+                                    SearchBar(
+                                        query = query,
+                                        onQueryChange = onQueryChange,
+                                        placeholder = searchPlaceholder,
+                                        modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
+                                        onFocusDown = onSearchFocusDown,
+                                        onFocusLeft = onFieldFocusLeft,
+                                    )
+                                }
+                                else -> {
+                                    // Library: a live inline filter for the active tab.
+                                    SearchBar(
+                                        query = query,
+                                        onQueryChange = onQueryChange,
+                                        placeholder = searchPlaceholder,
+                                        modifier = Modifier.fillMaxWidth().then(fieldFocusMod),
+                                        onFocusDown = onSearchFocusDown,
+                                        onFocusLeft = onFieldFocusLeft,
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.height(64.dp),
+                        navigationIcon = {
+                            if (onMenuClick != null) {
+                                IconButton(onClick = onMenuClick) {
+                                    Icon(Icons.Default.Menu, contentDescription = "Menu")
+                                }
+                            }
+                        },
+                        actions = {
+                            // Slides in when entering Library (and the source supports favouriting this
+                            // tab), slides away when returning to Home — this is the "animate away the
+                            // favourites button" behaviour. Defaults expand/shrink horizontally inside
+                            // the actions Row.
+                            AnimatedVisibility(visible = onLibrary && canFavoriteFilter) {
+                                IconButton(onClick = onToggleFavorites) {
+                                    Icon(
+                                        if (favoritesOnly) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                        contentDescription = if (favoritesOnly) "Showing favourites only" else "Show favourites only",
+                                        tint = if (favoritesOnly) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            if (canCast) {
+                                IconButton(onClick = onCastClick) {
+                                    Icon(
+                                        if (isCasting) Icons.Filled.Speaker else Icons.Outlined.Speaker,
+                                        contentDescription = "Play on another device",
+                                        tint = if (isCasting) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                        windowInsets = WindowInsets(0, 0, 0, 0),
+                    )
+                }
+            }
             // Narrow Library only: expands in below the (stationary) search row when entering Library.
+            // Sits outside the glass Box above, so it overlays the blurred content directly.
             AnimatedVisibility(
                 visible = showTabs,
                 enter = expandVertically() + fadeIn(),

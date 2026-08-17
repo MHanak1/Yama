@@ -1,6 +1,7 @@
 package net.mhanak.yama.ui.screens
 
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.snap
@@ -759,22 +760,46 @@ fun MainScreen() {
         // the favourites button and (narrow) segmented tab row animate in/out via AnimatedVisibility
         // rather than being replaced. Shown only on these two destinations; every other screen keeps its
         // own top bar inside the NavHost.
-        if (onHome || onLibrary || onSearch) {
+        val barVisible = onHome || onLibrary || onSearch
+        // The bar's route-derived look, *held* while it fades away over a detail transition. The moment
+        // navigation leaves the trio, [onHome]/[onLibrary]/[onSearch] all flip false — without this the
+        // bar would snap to a default layout (tabs and favourites gone, Home pill → empty field) on the
+        // first frame of the fade. Updated only while [barVisible], so the outgoing look is preserved
+        // during fade-out and refreshed the instant we return. Home ⇄ Library ⇄ Search keep barVisible
+        // true, so those still morph live.
+        var barOnHome by remember { mutableStateOf(onHome) }
+        var barOnLibrary by remember { mutableStateOf(onLibrary) }
+        var barOnSearch by remember { mutableStateOf(onSearch) }
+        if (barVisible) {
+            barOnHome = onHome
+            barOnLibrary = onLibrary
+            barOnSearch = onSearch
+        }
+        // Fade the shared bar in/out on the same timeline as the detail slide/fade rather than adding
+        // and removing it from composition — the previous instant pop was the jarring appear/disappear
+        // when entering and leaving detail views. No animation fires between Home/Library/Search since
+        // barVisible stays true across them; only crossing into or out of the trio triggers the fade.
+        AnimatedVisibility(
+            visible = barVisible,
+            enter = fadeIn(tween(DETAIL_DURATION)),
+            exit = fadeOut(tween(DETAIL_DURATION)),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             HomeLibraryTopBar(
-                onLibrary = onLibrary,
-                searchActive = onSearch,
+                onLibrary = barOnLibrary,
+                searchActive = barOnSearch,
                 searchFocusRequester = searchFocusRequester,
                 onMenuClick = onMenuClick,
                 // On Search the field drives the global-search query; on Library it drives the inline
                 // filter. (On Home it's read-only, so these are unused there.)
-                query = if (onSearch) searchQuery else query,
-                onQueryChange = if (onSearch) ({ searchQuery = it }) else ({ query = it }),
-                searchPlaceholder = if (onLibrary) "Search ${selectedTab.label.lowercase()}" else "Search",
+                query = if (barOnSearch) searchQuery else query,
+                onQueryChange = if (barOnSearch) ({ searchQuery = it }) else ({ query = it }),
+                searchPlaceholder = if (barOnLibrary) "Search ${selectedTab.label.lowercase()}" else "Search",
                 // Home's field is a read-only shortcut to the search screen; Library/Search are live inputs.
-                onSearchTap = if (onHome) ({ navController.navigateTopLevel(SearchRoute) }) else null,
+                onSearchTap = if (barOnHome) ({ navController.navigateTopLevel(SearchRoute) }) else null,
                 // TV: D-pad down from the search field drops into the active library grid or the search
                 // results (both register their items with the active ContentFocusRegistry).
-                onSearchFocusDown = if (isTV && (onLibrary || onSearch)) ({
+                onSearchFocusDown = if (isTV && (barOnLibrary || barOnSearch)) ({
                     val r = activeContentFocus.registry
                     if (r != null) { r.requestRestore(); true } else false
                 }) else null,
@@ -785,11 +810,10 @@ fun MainScreen() {
                 canCast = appContainer.activeMusicSource is RemotePlaybackProvider,
                 isCasting = appContainer.playback.viewedTarget != null,
                 onCastClick = { showTargets = true },
-                showTabs = onLibrary && !hasRail,
+                showTabs = barOnLibrary && !hasRail,
                 selectedTab = selectedTab,
                 onTabSelected = onTabClick,
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
                     .onSizeChanged { sharedBarHeight = with(density) { it.height.toDp() } },
             )
         }
