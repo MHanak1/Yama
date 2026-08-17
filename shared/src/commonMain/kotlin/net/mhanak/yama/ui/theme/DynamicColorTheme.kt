@@ -18,6 +18,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
 import coil3.compose.rememberAsyncImagePainter
@@ -30,7 +32,7 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.theme.AlbumTintMode
 
 /** Default transition duration when the seed colour changes (e.g. on track change). Short on purpose. */
-const val DynamicColorAnimationMs = 500
+const val DynamicColorAnimationMs = 320
 
 /**
  * Forces a CPU-readable (software) decode so the palette extractor can sample the pixels. On Android
@@ -152,16 +154,36 @@ class DetailTint {
 val LocalDetailTint = compositionLocalOf<DetailTint?> { null }
 
 /**
- * Registers [imageUrl]/[cacheKey] as the active detail screen's artwork for as long as this call is in
- * composition, so the app-wide theme ([AppColorTheme]) recolours to it and the shell paints it as the
+ * The nav entry currently at the top of the back stack, provided by the shell (see MainScreen). A detail
+ * screen compares this against its own entry ([LocalLifecycleOwner], which inside a NavHost destination
+ * *is* that screen's [androidx.navigation.NavBackStackEntry]) to know whether it's still the active
+ * destination. `currentBackStackEntry` flips the instant a pop is requested — before the exit animation
+ * runs — so this lets the tint clear at the *start* of the slide rather than when the composable is
+ * finally disposed at the end of it. Null when the shell doesn't provide it (tint stays composition-scoped).
+ */
+val LocalActiveNavEntry = compositionLocalOf<LifecycleOwner?> { null }
+
+/**
+ * Registers [imageUrl]/[cacheKey] as the active detail screen's artwork while this screen is the current
+ * destination, so the app-wide theme ([AppColorTheme]) recolours to it and the shell paints it as the
  * background. No-op when no [DetailTint] is provided (e.g. an overlay drawn outside the NavHost).
+ *
+ * Lifetime is gated on back-stack position, not composition: a NavHost destination stays composed for its
+ * whole exit transition, so unregistering in `onDispose` would leave the tint (and its colour/background
+ * cross-fade) frozen until the slide ends and only then snap. Instead we drop the tint as soon as this
+ * screen's entry stops being the current top ([LocalActiveNavEntry]), which happens when the pop is
+ * requested — so the cross-fade runs in parallel with the nav animation. `onDispose` still clears as a
+ * backstop, and predictive-back that re-selects this entry re-registers it.
  */
 @Composable
 fun RegisterDetailTint(imageUrl: String?, cacheKey: String?) {
     val holder = LocalDetailTint.current ?: return
     val owner = remember { Any() }
-    DisposableEffect(holder, imageUrl, cacheKey) {
-        holder.register(owner, imageUrl, cacheKey)
+    val entry = LocalLifecycleOwner.current
+    val activeEntry = LocalActiveNavEntry.current
+    val isActive = activeEntry == null || entry === activeEntry
+    DisposableEffect(holder, imageUrl, cacheKey, isActive) {
+        if (isActive) holder.register(owner, imageUrl, cacheKey) else holder.unregister(owner)
         onDispose { holder.unregister(owner) }
     }
 }

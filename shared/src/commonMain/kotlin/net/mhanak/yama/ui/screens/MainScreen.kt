@@ -105,6 +105,7 @@ import net.mhanak.yama.LocalIsTvMode
 import androidx.compose.foundation.layout.statusBarsPadding
 import net.mhanak.yama.ui.components.library.PaginatedTrackList
 import net.mhanak.yama.ui.theme.glassSource
+import net.mhanak.yama.ui.theme.LocalActiveNavEntry
 import net.mhanak.yama.media.sources.TrackSortOrder
 import net.mhanak.yama.ui.views.detail.AlbumDetailView
 import net.mhanak.yama.ui.views.settings.AppearanceSettingsView
@@ -390,6 +391,9 @@ fun MainScreen() {
     CompositionLocalProvider(
         LocalActiveContentFocus provides activeContentFocus,
         LocalTvZoneFocus provides tvZoneFocus,
+        // Lets a detail screen tell whether it's still the current destination, so it clears its tint at
+        // the start of a pop (parallel with the slide) rather than when it's finally disposed at the end.
+        LocalActiveNavEntry provides navBackStackEntry,
     ) {
     AdaptiveNavigationLayout(
         playerActive = playerStatus.current != null,

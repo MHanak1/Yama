@@ -43,17 +43,30 @@ fun BlurredBackgroundImage(
     val context = LocalPlatformContext.current
     // Two-layer cross-dissolve. The previous cover stays painted underneath while the incoming one fades
     // in over it: the old image (never the dark surface) is what shows through during the swap, so there
-    // is no black flash, and the fade gives the backdrop a smooth transition in step with the colours.
+    // is no black flash even if the incoming bitmap hasn't loaded yet, and the fade gives the backdrop a
+    // smooth transition in step with the colours. But when there is *no* incoming cover (imageUrl == null,
+    // e.g. leaving a detail screen once its RegisterDetailTint disposes at the end of the nav slide) there
+    // is nothing to fade in over the old one, so instead the old layer fades itself *out* to the surface —
+    // otherwise it would just sit at full opacity for the whole tween and then pop away at the end.
     // Both layers request one shared Size.ORIGINAL cache entry (see the player's cover/preload), and
     // placeholderMemoryCacheKey lets the incoming layer paint that bitmap on frame 0 rather than loading.
     var previous by remember { mutableStateOf<String?>(null) }
     Box(modifier.fillMaxSize()) {
         if (previous != null && previous != imageUrl) {
+            // Old cover underneath: held opaque while a new cover fades in over it, but faded out itself
+            // when nothing is coming in (imageUrl == null). Fresh animation per swap.
+            val fadeOut = remember(imageUrl) { Animatable(1f) }
+            LaunchedEffect(imageUrl) {
+                if (imageUrl == null) fadeOut.animateTo(0f, tween(DynamicColorAnimationMs))
+            }
             AsyncImage(
                 model = backgroundRequest(context, previous),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(blurRadius),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = fadeOut.value }
+                    .blur(blurRadius),
             )
         }
         // Fresh fade per incoming url; opaque immediately on the very first image (nothing to fade over).
