@@ -40,6 +40,7 @@ import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.ui.player.PlayerLayoutMode
 import net.mhanak.yama.ui.theme.ThemeMode
 import net.mhanak.yama.ui.theme.supportsDynamicColor
+import net.mhanak.yama.ui.theme.supportsBlurEffects
 import net.mhanak.yama.ui.components.input.SegmentedButtonRow
 import net.mhanak.yama.ui.theme.SeedColorPicker
 
@@ -229,24 +230,29 @@ fun AppearanceSettings(
 
         // ── Display ───────────────────────────────────────────────────
         SettingsSectionHeader("Display")
-        ListItem(
-            headlineContent = { Text("Blur effects") },
-            supportingContent = { Text("Frosted glass on UI panels") },
-            trailingContent = { Switch(checked = appContainer.blurEnabled, onCheckedChange = null) },
-            modifier = Modifier.clickable { appContainer.blurEnabled = !appContainer.blurEnabled },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        )
-        if (appContainer.blurEnabled) {
-            SliderItem(
-                label = "Opacity",
-                displayValue = "${(appContainer.uiOpacity * 100).toInt()}%",
-                value = appContainer.uiOpacity,
-                onValueChange = { appContainer.uiOpacity = it },
-                steps = 9,
-                valueRange = 0f..1f,
+        // Frosted-glass blur only works where the platform can render it (Android 12+ / desktop);
+        // below that Haze falls back to a broken scrim, so the toggle is hidden entirely and blur is
+        // forced off in App.kt. Hidden rather than disabled since there's nothing the user can do.
+        if (supportsBlurEffects()) {
+            ListItem(
+                headlineContent = { Text("Blur effects") },
+                supportingContent = { Text("Frosted glass on UI panels") },
+                trailingContent = { Switch(checked = appContainer.blurEnabled, onCheckedChange = null) },
+                modifier = Modifier.clickable { appContainer.blurEnabled = !appContainer.blurEnabled },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
+            if (appContainer.blurEnabled) {
+                SliderItem(
+                    label = "Opacity",
+                    displayValue = "${(appContainer.uiOpacity * 100).toInt()}%",
+                    value = appContainer.uiOpacity,
+                    onValueChange = { appContainer.uiOpacity = it },
+                    steps = 9,
+                    valueRange = 0f..1f,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
         }
-        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
         SliderItem(
             label = "UI scale",
             displayValue = "${(appContainer.uiScale * 100).toInt()}%",

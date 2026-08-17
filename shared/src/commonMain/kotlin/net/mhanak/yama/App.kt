@@ -21,6 +21,7 @@ import net.mhanak.yama.ui.theme.LocalDetailTint
 import net.mhanak.yama.ui.theme.LocalHazeState
 import net.mhanak.yama.ui.components.state.LocalTrackUserData
 import net.mhanak.yama.ui.theme.LocalUiOpacity
+import net.mhanak.yama.ui.theme.supportsBlurEffects
 import net.mhanak.yama.ui.components.state.rememberAvailability
 import net.mhanak.yama.ui.platform.RequestLocalAudioPermission
 import net.mhanak.yama.media.sources.SourceType
@@ -57,7 +58,10 @@ fun App() {
     }
     CompositionLocalProvider(
         LocalAppContainer provides appContainer,
-        LocalHazeState provides if (appContainer.blurEnabled) hazeState else null,
+        // Blur is off unless the user enabled it *and* the platform can actually render it (Android
+        // 12+); on older devices Haze degrades to a broken scrim, so we force it off regardless of the
+        // stored preference. See supportsBlurEffects().
+        LocalHazeState provides if (appContainer.blurEnabled && supportsBlurEffects()) hazeState else null,
         LocalUiOpacity provides appContainer.uiOpacity,
         LocalDensity provides scaledDensity,
         LocalDetailTint provides detailTint,
