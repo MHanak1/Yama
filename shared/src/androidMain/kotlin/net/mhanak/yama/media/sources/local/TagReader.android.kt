@@ -41,5 +41,10 @@ actual fun readTrackTags(path: String): TrackTags? {
     }
 }
 
+// Android has no dependency-free embedded-lyrics reader: MediaMetadataRetriever exposes no lyrics key,
+// and the MediaStore content:// path has no addressable sidecar. Returns null until an approach is
+// chosen (jaudiotagger over a content-stream copy, or a hand-rolled ID3/Vorbis lyric-frame parser).
+actual fun readEmbeddedLyrics(path: String): String? = null
+
 // "3/12" -> 3, "07" -> 7, "" -> null
 private fun String.parseIndex(): Int? = substringBefore('/').trim().toIntOrNull()

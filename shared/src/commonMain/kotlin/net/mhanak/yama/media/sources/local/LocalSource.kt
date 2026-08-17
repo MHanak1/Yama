@@ -193,6 +193,8 @@ class LocalSource(
         val allRows = if (AppPreferences.skipTracksWithoutMetadata) storedRows.filter { it.hasMetadata } else storedRows
         rows = allRows
         val favAlbums = AppPreferences.localFavorites(FavoritableKind.Album.name)
+        val favArtists = AppPreferences.localFavorites(FavoritableKind.Artist.name)
+        val favGenres = AppPreferences.localFavorites(FavoritableKind.Genre.name)
 
         // Albums: one per albumId; pull the first non-null year/art and union the genres.
         val albums = allRows
@@ -233,13 +235,14 @@ class LocalSource(
             }
         }
         val artists = artistAcc.map { (id, acc) ->
-            Artist(id = id, name = acc.name, imageUrl = artLookup[id], imageHash = null, genres = acc.genres.toList())
+            Artist(id = id, name = acc.name, imageUrl = artLookup[id], imageHash = null,
+                favorite = id in favArtists, genres = acc.genres.toList())
         }.sortedBy { it.name.lowercase() }
 
         // Genres: distinct (genreId -> name).
         val genreNames = LinkedHashMap<String, String>()
         for (row in allRows) row.genreIds.forEachIndexed { i, id -> row.genres.getOrNull(i)?.let { genreNames.putIfAbsent(id, it) } }
-        val genres = genreNames.map { (id, name) -> Genre(id = id, name = name, imageUrl = null, imageHash = null) }
+        val genres = genreNames.map { (id, name) -> Genre(id = id, name = name, imageUrl = null, imageHash = null, favorite = id in favGenres) }
             .sortedBy { it.name.lowercase() }
 
         _albums.value = albums
@@ -272,7 +275,7 @@ class LocalSource(
         val term = searchTerm?.takeIf { it.isNotBlank() }
         return rows
             .let { all -> if (favoritesOnly) all.filter { it.id in favs } else all }
-            .let { all -> if (term != null) all.filter { it.title.contains(term, ignoreCase = true) } else all }
+            .let { all -> if (term != null) all.filter { it.matchesSearch(term) } else all }
             .sortedForBrowse(sortBy).drop(offset).take(limit).map { it.toTrack(favs) }
     }
 
@@ -323,27 +326,40 @@ class LocalSource(
 
     override suspend fun getLyrics(trackId: String): Lyrics {
         val row = store.get(trackId) ?: return Lyrics.None
-        // Sidecar .lrc next to the audio file (same basename), desktop only — Android paths are
-        // opaque content:// URIs with no addressable sibling. Embedded lyric tags are a later seam.
-        if ("://" in row.path) return Lyrics.None
-        val file = File(row.path)
-        val lrc = File(file.parentFile, file.nameWithoutExtension + ".lrc")
-        if (!lrc.exists()) return Lyrics.None
-        return runCatching { parseLrc(lrc.readText()) }.getOrDefault(Lyrics.None)
+
+        // 1. Sidecar .lrc next to the audio file (same basename), desktop only — Android paths are
+        // opaque content:// URIs with no addressable sibling. Preferred when present, as a sidecar is
+        // usually curated/synced.
+        if ("://" !in row.path) {
+            val file = File(row.path)
+            val lrc = File(file.parentFile, file.nameWithoutExtension + ".lrc")
+            if (lrc.exists()) {
+                runCatching { parseLrc(lrc.readText()) }.getOrNull()
+                    ?.takeIf { it != Lyrics.None }?.let { return it }
+            }
+        }
+
+        // 2. Embedded lyric tag (USLT/LYRICS). The raw text may itself be LRC-formatted, so run it
+        // through parseLrc — timestamps → Timed, plain text → Unsynced. Null on platforms without an
+        // embedded-lyric reader (Android today).
+        val embedded = runCatching { readEmbeddedLyrics(row.path) }.getOrNull()?.takeIf { it.isNotBlank() }
+        return embedded?.let { parseLrc(it) } ?: Lyrics.None
     }
 
-    // Local favourites cover tracks and albums (persisted in AppPreferences; the index stays
-    // favourite-agnostic). Artists/genres/playlists aren't favouritable here.
+    // Local favourites cover tracks, albums, artists and genres (persisted in AppPreferences; the index
+    // stays favourite-agnostic). Playlists aren't favouritable here — there are no local playlists yet.
     override fun supportsFavorites(kind: FavoritableKind): Boolean =
-        kind == FavoritableKind.Track || kind == FavoritableKind.Album
+        kind == FavoritableKind.Track || kind == FavoritableKind.Album ||
+        kind == FavoritableKind.Artist || kind == FavoritableKind.Genre
 
     override suspend fun isFavorite(kind: FavoritableKind, id: String): Boolean =
         id in AppPreferences.localFavorites(kind.name)
 
     override suspend fun setFavorite(kind: FavoritableKind, id: String, favorite: Boolean) {
         AppPreferences.setLocalFavorite(kind.name, id, favorite)
-        // Album cards read `favorite` off the model, so re-derive to reflect the change in the grid.
-        if (kind == FavoritableKind.Album) deriveAndEmit(rows)
+        // Album/artist/genre cards read `favorite` off the model, so re-derive to reflect the change in
+        // the grids. Track hearts are read per-query via trackFavorites(), so they need no re-derive.
+        if (kind != FavoritableKind.Track) deriveAndEmit(rows)
     }
 
     // --- Folder management (driven by the local-library settings UI) -------------------------------
@@ -430,6 +446,13 @@ class LocalSource(
         }
     }
 }
+
+/** In-source track search: match the term against the title, album name, or any credited artist —
+ *  parity with Subsonic's `search3`, which spans the same fields (the old filter matched title only). */
+private fun StoredTrack.matchesSearch(term: String): Boolean =
+    title.contains(term, ignoreCase = true) ||
+        album?.contains(term, ignoreCase = true) == true ||
+        artists.any { it.contains(term, ignoreCase = true) }
 
 private fun List<StoredTrack>.sortedForBrowse(sortBy: TrackSortOrder): List<StoredTrack> = when (sortBy) {
     TrackSortOrder.Alphabetical -> sortedBy { it.title.lowercase() }
