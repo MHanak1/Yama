@@ -5,6 +5,9 @@ Yama is a Kotlin Multiplatform (KMP) music app.
 
 The goal of this app is to provide a unified experience across various platforms and music backends.
 
+> [!NOTE]  
+> The majority of the code in this project is AI-written. If you oppose to that, there are many great alternatives like [Finamp](https://github.com/finamp-app/finamp) (mobile), [Symfonium](https://www.symfonium.app/) (mobile, paid) or [Feishin](https://github.com/jeffvli/feishin) (desktop). 
+
 ## Major Features
 
 ![Yama Screenshots](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/screenshots/screenshots.png)
@@ -69,15 +72,13 @@ I do not guarantee it will work on a smartwatch, at least not yet.
 |---------------------|---------|
 | Jellyfin            | ✅️      |
 | Navidrome           | ✅️      |
-| Local Files         | ✅️\*    |
+| Local Files         | ✅️      |
 | Music Assistant     | 🚧      |
 | Plex                | ➖️      |
 | Other Media Servers | ➖️      |
-| Streaming Services  | ❌️\*\*  |
+| Streaming Services  | ❌️\*    |
 
-\*Local files support is still sub-par, and will require more work
-
-\*\*Most, if not all commercial streaming services disallow 3rd party apps, so even if it would be possible for the app to play audio from them, it would be against their TOS.
+\*Most, if not all commercial streaming services disallow 3rd party apps, so even if it would be possible for the app to play audio from them, it would be against their TOS.
 
 - ✅️ - Supported
 - 🚧 - In progress / Planned
