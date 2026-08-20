@@ -1,0 +1,42 @@
+# Maintainer: Michał Hanak <mail@mhanak.net>
+
+pkgname=yama-bin
+_appname=Yama
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A self-hosted music client (Jellyfin / Subsonic / local / Music Assistant)"
+arch=('x86_64')
+url="https://github.com/MHanak1/Yama"
+license=('GPL-3.0-or-later')
+depends=('vlc' 'hicolor-icon-theme')
+provides=('yama')
+conflicts=('yama')
+# The app image ships prebuilt native libs (bundled JRE, libvlc glue) — don't let makepkg strip them.
+options=('!strip')
+source=("$pkgname-$pkgver.tar.gz::${url}/releases/download/v${pkgver}/yama-${pkgver}-linux-x64.tar.gz"
+        "yama.desktop")
+# Run `updpkgsums` after bumping pkgver to fill the tarball hash. 'SKIP' is fine for a first cut.
+sha256sums=('SKIP'
+            'SKIP')
+
+package() {
+    # Drop the self-contained app image under /opt.
+    install -dm755 "$pkgdir/opt/yama"
+    cp -a "$srcdir/$_appname/." "$pkgdir/opt/yama/"
+
+    # Launcher on PATH.
+    install -dm755 "$pkgdir/usr/bin"
+    ln -s "/opt/yama/bin/$_appname" "$pkgdir/usr/bin/yama"
+
+    # License text, shipped inside the release tarball next to the app image (GPLv3 §4).
+    if [[ -f "$srcdir/LICENSE" ]]; then
+        install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    fi
+
+    # Desktop entry + icon.
+    install -Dm644 "$srcdir/yama.desktop" "$pkgdir/usr/share/applications/yama.desktop"
+    if [[ -f "$pkgdir/opt/yama/lib/$_appname.png" ]]; then
+        install -Dm644 "$pkgdir/opt/yama/lib/$_appname.png" \
+            "$pkgdir/usr/share/icons/hicolor/512x512/apps/yama.png"
+    fi
+}
