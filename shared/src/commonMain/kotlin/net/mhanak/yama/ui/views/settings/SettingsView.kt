@@ -18,10 +18,10 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,10 +47,9 @@ import net.mhanak.yama.ui.screens.AboutRoute
 import net.mhanak.yama.ui.screens.AppearanceSettingsRoute
 import net.mhanak.yama.ui.screens.DownloadsSettingsRoute
 import net.mhanak.yama.ui.screens.LocalLibrarySettingsRoute
+import net.mhanak.yama.ui.screens.BehaviorSettingsRoute
 import net.mhanak.yama.ui.screens.PlaybackSettingsRoute
 import net.mhanak.yama.ui.screens.ScrobblingSettingsRoute
-import net.mhanak.yama.ui.screens.SystemSettingsRoute
-import net.mhanak.yama.supportsSystemTray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,8 +89,20 @@ fun SettingsView(
                     iconContainerColor = Color.hsv(200f, 0.6f, 1f),
                     iconContentColor = Color.hsv(200f, 1f, 0.4f),
                     title = "Appearance",
-                    subtitle = "Theme, colours, blur & album art",
+                    subtitle = "Theme, colours, album art & layout",
                     onClick = { onNavigate(AppearanceSettingsRoute) },
+                )
+                Spacer(Modifier.height(8.dp))
+                // The two app-wide UX categories sit together at the top: Appearance (how it looks),
+                // Behavior (how it acts). Cross-platform — the rows inside gate themselves (tray on
+                // desktop, controller/TV toggle off real TVs), so the category always shows.
+                SettingsCategoryCard(
+                    icon = Icons.Default.Tune,
+                    iconContainerColor = Color.hsv(260f, 0.4f, 1f),
+                    iconContentColor = Color.hsv(260f, 1f, 0.4f),
+                    title = "Behavior",
+                    subtitle = "Startup, controls & window",
+                    onClick = { onNavigate(BehaviorSettingsRoute) },
                 )
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(
@@ -129,19 +140,6 @@ fun SettingsView(
                     subtitle = "Music folders & scan settings",
                     onClick = { onNavigate(LocalLibrarySettingsRoute) },
                 )
-                // Desktop-only: window/tray behaviour. Absent on Android and on desktops with no
-                // working tray, since there's nothing to configure there.
-                if (supportsSystemTray()) {
-                    Spacer(Modifier.height(8.dp))
-                    SettingsCategoryCard(
-                        icon = Icons.Default.Computer,
-                        iconContainerColor = Color.hsv(260f, 0.6f, 1f),
-                        iconContentColor = Color.hsv(260f, 1f, 0.4f),
-                        title = "System",
-                        subtitle = "Tray & window behaviour",
-                        onClick = { onNavigate(SystemSettingsRoute) },
-                    )
-                }
                 Spacer(Modifier.height(8.dp))
                 SettingsCategoryCard(
                     icon = Icons.Outlined.Info,

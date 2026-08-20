@@ -1,19 +1,12 @@
 package net.mhanak.yama.ui.components.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
 
@@ -21,20 +14,20 @@ import net.mhanak.yama.LocalAppContainer
 fun PlaybackSettings(modifier: Modifier = Modifier) {
     val appContainer = LocalAppContainer.current
     Column(modifier = modifier) {
+        // These three form one group, so no dividers between them — a divider only precedes the next
+        // section header (matching Downloads / Scrobbling).
         SettingToggle(
             title = "Allow remote control",
             subtitle = "Let other clients play to this device (\"Play On\")",
             checked = appContainer.allowRemoteControl,
             onCheckedChange = { appContainer.allowRemoteControl = it },
         )
-        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
         SettingToggle(
             title = "Use device volume",
             subtitle = "Use the system volume instead of an in-app slider",
             checked = appContainer.useDeviceVolume,
             onCheckedChange = { appContainer.useDeviceVolume = it },
         )
-        HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
         SettingToggle(
             title = "Keep screen on while playing",
             subtitle = "Stop the screen from dimming while the full player is open",
@@ -51,35 +44,8 @@ fun PlaybackSettings(modifier: Modifier = Modifier) {
                 supportingText = "Applies from the next track",
             )
         }
-        // The Controller / TV layout toggle moved to Settings → Appearance → Layout.
+        // The Controller / TV layout toggle moved to Settings → Behavior.
         Spacer(Modifier.height(8.dp))
     }
-}
-
-@Composable
-private fun SettingToggle(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(subtitle) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
-        modifier = modifier.clickable { onCheckedChange(!checked) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-    )
-}
-
-@Composable
-private fun SettingsSectionHeader(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-    )
 }
 

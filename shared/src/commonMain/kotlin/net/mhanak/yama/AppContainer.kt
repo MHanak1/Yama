@@ -150,7 +150,6 @@ class AppContainer {
         defaultQuality = { downloadQuality },
         cacheQuality = { streamingQuality },
         wifiOnly = { downloadOverWifiOnly },
-        backgroundDownloads = { backgroundDownloads },
         cacheBudgetMb = { cacheSizeBudgetMb },
     )
 
@@ -290,11 +289,6 @@ class AppContainer {
     var downloadOverWifiOnly: Boolean
         get() = _downloadOverWifiOnly.value
         set(value) { _downloadOverWifiOnly.value = value; AppPreferences.downloadOverWifiOnly = value }
-
-    private val _backgroundDownloads = mutableStateOf(AppPreferences.backgroundDownloads)
-    var backgroundDownloads: Boolean
-        get() = _backgroundDownloads.value
-        set(value) { _backgroundDownloads.value = value; AppPreferences.backgroundDownloads = value }
 
     private val _cacheRecentTracks = mutableStateOf(AppPreferences.cacheRecentTracks)
     var cacheRecentTracks: Boolean

@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.components.interaction.ContentFocusHost
 import net.mhanak.yama.ui.components.settings.PlaybackSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,14 +42,16 @@ fun PlaybackSettingsView(
             )
         },
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            PlaybackSettings()
-            Spacer(Modifier.height(bottomContentPadding))
+        ContentFocusHost(Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                PlaybackSettings()
+                Spacer(Modifier.height(bottomContentPadding))
+            }
         }
     }
 }

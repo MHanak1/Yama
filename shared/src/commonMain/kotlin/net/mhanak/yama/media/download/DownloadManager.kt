@@ -62,7 +62,6 @@ class DownloadManager(
     private val defaultQuality: () -> StreamingQuality,
     private val cacheQuality: () -> StreamingQuality = defaultQuality,
     private val wifiOnly: () -> Boolean = { false },
-    private val backgroundDownloads: () -> Boolean = { true },
     private val cacheBudgetMb: () -> Int = { 1024 },
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -76,9 +75,8 @@ class DownloadManager(
     // cancelled (a Failed entry stays so [retry] can re-queue it).
     private val pendingTracks = ConcurrentHashMap<String, Track>()
 
-    // Serial, Wi-Fi-aware background queue. When "Background downloads" is off, requests run
-    // immediately on [scope] instead (the foreground fallback the plan calls for). [onWaiting] flips a
-    // held job's row to WaitingForNetwork so the UI can explain the stall (and offer "Download now").
+    // Serial, Wi-Fi-aware background queue that every download goes through. [onWaiting] flips a held
+    // job's row to WaitingForNetwork so the UI can explain the stall (and offer "Download now").
     private val scheduler = DownloadScheduler(
         wifiOnly = wifiOnly,
         onWaiting = { trackId -> updateState(trackId, DownloadState.WaitingForNetwork) },
@@ -91,15 +89,10 @@ class DownloadManager(
         repo.onStaleOnline = { key, row -> onStaleOnline(key, row) }
     }
 
-    /** Route a request through the background scheduler, or run it at once when background downloads
-     *  are disabled (the user tapped download and wants it now, metered or not). */
-    private fun submit(request: DownloadRequest) {
-        if (backgroundDownloads()) scheduler.enqueue(request)
-        else scope.launch {
-            runCatching { executeRequest(request) }
-                .onFailure { log.error("executeRequest failed for track=${request.trackId}", it) }
-        }
-    }
+    /** Route every request through the background scheduler — serial, Wi-Fi-aware, and (on Android)
+     *  able to survive process death via WorkManager. There is no foreground fast-path: an immediate,
+     *  metered download is instead handled per-job by "Download now" on a Wi-Fi-parked row. */
+    private fun submit(request: DownloadRequest) = scheduler.enqueue(request)
 
     // --- Enqueue entry points ----------------------------------------------------------------------
 

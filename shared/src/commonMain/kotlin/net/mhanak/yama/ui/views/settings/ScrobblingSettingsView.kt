@@ -43,15 +43,15 @@ fun ScrobblingSettingsView(
         },
     ) { innerPadding ->
         ContentFocusHost(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            ScrobblingSettings()
-            Spacer(Modifier.height(bottomContentPadding))
-        }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                ScrobblingSettings()
+                Spacer(Modifier.height(bottomContentPadding))
+            }
         }
     }
 }

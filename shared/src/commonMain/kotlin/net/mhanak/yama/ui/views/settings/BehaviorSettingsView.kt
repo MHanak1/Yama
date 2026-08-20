@@ -20,11 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.ui.components.interaction.ContentFocusHost
-import net.mhanak.yama.ui.components.settings.SystemSettings
+import net.mhanak.yama.ui.components.settings.BehaviorSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SystemSettingsView(
+fun BehaviorSettingsView(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     bottomContentPadding: Dp = 0.dp,
@@ -33,7 +33,7 @@ fun SystemSettingsView(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("System") },
+                title = { Text("Behavior") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -43,15 +43,15 @@ fun SystemSettingsView(
         },
     ) { innerPadding ->
         ContentFocusHost(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            SystemSettings()
-            Spacer(Modifier.height(bottomContentPadding))
-        }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                BehaviorSettings()
+                Spacer(Modifier.height(bottomContentPadding))
+            }
         }
     }
 }

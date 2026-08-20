@@ -44,15 +44,15 @@ fun AppearanceSettingsView(
         },
     ) { innerPadding ->
         ContentFocusHost(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            AppearanceSettings(onOpenHomeLayout = onOpenHomeLayout)
-            Spacer(Modifier.height(bottomContentPadding))
-        }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                AppearanceSettings(onOpenHomeLayout = onOpenHomeLayout)
+                Spacer(Modifier.height(bottomContentPadding))
+            }
         }
     }
 }

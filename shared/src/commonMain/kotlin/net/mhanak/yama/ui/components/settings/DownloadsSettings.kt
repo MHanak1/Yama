@@ -14,7 +14,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,7 +22,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
@@ -31,8 +29,8 @@ import net.mhanak.yama.media.sources.OfflineCapable
 
 /**
  * Settings for the offline/downloads layer (see DOWNLOADS_PLAN.md): the default download quality, the
- * background-queue + Wi-Fi-only constraints, the recent-tracks cache and its size budget, and
- * offline-play recording. Managing actual downloads lives in the Downloads hub, not here.
+ * Wi-Fi-only constraint, the recent-tracks cache and its size budget, and offline-play recording.
+ * Managing actual downloads lives in the Downloads hub, not here.
  */
 @Composable
 fun DownloadsSettings(
@@ -50,17 +48,10 @@ fun DownloadsSettings(
             onSelect = { appContainer.downloadQuality = it },
         )
         SettingToggle(
-            title = "Background downloads",
-            subtitle = "Queue downloads instead of starting each immediately",
-            checked = appContainer.backgroundDownloads,
-            onCheckedChange = { appContainer.backgroundDownloads = it },
-        )
-        SettingToggle(
             title = "Download over Wi-Fi only",
-            subtitle = "Hold queued downloads until on an unmetered network",
+            subtitle = "Hold downloads until on an unmetered network",
             checked = appContainer.downloadOverWifiOnly,
             onCheckedChange = { appContainer.downloadOverWifiOnly = it },
-            enabled = appContainer.backgroundDownloads,
         )
 
         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
@@ -144,26 +135,6 @@ private fun formatMb(mb: Int): String =
     if (mb >= 1024) "${(mb * 10 / 1024) / 10f} GB" else "$mb MB"
 
 @Composable
-private fun SettingToggle(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true,
-) {
-    val alpha = if (enabled) 1f else 0.4f
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(subtitle) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
-        modifier = Modifier
-            .then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier)
-            .alpha(alpha),
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-    )
-}
-
-@Composable
 private fun SettingsRow(
     title: String,
     subtitle: String,
@@ -179,12 +150,3 @@ private fun SettingsRow(
     )
 }
 
-@Composable
-private fun SettingsSectionHeader(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-    )
-}

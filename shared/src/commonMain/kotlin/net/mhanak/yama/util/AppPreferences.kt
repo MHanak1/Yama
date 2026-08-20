@@ -181,12 +181,6 @@ object AppPreferences {
         get() = settings.getBoolean("download_wifi_only", false)
         set(value) { settings.putBoolean("download_wifi_only", value) }
 
-    // Queue downloads on a single background queue (respecting Wi-Fi-only) rather than starting each
-    // immediately. On by default.
-    var backgroundDownloads: Boolean
-        get() = settings.getBoolean("background_downloads", true)
-        set(value) { settings.putBoolean("background_downloads", value) }
-
     // Play-capture: cache the track that's *currently playing* so replaying it doesn't re-fetch. On
     // desktop this background-re-fetches a not-already-cached current track; on Android the playback
     // engine's read-through cache captures the stream for free. Off by default — opt in to spend disk.

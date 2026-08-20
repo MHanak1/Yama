@@ -43,15 +43,15 @@ fun DownloadsSettingsView(
         },
     ) { innerPadding ->
         ContentFocusHost(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            DownloadsSettings()
-            Spacer(Modifier.height(bottomContentPadding))
-        }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                DownloadsSettings()
+                Spacer(Modifier.height(bottomContentPadding))
+            }
         }
     }
 }
