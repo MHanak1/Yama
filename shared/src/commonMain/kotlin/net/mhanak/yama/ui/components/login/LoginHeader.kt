@@ -22,7 +22,7 @@ import yama.shared.generated.resources.yama_logo
  * Login-screen hero: the gradient waveform mark beside the "Yama" wordmark, side by side.
  *
  * The mark is [Res.drawable.yama_logo] — the app icon with its background layer stripped
- * (regenerated from `resources/branding/icon.svg` by `tools/generate_icons.sh`), so it sits on transparency and reads on any
+ * (regenerated from `resources/branding/logo.svg` by `tools/generate_icons.sh`), so it sits on transparency and reads on any
  * surface. The wordmark is a real [Text] (not baked into the image) so it follows the theme's
  * `onSurface` colour in both light and dark.
  */
