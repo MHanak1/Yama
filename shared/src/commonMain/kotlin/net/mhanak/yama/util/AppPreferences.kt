@@ -6,6 +6,7 @@ import net.mhanak.yama.media.sources.HomeBlockKind
 import net.mhanak.yama.ui.screens.LaunchDestination
 import net.mhanak.yama.ui.theme.ThemeMode
 import net.mhanak.yama.ui.theme.AlbumTintMode
+import net.mhanak.yama.ui.theme.ColorSourceKind
 import net.mhanak.yama.ui.player.PlayerLayoutMode
 
 // commonMain
@@ -50,11 +51,19 @@ object AppPreferences {
         get() = ThemeMode.entries.getOrElse(settings.getInt("theme_mode", ThemeMode.System.ordinal)) { ThemeMode.System }
         set(value) { settings.putInt("theme_mode", value.ordinal) }
 
-    // Use the OS dynamic palette (Android 12+ "Material You"). Defaults on; it's gated by
-    // supportsDynamicColor() at the use site, so it's effectively off where the platform can't provide one.
-    var useMaterialYou: Boolean
-        get() = settings.getBoolean("use_material_you", true)
-        set(value) { settings.putBoolean("use_material_you", value) }
+    // Origin of the base colour scheme's seed (replaces the legacy `use_material_you` boolean, still
+    // read once here to migrate existing users). Stored by name for forward-compat if the enum is
+    // reordered; AppContainer clamps a value the current platform can't offer down to Manual.
+    var colorSource: ColorSourceKind
+        get() {
+            settings.getStringOrNull("color_source")?.let { name ->
+                runCatching { ColorSourceKind.valueOf(name) }.getOrNull()?.let { return it }
+            }
+            // Migrate: Material You on (the old default) → SystemDynamic, off → Manual.
+            return if (settings.getBoolean("use_material_you", true)) ColorSourceKind.SystemDynamic
+            else ColorSourceKind.Manual
+        }
+        set(value) { settings.putString("color_source", value.name) }
 
     // Seed colour (packed ARGB) for the generated default scheme, used when Material You is off/unsupported.
     var seedColor: Int

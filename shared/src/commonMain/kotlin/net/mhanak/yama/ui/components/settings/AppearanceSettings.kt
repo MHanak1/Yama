@@ -39,10 +39,12 @@ import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.ui.theme.AlbumTintMode
 import net.mhanak.yama.ui.player.PlayerLayoutMode
 import net.mhanak.yama.ui.theme.ThemeMode
-import net.mhanak.yama.ui.theme.supportsDynamicColor
 import net.mhanak.yama.ui.theme.supportsBlurEffects
 import net.mhanak.yama.ui.components.input.SegmentedButtonRow
+import net.mhanak.yama.ui.theme.ColorSourceKind
 import net.mhanak.yama.ui.theme.SeedColorPicker
+import net.mhanak.yama.ui.theme.availableColorSources
+import net.mhanak.yama.ui.theme.colorSchemeFilePath
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,23 +89,36 @@ fun AppearanceSettings(
             ) { mode -> Text(themeLabels[mode] ?: mode.name) }
         }
 
-        // System dynamic palette ("Material You"). Hidden where the platform can't provide one
-        // (desktop, Android < 12), in which case the app always uses the generated seed scheme.
-        val dynamicSupported = supportsDynamicColor()
-        if (dynamicSupported) {
+        // Colour source: where the base palette's seed comes from (Material You / the desktop shell
+        // accent, versus a custom colour). The switch below is only shown when the platform offers a
+        // non-custom source; otherwise just the custom seed picker shows. Album-art tinting still layers
+        // on top — see the Album art section below.
+        val colorSources = remember { availableColorSources() }
+        val selectedSource = appContainer.colorSource
+        // The one non-custom source this platform offers, if any (Material You on Android, the shell
+        // accent on desktop). There is at most one for now, so a single on/off switch between it and the
+        // custom seed is enough — matching Android's old "Use Material You" toggle.
+        // NOTE: this binary switch only works while there are exactly two sources. When a third is added
+        // (e.g. wallpaper extraction), replace it with a multi-option picker over `colorSources`.
+        val systemSource = remember(colorSources) { colorSources.firstOrNull { it != ColorSourceKind.Manual } }
+        if (systemSource != null) {
             HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
             ListItem(
-                headlineContent = { Text("Use Material You") },
-                supportingContent = { Text("Follow your system's dynamic colour palette") },
-                trailingContent = { Switch(checked = appContainer.useMaterialYou, onCheckedChange = null) },
-                modifier = Modifier.clickable { appContainer.useMaterialYou = !appContainer.useMaterialYou },
+                headlineContent = { Text(systemSource.label) },
+                supportingContent = { Text(systemSource.description) },
+                trailingContent = { Switch(checked = selectedSource == systemSource, onCheckedChange = null) },
+                modifier = Modifier.clickable {
+                    appContainer.colorSource =
+                        if (selectedSource == systemSource) ColorSourceKind.Manual else systemSource
+                },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
         }
 
-        // Seed colour drives the generated scheme; only relevant when the system palette isn't in use.
-        if (!dynamicSupported || !appContainer.useMaterialYou) {
-            HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+        // Custom seed colour, shown when the user picks the Manual source (also the sole option on
+        // platforms that offer nothing else). On desktop the seed is mirrored to a theme file, whose
+        // path is shown so the user can point their theming tools (matugen &c.) at it.
+        if (selectedSource == ColorSourceKind.Manual) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
                     "Accent colour",
@@ -115,6 +130,14 @@ fun AppearanceSettings(
                     onColorChange = { appContainer.seedColor = it },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                colorSchemeFilePath()?.let { path ->
+                    Text(
+                        "Synced to $path — point your theming tools here to drive this colour.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
         }
 

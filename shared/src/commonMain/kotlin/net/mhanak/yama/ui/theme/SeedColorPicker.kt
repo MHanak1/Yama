@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import kotlin.math.max
 import kotlin.math.min
@@ -44,6 +46,17 @@ fun SeedColorPicker(
     var brightness by remember { mutableFloatStateOf(initial.third) }
 
     fun emit() = onColorChange(Color.hsv(hue, saturation, brightness))
+
+    // Re-seed the sliders when [color] arrives *different* from what they already show — i.e. an external
+    // update (a theming tool rewrote the desktop scheme file), not the echo of our own emission coming
+    // back through the caller. Compared on 8-bit RGB, since the stored seed round-trips through an ARGB
+    // int; the drag path always matches here (the caller just stored what we emitted), so no jitter.
+    LaunchedEffect(color) {
+        if (Color.hsv(hue, saturation, brightness).rgb24() != color.rgb24()) {
+            val (h, s, v) = color.toHsv()
+            hue = h; saturation = s; brightness = v
+        }
+    }
 
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -70,6 +83,10 @@ private fun LabeledSlider(
         Slider(value = value, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f))
     }
 }
+
+/** The 24-bit RGB of this colour — the stable identity a seed keeps when it round-trips through an ARGB
+ *  int (unlike the float channels), used to tell an external colour change from our own drag echo. */
+private fun Color.rgb24(): Int = toArgb() and 0xFFFFFF
 
 /** Decompose an opaque colour into hue (0..360), saturation (0..1) and value/brightness (0..1). */
 private fun Color.toHsv(): Triple<Float, Float, Float> {

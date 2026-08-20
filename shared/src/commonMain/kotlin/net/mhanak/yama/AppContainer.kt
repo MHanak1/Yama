@@ -56,6 +56,8 @@ import net.mhanak.yama.session.ListenBrainzConfig
 import net.mhanak.yama.session.ListenBrainzConfigRepository
 import net.mhanak.yama.session.SubsonicSessionRepository
 import net.mhanak.yama.ui.theme.AlbumTintMode
+import net.mhanak.yama.ui.theme.ColorSourceKind
+import net.mhanak.yama.ui.theme.availableColorSources
 import net.mhanak.yama.ui.player.PlayerLayoutMode
 import net.mhanak.yama.util.AppPreferences
 import net.mhanak.yama.util.SecureStorage
@@ -594,10 +596,14 @@ class AppContainer {
         get() = _themeMode.value
         set(value) { _themeMode.value = value; AppPreferences.themeMode = value }
 
-    private val _useMaterialYou = mutableStateOf(AppPreferences.useMaterialYou)
-    var useMaterialYou: Boolean
-        get() = _useMaterialYou.value
-        set(value) { _useMaterialYou.value = value; AppPreferences.useMaterialYou = value }
+    private val _colorSource = mutableStateOf(
+        // Clamp a stored/migrated selection the current platform can't offer (e.g. a desktop user
+        // migrated from Material You) down to the universal Manual fallback.
+        AppPreferences.colorSource.let { if (it in availableColorSources()) it else ColorSourceKind.Manual },
+    )
+    var colorSource: ColorSourceKind
+        get() = _colorSource.value
+        set(value) { _colorSource.value = value; AppPreferences.colorSource = value }
 
     private val _seedColor = mutableStateOf(Color(AppPreferences.seedColor))
     var seedColor: Color
