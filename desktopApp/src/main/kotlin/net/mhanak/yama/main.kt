@@ -17,6 +17,7 @@ import net.mhanak.yama.platform.SingleInstance
 import net.mhanak.yama.platform.TrayEvent
 import net.mhanak.yama.platform.TrayPlaybackState
 import net.mhanak.yama.util.AppPreferences
+import net.mhanak.yama.util.handlePlaybackShortcut
 import java.awt.Frame
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -92,6 +93,10 @@ fun main() {
             visible = isVisible,
             title = "Yama",
             icon = painterResource("icon.png"),
+            // Bubble-phase transport shortcuts (Space, ←/→ seek, ↑/↓ volume) on the *viewed* player.
+            // At the scene root so it catches keys whatever's focused, yet still after text fields/lists
+            // consume theirs. No media keys here — those are the OS layer's (MPRIS / future SMTC).
+            onKeyEvent = { handlePlaybackShortcut(it, playback, AppContainer.shared.forceTvMode) },
         ) {
             App()
 
