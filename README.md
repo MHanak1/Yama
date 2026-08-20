@@ -1,4 +1,4 @@
-![Yama Logo](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/banner.svg)
+![Yama Logo](https://raw.githubusercontent.com/MHanak1/Yama/refs/heads/main/resources/branding/banner.svg)
 Yama is a Kotlin Multiplatform (KMP) music app.
 
 ## Goals

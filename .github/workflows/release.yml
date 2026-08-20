@@ -82,6 +82,25 @@ jobs:
           Copy-Item "$src/plugins"        "$dst/plugins" -Recurse -Force
           Write-Host "Staged libvlc into $dst"
 
+      # Compile the WinRT SMTC shim (media keys / flyout) and stage it next to libvlc so jpackage
+      # bundles it. Source is desktopApp/native/smtc/yama_smtc.cpp; see SMTC_PLAN.md. windows-latest
+      # ships MSVC + the Windows SDK (with the C++/WinRT headers under Include\<ver>\cppwinrt), so no
+      # extra toolchain install is needed — we just locate vcvars via vswhere.
+      - name: Build SMTC shim (yama_smtc.dll)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`vswhere -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          if not exist desktopApp\resources\windows-x64\smtc mkdir desktopApp\resources\windows-x64\smtc
+          cl /nologo /LD /std:c++17 /EHsc /permissive- /DUNICODE /D_UNICODE ^
+             /I "%WindowsSdkDir%Include\%WindowsSDKVersion%cppwinrt" ^
+             desktopApp\native\smtc\yama_smtc.cpp ^
+             /Fe:desktopApp\resources\windows-x64\smtc\yama_smtc.dll ^
+             /link RuntimeObject.lib ole32.lib oleaut32.lib
+          if errorlevel 1 exit /b 1
+          if not exist desktopApp\resources\windows-x64\smtc\yama_smtc.dll exit /b 1
+          echo Staged yama_smtc.dll into desktopApp\resources\windows-x64\smtc
+
       - name: Build MSI
         shell: pwsh
         run: .\gradlew.bat :desktopApp:packageMsi --no-daemon

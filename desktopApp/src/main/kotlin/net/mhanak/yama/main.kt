@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import net.mhanak.yama.platform.DesktopTray
 import net.mhanak.yama.platform.MprisService
 import net.mhanak.yama.platform.SingleInstance
+import net.mhanak.yama.platform.SmtcService
 import net.mhanak.yama.platform.TrayEvent
 import net.mhanak.yama.platform.TrayPlaybackState
 import net.mhanak.yama.util.AppPreferences
@@ -40,6 +41,11 @@ fun main() {
         }
         val tray = remember { DesktopTray.install(title = "Yama") }  // null where no tray backend works
 
+        // Windows OS media integration (media keys / flyout / lockscreen), the counterpart to MPRIS on
+        // Linux. Bound to the *viewed* player; started below once the window handle exists. No-ops off
+        // Windows and when the native shim isn't bundled (e.g. ./gradlew run).
+        val smtc = remember { SmtcService(AppContainer.shared.playback) }
+
         // The window can be hidden (to tray) without ending the process, so its visibility is state.
         var isVisible by remember { mutableStateOf(true) }
 
@@ -48,6 +54,7 @@ fun main() {
         fun quit() {
             instance.close()
             mpris.stop()
+            smtc.stop()
             tray?.dispose()
             exitApplication()
         }
@@ -99,6 +106,10 @@ fun main() {
             onKeyEvent = { handlePlaybackShortcut(it, playback, AppContainer.shared.forceTvMode) },
         ) {
             App()
+
+            // Bind SMTC to this window's native handle now that it's displayable. Idempotent + no-op
+            // off Windows, so an unconditional call is fine.
+            LaunchedEffect(Unit) { smtc.start(window) }
 
             // Raise + focus the window. Driven off the show *event*, not the visibility state, so a
             // second launch steals focus even when the window is already visible (isVisible unchanged).

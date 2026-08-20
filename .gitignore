@@ -18,6 +18,7 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 .claude
+.zed
 
 # Release signing — never commit keystores or their passwords
 keystore.properties
@@ -26,6 +27,9 @@ keystore.properties
 
 # Bundled libvlc is downloaded fresh in CI, never committed
 desktopApp/resources/*/vlc/
+# The SMTC shim DLL is compiled fresh in CI from desktopApp/native/smtc/; only the source is committed
+desktopApp/resources/*/smtc/
+
 
 # JVM crash logs
 hs_err_pid*.log
