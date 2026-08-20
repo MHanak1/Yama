@@ -30,7 +30,9 @@ fun main() {
         // visibility changes), so they're remembered rather than rebuilt each pass.
         val mpris = remember {
             MprisService(
-                AppContainer.shared.playback.local,
+                // The controller, not .local — MPRIS mirrors the *viewed* player so the OS media widget
+                // and hardware media keys follow the UI onto a "Play On" target while casting.
+                AppContainer.shared.playback,
                 // Resolve lyrics through the active source, same seam the full player uses.
                 lyricsProvider = { id -> AppContainer.shared.activeMusicSource.getLyrics(id) },
             ).also { it.start() }

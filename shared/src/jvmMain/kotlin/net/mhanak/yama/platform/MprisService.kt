@@ -1,14 +1,17 @@
 package net.mhanak.yama.platform
 
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Lyrics
 import net.mhanak.yama.media.model.Track
-import net.mhanak.yama.media.playback.LocalPlayer
+import net.mhanak.yama.media.playback.PlaybackController
+import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.playback.PlaybackState
 import net.mhanak.yama.media.playback.PlayerStatus
 import net.mhanak.yama.media.playback.RepeatMode
@@ -34,7 +37,13 @@ private const val IFACE_PLAYER = "org.mpris.MediaPlayer2.Player"
  * Transport is discovered at runtime via ServiceLoader from dbus-java-transport-native-unixsocket.
  */
 class MprisService(
-    private val player: LocalPlayer,
+    /**
+     * The controller whose *viewed* player MPRIS mirrors — this device's own playback, or a remote
+     * ("Play On") target while casting. Bound to [PlaybackController.viewed] rather than [local] so the
+     * OS media widget and hardware media keys follow whatever the UI is showing, matching Android's
+     * `PlaybackService.observeActivePlayer`.
+     */
+    private val playback: PlaybackController,
     /**
      * Resolves the plain-text lyrics for a track id, mirroring the UI's own
      * `activeMusicSource.getLyrics(id)`. Optional — when null, MPRIS simply omits `xesam:asText`.
@@ -51,9 +60,17 @@ class MprisService(
             val c = DBusConnectionBuilder.forSessionBus().build()
             conn = c
             c.requestBusName(MPRIS_SERVICE)
-            val handler = MprisHandler(c, player, scope, lyricsProvider)
+            val handler = MprisHandler(c, playback.viewed, scope, lyricsProvider)
             c.exportObject(MPRIS_PATH, handler)
-            scope.launch { player.status.collect { handler.onStatusChanged(it) } }
+            // Follow the viewed player across "Play On" swaps: re-point command dispatch at the new
+            // player and re-subscribe its status. collectLatest cancels the previous status collection
+            // the moment `viewed` swaps, so a stale remote's updates can't leak onto the bus.
+            scope.launch {
+                snapshotFlow { playback.viewed }.collectLatest { player ->
+                    handler.player = player
+                    player.status.collect { handler.onStatusChanged(it) }
+                }
+            }
         }.onFailure {
             log.warn("D-Bus unavailable — MPRIS disabled", it)
         }
@@ -89,7 +106,9 @@ interface MprisPlayer : DBusInterface {
 
 private class MprisHandler(
     private val conn: DBusConnection,
-    private val player: LocalPlayer,
+    // The player commands dispatch to. Swapped by the viewed-player observer in [MprisService.start],
+    // so it's @Volatile — reads happen on D-Bus threads, writes on the observer's coroutine.
+    @Volatile var player: Player,
     private val scope: CoroutineScope,
     private val lyricsProvider: (suspend (trackId: String) -> Lyrics)?,
 ) : MprisRoot, MprisPlayer, Properties {
