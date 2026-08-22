@@ -107,6 +107,15 @@ object AppPreferences {
         get() = settings.getBoolean("force_tv_mode", false)
         set(value) { settings.putBoolean("force_tv_mode", value) }
 
+    // Whether to reconnect to the last "Play On" (remote/cast) target for the active source when the
+    // app launches. Off by default — the app opens on local playback and the user re-picks a target if
+    // they want one. The chosen target is still *persisted* regardless, so switching source and back
+    // within a session restores it (that mid-session restore isn't gated by this); only the launch-time
+    // replay is. Consulted once in AppContainer.init.
+    var restorePlaybackTargetOnLaunch: Boolean
+        get() = settings.getBoolean("restore_playback_target_on_launch", false)
+        set(value) { settings.putBoolean("restore_playback_target_on_launch", value) }
+
     // Which top-level screen the app opens on after login. Defaults to Home.
     var launchDestination: LaunchDestination
         get() = LaunchDestination.entries.getOrElse(settings.getInt("launch_destination", LaunchDestination.Home.ordinal)) { LaunchDestination.Home }

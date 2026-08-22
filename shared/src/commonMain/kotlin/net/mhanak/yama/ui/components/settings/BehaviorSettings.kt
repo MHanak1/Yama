@@ -30,6 +30,7 @@ import net.mhanak.yama.util.AppPreferences
 @Composable
 fun BehaviorSettings(modifier: Modifier = Modifier) {
     val appContainer = LocalAppContainer.current
+    var restoreTarget by remember { mutableStateOf(AppPreferences.restorePlaybackTargetOnLaunch) }
     Column(modifier = modifier) {
 
         // ── Startup ───────────────────────────────────────────────────
@@ -50,6 +51,14 @@ fun BehaviorSettings(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(it.label) }
         }
+        // Reconnect to the last "Play On" target on launch. Read once at AppContainer init, so a local
+        // mirror is enough to keep the toggle in sync. Off by default — the app opens on local playback.
+        SettingToggle(
+            title = "Resume last playback device",
+            subtitle = "Reconnect to the last remote playback target when the app starts",
+            checked = restoreTarget,
+            onCheckedChange = { restoreTarget = it; AppPreferences.restorePlaybackTargetOnLaunch = it },
+        )
 
         // ── Input ─────────────────────────────────────────────────────
         // A real TV reports itself via isTelevisionDevice() and always uses the TV layout, so the

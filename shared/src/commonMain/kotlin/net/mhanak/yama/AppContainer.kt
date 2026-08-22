@@ -11,8 +11,11 @@ import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -405,8 +408,9 @@ class AppContainer {
         playback.local.setVolumeMode(_useDeviceVolume.value)
         // Resume the active source's remembered cast target (or local playback) on launch, the same way
         // selectSource does when switching — restoreSession in JellyfinSource has already restored the
-        // session/client by now, so a remote target can build its player.
-        playback.restoreTargetForActiveSource()
+        // session/client by now, so a remote target can build its player. Gated by a user setting (off
+        // by default): when disabled we simply leave viewedTarget null, i.e. start on local playback.
+        if (AppPreferences.restorePlaybackTargetOnLaunch) playback.restoreTargetForActiveSource()
         // The socket seeds its controlled-mode state from AppPreferences itself; this only routes
         // remote "Play On" commands from the source's push channel onto the local player. Collected
         // on Main because the transport calls reach the engine directly (Android's Media3
@@ -493,21 +497,40 @@ class AppContainer {
     /**
      * Drop back to local playback when the viewed "Play On" target disappears from the discovered list
      * — whether it was never reachable (a remembered target restored on launch that's now offline) or it
-     * went away mid-session. Gated on a *non-empty* target list so we don't reset before targets have
-     * actually been fetched: an empty list can simply mean discovery hasn't produced results yet, and
-     * resetting then would undo a perfectly valid restore. Restoring local isn't a user choice, so it
-     * doesn't overwrite their remembered target.
+     * went away mid-session, including the case where it was the only device and the list is now empty.
+     *
+     * The trap is that an empty/partial list is ambiguous: it can mean "discovery hasn't run yet",
+     * "the socket blipped", or "the link is healthy and the device is genuinely gone" — and only the
+     * last should reset. So we don't guess from the list's emptiness; we gate on the provider's own
+     * [connected][RemotePlaybackProvider.connected] flag, which is true only while the discovered list
+     * actually reflects reality. On a transient drop `connected` goes false (and the source keeps its
+     * last session list), so we neither see nor act on a spurious empty. A [debounce] on the reset
+     * closes the narrow post-reconnect window where `connected` flips true just *before* the REST
+     * resync refills the list — the list arrives within the grace period, so we never act on it.
+     *
+     * Restoring local isn't a user choice, so it doesn't overwrite their remembered target.
      */
-    @OptIn(ExperimentalCoroutinesApi::class)
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     private fun observeCastTargetAvailability() {
         scope.launch(Dispatchers.Main) {
             snapshotFlow { activeMusicSource }
-                .flatMapLatest { (it as? RemotePlaybackProvider)?.remoteTargets ?: flowOf(emptyList()) }
-                .collect { targets ->
-                    val target = playback.viewedTarget ?: return@collect
-                    if (targets.isNotEmpty() && targets.none { it.id == target.id }) {
-                        playback.selectTarget(null, remember = false)
+                .flatMapLatest { src ->
+                    val provider = src as? RemotePlaybackProvider ?: return@flatMapLatest flowOf(false)
+                    // "The viewed target is absent from an up-to-date list." All three inputs are
+                    // reactive so the verdict re-evaluates on link health, discovery, and target changes.
+                    combine(
+                        provider.connected,
+                        provider.remoteTargets,
+                        snapshotFlow { playback.viewedTarget },
+                    ) { connected, targets, target ->
+                        connected && target != null && targets.none { it.id == target.id }
                     }
+                }
+                .distinctUntilChanged()
+                // Only the "should reset" verdict waits out the grace window; clearing it is instant.
+                .debounce { absent -> if (absent) TARGET_ABSENCE_GRACE_MS else 0L }
+                .collect { absent ->
+                    if (absent) playback.selectTarget(null, remember = false)
                 }
         }
     }
@@ -615,6 +638,11 @@ class AppContainer {
         set(value) { _playerLayoutMode.value = value; AppPreferences.playerLayoutMode = value }
 
     companion object {
+        // How long the "viewed target is absent from a live list" verdict must hold before we fall back
+        // to local. Long enough to cover a post-reconnect REST resync round-trip (so we don't reset in
+        // the gap where the link is up but the list hasn't refilled), short enough to feel immediate.
+        private const val TARGET_ABSENCE_GRACE_MS = 2_500L
+
         // Process-wide singleton. On Android the Activity (and thus the Compose tree) can be
         // recreated when the app is backgrounded and reopened, while the playback foreground service
         // keeps the process alive — recreating AppContainer there would drop the playback queue and
