@@ -43,6 +43,8 @@ import net.mhanak.yama.ui.components.image.CardImage
 import net.mhanak.yama.ui.components.interaction.contentFocusItem
 import net.mhanak.yama.ui.components.state.LocalAvailability
 import net.mhanak.yama.ui.home.HomeBlockData
+import net.mhanak.yama.ui.platform.HorizontalScrollbarIfNeeded
+import net.mhanak.yama.ui.platform.horizontalTouchpadScroll
 import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
 import yama.shared.generated.resources.album
@@ -108,6 +110,7 @@ fun HomeShelf(
 
         LazyRow(
             state = listState,
+            modifier = Modifier.horizontalTouchpadScroll(listState),
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -157,6 +160,13 @@ fun HomeShelf(
                 }
             }
         }
+
+        // Desktop only: a thin scrollbar under the row so trackpad/mouse users get a visible scroll
+        // affordance and target. No-op (renders nothing, reserves no height) on Android.
+        HorizontalScrollbarIfNeeded(
+            listState,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, start = 16.dp, end = 16.dp),
+        )
     }
 
     actionTarget?.let { target ->
