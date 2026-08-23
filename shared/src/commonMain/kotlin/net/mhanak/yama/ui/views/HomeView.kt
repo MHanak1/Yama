@@ -74,7 +74,10 @@ fun HomeView(
     val reachable by source.isReachable.collectAsState()
 
     val key = remember(source) { homeConfigKey(source) }
-    val blocks = remember(source, reachable) { activeHomeBlocks(source) }
+    // The block *set* is intentionally independent of reachability — it stays stable across going
+    // online/offline so the layout never reflows on a connection change. Album-discovery shelves survive
+    // offline by serving their cached last-seen albums (see HomeBlock.load); graying happens per-card.
+    val blocks = remember(source) { activeHomeBlocks(source) }
 
     // TV D-pad focus: one registry for the whole Home screen (shelf cards register per-item via
     // contentFocusItem). savedKey is rememberSaveable so the card the user left on is restored after a
@@ -85,8 +88,11 @@ fun HomeView(
     RegisterActiveContentFocus(focusRegistry)
 
     // Fast path on the store: a no-op when the data already matches this source + block set (the
-    // navigate-back case), so returning to Home is instant. Reloads when the block set changes.
-    LaunchedEffect(key, blocks) { store.load(appContainer, key, blocks, force = false) }
+    // navigate-back case), so returning to Home is instant. Reloads when the block set changes, and — by
+    // keying on [reachable] — when the source comes online, so the live-only track shelves (which fall
+    // back to the offline/downloads path on a cold launch) revalidate into their real art-bearing rows.
+    // The store no-ops the redundant re-fire when the data was already loaded while reachable.
+    LaunchedEffect(key, blocks, reachable) { store.load(appContainer, key, blocks, force = false) }
 
     // The local-files catalog is built by a background scan that usually finishes *after* Home has
     // already loaded its (empty) shelves, so — unlike the reactive Library view — Home would otherwise

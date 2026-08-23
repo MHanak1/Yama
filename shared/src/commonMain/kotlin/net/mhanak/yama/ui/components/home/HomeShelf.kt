@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,7 @@ import net.mhanak.yama.LocalAppContainer
 import net.mhanak.yama.ui.components.card.ItemCard
 import net.mhanak.yama.ui.components.image.CardImage
 import net.mhanak.yama.ui.components.interaction.contentFocusItem
+import net.mhanak.yama.ui.components.state.LocalAvailability
 import net.mhanak.yama.ui.home.HomeBlockData
 import org.jetbrains.compose.resources.painterResource
 import yama.shared.generated.resources.Res
@@ -65,6 +67,10 @@ fun HomeShelf(
     focusKeyPrefix: String = "",
 ) {
     val player = LocalAppContainer.current.playback.viewed
+    // Dim items that aren't playable right now (not downloaded and the source unreachable), matching the
+    // library grid's graying. This is what lets album-discovery shelves stay visible offline (served from
+    // the CatalogCache) instead of disappearing: the stale cards are shown, just grayed.
+    val availability = LocalAvailability.current
     // Hoisted so the shelf's horizontal scroll offset survives a navigate-to-detail → back round-trip
     // (Home is disposed while a detail screen is open); paired with per-card focus restore, the card the
     // user left on scrolls back into view and refocuses.
@@ -97,6 +103,7 @@ fun HomeShelf(
                         fallback = painterResource(Res.drawable.album),
                         width = cardWidth,
                         focusKey = shelfFocusKey(focusKeyPrefix, album.id),
+                        dimmed = !availability.album(album.id),
                         onClick = { onAlbumClick(album.id) },
                     )
                 }
@@ -109,6 +116,7 @@ fun HomeShelf(
                         fallback = painterResource(Res.drawable.folder),
                         width = cardWidth,
                         focusKey = shelfFocusKey(focusKeyPrefix, genre.id),
+                        dimmed = !availability.genre(genre.id),
                         onClick = { onGenreClick(genre.id) },
                     )
                 }
@@ -121,6 +129,7 @@ fun HomeShelf(
                         fallback = painterResource(Res.drawable.album),
                         width = cardWidth,
                         focusKey = shelfFocusKey(focusKeyPrefix, track.id),
+                        dimmed = !availability.track(track.id),
                         // Play the whole shelf as a queue, starting at the tapped track.
                         onClick = { player.playNow(data.tracks, index) },
                     )
@@ -146,13 +155,15 @@ private fun ShelfCard(
     // TV D-pad: the card's registry key (null = untracked). Applied before clickable so the focus
     // target node and the clickable surface are the same node.
     focusKey: String? = null,
+    // Grays the card when its item isn't playable right now (offline + not downloaded), matching the grid.
+    dimmed: Boolean = false,
 ) {
     // Fixed width sizes the card (outer modifier); the tap rides in on contentModifier so it lands
     // inside the Surface and its ripple is clipped to the rounded corners, matching the library grid.
     ItemCard(
         title = title,
         subtitle = subtitle,
-        modifier = Modifier.width(width),
+        modifier = Modifier.width(width).alpha(if (dimmed) 0.5f else 1f),
         contentModifier = Modifier.contentFocusItem(focusKey).clickable(onClick = onClick),
         image = { CardImage(imageUrl = imageUrl, imageHash = imageHash, imageFallback = fallback) },
     )

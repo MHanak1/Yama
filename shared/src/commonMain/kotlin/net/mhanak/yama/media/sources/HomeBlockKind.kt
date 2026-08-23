@@ -8,7 +8,8 @@ package net.mhanak.yama.media.sources
  *   (`albums`/`genres`), which persist to disk via CatalogCache, so these survive offline for free.
  * - [TrackDiscovery] — served through `CatalogReader.getAllTracks`, which degrades to the downloaded
  *   subset when offline (every sort order supported there).
- * - [AlbumDiscovery] — a live `MusicSource.getAlbums` query with no result cache; **hidden offline**.
+ * - [AlbumDiscovery] — a live `MusicSource.getAlbums` query, read-through the CatalogCache: online it
+ *   fetches and writes through; offline it serves the last-seen album list, so the shelf survives offline.
  * - [Downloads] — read straight from the downloads index; inherently offline.
  */
 enum class HomeBlockTier { CatalogAlbums, Favourites, Genres, TrackDiscovery, AlbumDiscovery, Downloads }
@@ -38,7 +39,4 @@ enum class HomeBlockKind(
     RandomAlbums("Random albums", HomeBlockTier.CatalogAlbums),
     BrowseGenres("Browse by genre", HomeBlockTier.Genres),
     DownloadedAlbums("Downloaded", HomeBlockTier.Downloads);
-
-    /** Tier-C album-discovery blocks issue an uncached live query, so they disappear when offline. */
-    val hiddenWhenOffline: Boolean get() = tier == HomeBlockTier.AlbumDiscovery
 }

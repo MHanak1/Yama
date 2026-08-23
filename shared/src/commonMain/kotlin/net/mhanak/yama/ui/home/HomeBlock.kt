@@ -5,7 +5,6 @@ import net.mhanak.yama.media.download.DownloadedAlbum
 import net.mhanak.yama.media.model.Album
 import net.mhanak.yama.media.model.Genre
 import net.mhanak.yama.media.model.Track
-import net.mhanak.yama.media.sources.AlbumSortOrder
 import net.mhanak.yama.media.sources.HomeBlockKind
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.OfflineCapable
@@ -33,12 +32,13 @@ fun resolveHomeBlocks(source: MusicSource): List<HomeBlockKind> {
 }
 
 /**
- * [resolveHomeBlocks] minus album-discovery blocks while the source is unreachable (their live query
- * has no offline fallback). The single source of truth for "what the home screen shows now", shared by
- * HomeView's rendering and HomeContentStore's loading so they never disagree.
+ * The single source of truth for "what the home screen shows now", shared by HomeView's rendering and
+ * HomeContentStore's loading so they never disagree. Deliberately independent of reachability: the block
+ * *set* stays stable across going online/offline so the layout never reflows on a connection change.
+ * Album-discovery shelves survive offline by serving their last-seen albums from [CatalogCache]
+ * (see [load]); unreachable/unavailable items are grayed by the shelf cards, not dropped.
  */
-fun activeHomeBlocks(source: MusicSource): List<HomeBlockKind> =
-    resolveHomeBlocks(source).filter { !(it.hiddenWhenOffline && !source.isReachable.value) }
+fun activeHomeBlocks(source: MusicSource): List<HomeBlockKind> = resolveHomeBlocks(source)
 
 /**
  * The loaded contents of a home block, tagged by the card type its shelf renders. Keeping the three
@@ -67,17 +67,17 @@ sealed interface HomeBlockData {
  * - CatalogAlbums/Favourites/Genres — filter/shuffle the already-hydrated browse StateFlows (offline-safe).
  * - TrackDiscovery — through [AppContainer.catalog], so it degrades to the downloaded subset offline
  *   rather than hitting the source directly and throwing.
- * - AlbumDiscovery — a live [net.mhanak.yama.media.sources.MusicSource.getAlbums] query; the caller
- *   hides these blocks when the source is unreachable ([HomeBlockKind.hiddenWhenOffline]).
+ * - AlbumDiscovery — a live [net.mhanak.yama.media.sources.MusicSource.getAlbums] query, read-through
+ *   [net.mhanak.yama.media.download.CatalogCache] (see [loadAlbumDiscovery]): online it fetches and
+ *   writes through; offline (or on cold start before the socket connects) it serves the last-seen list,
+ *   so the shelf never vanishes and the layout never reflows on a connection change.
  * - Downloads — straight from the downloads index, always available offline.
  */
 suspend fun HomeBlockKind.load(appContainer: AppContainer, limit: Int = HOME_SHELF_LIMIT): HomeBlockData {
     val source = appContainer.activeMusicSource
     return when (this) {
-        HomeBlockKind.RecentlyAddedAlbums ->
-            HomeBlockData.Albums(source.getAlbums(AlbumSortOrder.RecentlyAdded, limit))
-        HomeBlockKind.MostPlayedAlbums ->
-            HomeBlockData.Albums(source.getAlbums(AlbumSortOrder.MostPlayed, limit))
+        HomeBlockKind.RecentlyAddedAlbums, HomeBlockKind.MostPlayedAlbums ->
+            loadAlbumDiscovery(appContainer, source, this, limit)
         HomeBlockKind.RandomAlbums ->
             HomeBlockData.Albums(source.albums.value.shuffled().take(limit))
         HomeBlockKind.FavouriteAlbums ->
@@ -94,6 +94,32 @@ suspend fun HomeBlockKind.load(appContainer: AppContainer, limit: Int = HOME_SHE
             HomeBlockData.Albums(appContainer.downloads.downloadedAlbums(key).take(limit).map { it.toAlbum() })
         }
     }
+}
+
+/**
+ * Load an album-discovery shelf read-through [net.mhanak.yama.media.download.CatalogCache], mirroring
+ * [net.mhanak.yama.coordinators.CatalogReader.tracksFor]: reachable → fetch from the source and write
+ * the result through to the cache (so a later offline / cold-start load works); otherwise (offline, or
+ * the fetch failed/returned empty) → serve the cached last-seen list. Keyed per source partition by the
+ * block's name. Returns empty only when there is neither a live result nor a cached one (a first-ever
+ * launch of that shelf while offline).
+ */
+private suspend fun loadAlbumDiscovery(
+    appContainer: AppContainer,
+    source: MusicSource,
+    kind: HomeBlockKind,
+    limit: Int,
+): HomeBlockData.Albums {
+    val key = (source as? OfflineCapable)?.downloadSourceKey()
+    if (source.isReachable.value) {
+        val fresh = runCatching { source.getAlbums(kind.albumSort!!, limit) }.getOrNull()
+        if (!fresh.isNullOrEmpty()) {
+            if (key != null) appContainer.catalogCache.saveHomeShelf(key, kind.name, fresh)
+            return HomeBlockData.Albums(fresh)
+        }
+    }
+    val cached = key?.let { appContainer.catalogCache.loadHomeShelf(it, kind.name) }
+    return HomeBlockData.Albums(cached?.take(limit) ?: emptyList())
 }
 
 /** Adapt a downloads-index album to the shared [Album] model so shelves render it like any other. */

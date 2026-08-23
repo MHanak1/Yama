@@ -67,6 +67,7 @@ class CatalogCache(private val baseDir: File) {
     private fun snapshotFile(sourceKey: String) = File(partitionDir(sourceKey), "snapshot.json")
     private fun trackListFile(sourceKey: String) = File(partitionDir(sourceKey), "tracklists.json")
     private fun favoritesFile(sourceKey: String) = File(partitionDir(sourceKey), "favorites.json")
+    private fun homeShelfFile(sourceKey: String) = File(partitionDir(sourceKey), "homeshelves.json")
 
     fun saveSnapshot(sourceKey: String, snapshot: CatalogSnapshot) = synchronized(lock) {
         // Never let an empty list overwrite a previously-saved non-empty one. The browse flows fill
@@ -100,6 +101,34 @@ class CatalogCache(private val baseDir: File) {
         synchronized(lock) {
             readTrackLists(sourceKey)[trackListKey(kind, containerId)]?.map { it.toDomain() }
         }
+
+    /**
+     * Write-through one home-shelf's resolved album list, keyed by its [net.mhanak.yama.media.sources.HomeBlockKind]
+     * name. Only the album-discovery shelves ("Recently added", "Most played albums") need this: their
+     * contents come from a live `MusicSource.getAlbums` query with no other cache tier, so without this
+     * they'd vanish offline (and flicker in on cold start once the socket connects). The catalog-derived
+     * and track shelves already survive offline via the browse snapshot / CatalogReader. Never lets an
+     * empty list overwrite a saved non-empty one, for the same reason [saveSnapshot] doesn't.
+     */
+    fun saveHomeShelf(sourceKey: String, blockName: String, albums: List<Album>) = synchronized(lock) {
+        if (albums.isEmpty()) return@synchronized
+        val map = readHomeShelves(sourceKey).toMutableMap()
+        map[blockName] = albums.map { it.toDto() }
+        runCatching { homeShelfFile(sourceKey).writeText(json.encodeToString(map)) }
+        Unit
+    }
+
+    /** The last-seen album list for a home shelf, or null if it was never loaded online. */
+    fun loadHomeShelf(sourceKey: String, blockName: String): List<Album>? = synchronized(lock) {
+        readHomeShelves(sourceKey)[blockName]?.map { it.toDomain() }
+    }
+
+    private fun readHomeShelves(sourceKey: String): Map<String, List<AlbumDto>> {
+        val f = homeShelfFile(sourceKey)
+        if (!f.exists()) return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, List<AlbumDto>>>(f.readText()) }
+            .getOrDefault(emptyMap())
+    }
 
     /**
      * Patch favorite/playCount for specific track IDs across all cached track lists for [sourceKey].

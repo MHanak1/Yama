@@ -28,21 +28,30 @@ class HomeContentStore {
     // The source + block set the current [data] belongs to, so we can skip a redundant reload.
     private var loadedKey: String? = null
     private var loadedBlocks: List<HomeBlockKind> = emptyList()
+    // Whether the current [data] was fetched while the source was reachable. The live-only shelves
+    // (recently/most played tracks) fall back to the offline/downloads path when loaded before the
+    // socket connects, yielding art-less or empty rows; when we later come online we must reload them.
+    private var loadedWhileReachable = false
 
     /**
      * Ensure [blocks] are loaded for source [key]. A no-op when the data already matches (the
-     * navigate-back fast path) unless [force]. Existing data stays visible while a reload runs, so the
-     * screen never blanks; only a source switch clears it first (to avoid showing another account's
-     * shelves).
+     * navigate-back fast path) unless [force] — *except* when the current data was loaded offline and the
+     * source is now reachable, which forces a revalidation so the live-only shelves pick up their real
+     * (art-bearing) contents. Existing data stays visible while a reload runs, so the screen never blanks;
+     * only a source switch clears it first (to avoid showing another account's shelves).
      */
     suspend fun load(appContainer: AppContainer, key: String, blocks: List<HomeBlockKind>, force: Boolean) {
-        val upToDate = key == loadedKey && blocks == loadedBlocks && data.isNotEmpty()
+        val reachable = appContainer.activeMusicSource.isReachable.value
+        // Data fetched offline is now revalidatable: we came online since it was loaded.
+        val staleOffline = data.isNotEmpty() && !loadedWhileReachable && reachable
+        val upToDate = key == loadedKey && blocks == loadedBlocks && data.isNotEmpty() && !staleOffline
         if (!force && upToDate) return
         if (key != loadedKey) data.clear()
 
         isLoading = true
         try {
             loadBlocks(appContainer, key, blocks)
+            loadedWhileReachable = reachable
         } finally {
             isLoading = false
         }
@@ -56,6 +65,7 @@ class HomeContentStore {
         try {
             runCatching { appContainer.activeMusicSource.refresh() }
             loadBlocks(appContainer, key, blocks)
+            loadedWhileReachable = appContainer.activeMusicSource.isReachable.value
         } finally {
             isLoading = false
         }
