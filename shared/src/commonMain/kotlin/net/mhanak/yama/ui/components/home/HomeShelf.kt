@@ -1,6 +1,9 @@
 package net.mhanak.yama.ui.components.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,11 +22,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.mhanak.yama.LocalAppContainer
@@ -76,6 +87,13 @@ fun HomeShelf(
     // user left on scrolls back into view and refocuses.
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
+    // The item a long-press / right-click has opened the action sheet for (null = no sheet). Kept per
+    // shelf: only one card can be long-pressed at a time, so each shelf hosting its own sheet is enough.
+    var actionTarget by remember { mutableStateOf<HomeItemAction?>(null) }
+    // The shelf outlives the transient sheet, so its scope drives playback started from the sheet — the
+    // sheet dismissing (and disposing) mid-fetch would otherwise cancel it. See HomeItemActionSheet.
+    val shelfScope = rememberCoroutineScope()
+
     Column(modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
@@ -105,6 +123,7 @@ fun HomeShelf(
                         focusKey = shelfFocusKey(focusKeyPrefix, album.id),
                         dimmed = !availability.album(album.id),
                         onClick = { onAlbumClick(album.id) },
+                        onLongPress = { actionTarget = HomeItemAction.AlbumAction(album) },
                     )
                 }
                 is HomeBlockData.Genres -> items(data.genres, key = { it.id }) { genre ->
@@ -118,6 +137,7 @@ fun HomeShelf(
                         focusKey = shelfFocusKey(focusKeyPrefix, genre.id),
                         dimmed = !availability.genre(genre.id),
                         onClick = { onGenreClick(genre.id) },
+                        onLongPress = { actionTarget = HomeItemAction.GenreAction(genre) },
                     )
                 }
                 is HomeBlockData.Tracks -> itemsIndexed(data.tracks, key = { _, t -> t.id }) { index, track ->
@@ -132,10 +152,19 @@ fun HomeShelf(
                         dimmed = !availability.track(track.id),
                         // Play the whole shelf as a queue, starting at the tapped track.
                         onClick = { player.playNow(data.tracks, index) },
+                        onLongPress = { actionTarget = HomeItemAction.TrackAction(track) },
                     )
                 }
             }
         }
+    }
+
+    actionTarget?.let { target ->
+        HomeItemActionSheet(
+            target = target,
+            onDismiss = { actionTarget = null },
+            playbackScope = shelfScope,
+        )
     }
 }
 
@@ -143,6 +172,7 @@ fun HomeShelf(
 private fun shelfFocusKey(prefix: String, id: String): String? =
     if (prefix.isEmpty()) null else "$prefix/$id"
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ShelfCard(
     title: String,
@@ -152,19 +182,40 @@ private fun ShelfCard(
     fallback: Painter,
     width: Dp,
     onClick: () -> Unit,
+    // Long-press (touch/TV) or right-click (desktop) opens the item's action sheet. Null = tap only.
+    onLongPress: (() -> Unit)? = null,
     // TV D-pad: the card's registry key (null = untracked). Applied before clickable so the focus
     // target node and the clickable surface are the same node.
     focusKey: String? = null,
     // Grays the card when its item isn't playable right now (offline + not downloaded), matching the grid.
     dimmed: Boolean = false,
 ) {
-    // Fixed width sizes the card (outer modifier); the tap rides in on contentModifier so it lands
-    // inside the Surface and its ripple is clipped to the rounded corners, matching the library grid.
+    // The tap rides in on contentModifier so it lands inside the Surface and its ripple is clipped to
+    // the rounded corners, matching the library grid. When an action sheet is offered, use
+    // combinedClickable for the long-press and add a separate secondary-press gesture for desktop
+    // right-click (which combinedClickable doesn't cover), mirroring GridCard / TrackListCard.
+    val clickModifier = if (onLongPress != null) {
+        Modifier
+            .contentFocusItem(focusKey)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val event = awaitPointerEvent()
+                    if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                        onLongPress()
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+    } else {
+        Modifier.contentFocusItem(focusKey).clickable(onClick = onClick)
+    }
+    // Fixed width sizes the card (outer modifier).
     ItemCard(
         title = title,
         subtitle = subtitle,
         modifier = Modifier.width(width).alpha(if (dimmed) 0.5f else 1f),
-        contentModifier = Modifier.contentFocusItem(focusKey).clickable(onClick = onClick),
+        contentModifier = clickModifier,
         image = { CardImage(imageUrl = imageUrl, imageHash = imageHash, imageFallback = fallback) },
     )
 }

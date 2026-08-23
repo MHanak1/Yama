@@ -33,12 +33,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.playback.Player
@@ -62,8 +64,19 @@ fun DetailPlayActions(
     modifier: Modifier = Modifier,
     // Disabled (dimmed, taps ignored) when the collection is neither downloaded nor reachable.
     enabled: Boolean = true,
+    // When false, only the Play button is shown (Shuffle is meaningless for a single track). The Play
+    // button then spans the full width. Defaults to true so every collection detail screen is unchanged.
+    showShuffle: Boolean = true,
+    // Fired the moment any action (Play / Shuffle / Play next / Add to queue) is invoked, before the
+    // tracks are fetched — lets a host (e.g. the home action sheet) dismiss itself on a play tap.
+    // Defaults to a no-op so the detail screens, which stay put, are unaffected.
+    onAction: () -> Unit = {},
+    // Scope the track fetch + enqueue runs on. Defaults to this composable's own scope (fine for the
+    // detail screens, which outlive the tap). A host that dismisses itself on [onAction] — like the home
+    // action sheet — must pass a longer-lived scope, else removing the host cancels the fetch before it
+    // can enqueue and nothing plays.
+    scope: CoroutineScope = rememberCoroutineScope(),
 ) {
-    val scope = rememberCoroutineScope()
     // Drop tracks that can't be played right now (not downloaded while offline) so a partially-downloaded
     // album/artist plays only what's available rather than failing on the missing ones.
     val availability = LocalAvailability.current
@@ -71,6 +84,8 @@ fun DetailPlayActions(
     // because the collection views fetch their full track set on demand rather than holding it.
     fun act(shuffled: Boolean, enqueue: Player.(List<Track>) -> Unit) {
         if (!enabled) return
+        // Signal the action up front (e.g. to dismiss a host sheet) — playback then continues async.
+        onAction()
         scope.launch {
             val tracks = fetchTracks(shuffled).filter { availability.track(it.id) }
             if (tracks.isNotEmpty()) player.enqueue(tracks)
@@ -96,15 +111,17 @@ fun DetailPlayActions(
             onPlayNext = { act(false) { playNext(it) } },
             onAddToQueue = { act(false) { addToQueue(it) } },
         )
-        PlayActionButton(
-            label = "Shuffle",
-            icon = Icons.Filled.Shuffle,
-            filled = false,
-            modifier = Modifier.weight(1f),
-            onPlay = { act(true) { playNow(it) } },
-            onPlayNext = { act(true) { playNext(it) } },
-            onAddToQueue = { act(true) { addToQueue(it) } },
-        )
+        if (showShuffle) {
+            PlayActionButton(
+                label = "Shuffle",
+                icon = Icons.Filled.Shuffle,
+                filled = false,
+                modifier = Modifier.weight(1f),
+                onPlay = { act(true) { playNow(it) } },
+                onPlayNext = { act(true) { playNext(it) } },
+                onAddToQueue = { act(true) { addToQueue(it) } },
+            )
+        }
     }
 }
 
@@ -140,6 +157,7 @@ private fun PlayActionButton(
             contentColor = colors.contentColor,
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(shape)
                 .contentFocusItem(focusKey)
                 .combinedClickable(
                     onClick = onPlay,
