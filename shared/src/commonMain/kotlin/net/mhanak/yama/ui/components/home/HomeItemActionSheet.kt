@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -26,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,7 +52,9 @@ import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.OfflineCapable
+import net.mhanak.yama.media.sources.PlaylistWritable
 import net.mhanak.yama.ui.components.detail.DetailPlayActions
+import net.mhanak.yama.ui.components.playlist.AddToPlaylistSheet
 import net.mhanak.yama.ui.components.image.CardImage
 import net.mhanak.yama.ui.components.interaction.LocalTvZoneFocus
 import net.mhanak.yama.ui.components.interaction.tvFocusContainer
@@ -200,6 +204,29 @@ fun HomeItemActionSheet(
         dismiss()
     }
 
+    // "Add to playlist" — online-only, offered for albums (whole album) and single tracks, not genres
+    // (which could be thousands of tracks). Tapping resolves the track ids (an album fetches them) then
+    // swaps this sheet for the playlist picker.
+    val reachable by source.isReachable.collectAsState()
+    val canAddToPlaylist = source is PlaylistWritable && reachable && target !is HomeItemAction.GenreAction
+    var addToPlaylistIds by remember { mutableStateOf<List<String>?>(null) }
+    fun addToPlaylist() {
+        // Gather on the host-owned scope so swapping this sheet away doesn't cancel an album's fetch.
+        playbackScope.launch {
+            addToPlaylistIds = when (target) {
+                is HomeItemAction.TrackAction -> listOf(target.track.id)
+                else -> gatherTracks(shuffled = false).map { it.id }
+            }
+        }
+    }
+
+    // Once tracks are resolved, present the playlist picker in place of the action rows. Its dismiss
+    // tears the whole thing down (onDismiss clears the host's actionTarget).
+    addToPlaylistIds?.let { ids ->
+        AddToPlaylistSheet(trackIds = ids, onDismiss = onDismiss)
+        return
+    }
+
     val fallback: Painter = when (target) {
         is HomeItemAction.GenreAction -> painterResource(Res.drawable.folder)
         else -> painterResource(Res.drawable.album)
@@ -270,6 +297,9 @@ fun HomeItemActionSheet(
                     label = if (isFavorite) "Remove from favourites" else "Add to favourites",
                     onClick = { toggleFavorite() },
                 )
+            }
+            if (canAddToPlaylist) {
+                ActionRow(icon = Icons.AutoMirrored.Filled.PlaylistAdd, label = "Add to playlist", onClick = { addToPlaylist() })
             }
             if (downloadsSupported) {
                 ActionRow(icon = Icons.Outlined.Download, label = "Download", onClick = { download() })

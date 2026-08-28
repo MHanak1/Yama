@@ -40,6 +40,7 @@ import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
 import org.jellyfin.sdk.api.client.extensions.authenticateWithQuickConnect
 import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
+import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.api.client.extensions.lyricsApi
 import org.jellyfin.sdk.api.client.extensions.musicGenresApi
 import org.jellyfin.sdk.api.client.extensions.playStateApi
@@ -54,6 +55,7 @@ import org.jellyfin.sdk.model.ClientInfo
 import org.jellyfin.sdk.model.DeviceInfo
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.CollectionType
+import org.jellyfin.sdk.model.api.CreatePlaylistDto
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
@@ -66,12 +68,13 @@ import org.jellyfin.sdk.model.api.PlayMethod
 import org.jellyfin.sdk.model.api.QueueItem
 import org.jellyfin.sdk.model.api.RepeatMode
 import org.jellyfin.sdk.model.api.SortOrder
+import org.jellyfin.sdk.model.api.UpdatePlaylistDto
 import java.security.MessageDigest
 import java.util.UUID
 import kotlin.collections.get
 import org.jellyfin.sdk.model.UUID as JellyfinUUID
 
-class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : StaleWhileRevalidateSource(), RemotePlaybackProvider, FavoriteCapable, PlaybackReporting, OfflineCapable, AccountedSource {
+class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) : StaleWhileRevalidateSource(), RemotePlaybackProvider, FavoriteCapable, PlaybackReporting, OfflineCapable, AccountedSource, PlaylistWritable {
     override val type: SourceType = SourceType.Jellyfin
     override val supportsStreamingQuality: Boolean = true
     // Rebuilt by [reconnect] on device wake so a fresh instance (and thus a fresh OkHttp connection
@@ -842,6 +845,70 @@ class JellyfinSource(private val sessionRepository: JellyfinSessionRepository) :
                 _playlists.value = _playlists.value.map { if (it.id == id) it.copy(favorite = favorite) else it }
             FavoritableKind.Track -> Unit // tracks aren't held in a cached browse list
         }
+    }
+
+    // --- PlaylistWritable ---------------------------------------------------------------
+    // The SDK's playlistsApi covers create/add/remove/rename; deletion is a library-item delete.
+    // After each mutation we re-pull the playlist view so item counts and artwork stay correct — the
+    // same stale-while-revalidate refresh the browse lists get, scoped to just the cheap playlist query.
+
+    override suspend fun createPlaylist(name: String, trackIds: List<String>): String {
+        val currentApi = api ?: error("Not connected")
+        val result = currentApi.playlistsApi.createPlaylist(
+            CreatePlaylistDto(
+                name = name,
+                ids = trackIds.map { JellyfinUUID.fromString(it) },
+                userId = currentUserId(),
+                users = emptyList(),
+                isPublic = false,
+            )
+        )
+        refreshPlaylists()
+        return result.content.id.toString()
+    }
+
+    override suspend fun renamePlaylist(playlistId: String, name: String) {
+        val currentApi = api ?: return
+        currentApi.playlistsApi.updatePlaylist(JellyfinUUID.fromString(playlistId), UpdatePlaylistDto(name = name))
+        refreshPlaylists()
+    }
+
+    override suspend fun deletePlaylist(playlistId: String) {
+        val currentApi = api ?: return
+        // A Jellyfin playlist is a library item; there is no dedicated delete endpoint on playlistsApi.
+        currentApi.libraryApi.deleteItem(JellyfinUUID.fromString(playlistId))
+        _playlists.value = _playlists.value.filterNot { it.id == playlistId }
+    }
+
+    override suspend fun addTracksToPlaylist(playlistId: String, trackIds: List<String>) {
+        val currentApi = api ?: return
+        if (trackIds.isEmpty()) return
+        currentApi.playlistsApi.addItemToPlaylist(
+            playlistId = JellyfinUUID.fromString(playlistId),
+            ids = trackIds.map { JellyfinUUID.fromString(it) },
+            userId = currentUserId(),
+        )
+        refreshPlaylists()
+    }
+
+    override suspend fun removeTracksFromPlaylist(playlistId: String, entryIndexes: List<Int>) {
+        val currentApi = api ?: return
+        if (entryIndexes.isEmpty()) return
+        // Jellyfin removes by playlist-entry id (playlistItemId), distinct from the track id and unique
+        // per occurrence, so map each requested position to its entry id from the current listing.
+        val items = currentApi.playlistsApi.getPlaylistItems(
+            playlistId = JellyfinUUID.fromString(playlistId),
+            limit = 10_000,
+        ).content.items.orEmpty()
+        val entryIds = entryIndexes.mapNotNull { items.getOrNull(it)?.playlistItemId }
+        if (entryIds.isEmpty()) return
+        currentApi.playlistsApi.removeItemFromPlaylist(playlistId, entryIds)
+        refreshPlaylists()
+    }
+
+    private suspend fun refreshPlaylists() {
+        val currentApi = api ?: return
+        runCatching { currentApi.fetchPlaylists(currentUserId()) }.getOrNull()?.let { _playlists.value = it }
     }
 
     /**

@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -127,6 +128,10 @@ fun GridCard(
     title: String? = null,
     subtitle: String? = null,
     selectable: GridSelection? = null,
+    // Long-press (touch/TV) or right-click (desktop) opens a per-item action sheet — used by the
+    // playlists grid, which (unlike albums/artists/genres) isn't part of the library multi-selection.
+    // Ignored when [selectable] is non-null, where long-press already means "toggle selection".
+    onLongClick: (() -> Unit)? = null,
     // Dimmed when the item is neither downloaded nor reachable. Navigation stays enabled (you can open
     // a grayed album to download from it) — only the visual is dimmed.
     dimmed: Boolean = false,
@@ -139,11 +144,14 @@ fun GridCard(
     // pointing at the *current* item's toggle rather than the one captured when the slot was first laid
     // out — otherwise shift-clicking a recycled card toggles whichever album used to occupy it.
     val onToggle = rememberUpdatedState(selectable?.onToggle)
+    // Same recycling hazard for the right-click action gesture below (keyed on Unit): read the current
+    // card's callback, not the one captured when the slot was first composed.
+    val currentOnLongClick = rememberUpdatedState(onLongClick)
     // contentFocusItem comes first: focusRequester must precede combinedClickable so the focus target
     // node (created by combinedClickable) is downstream and the requester resolves to it.
     val focusMod = Modifier.contentFocusItem(focusKey)
-    val clickModifier = if (selectable != null) {
-        focusMod
+    val clickModifier = when {
+        selectable != null -> focusMod
             .combinedClickable(
                 onClick = { if (selectable.active) selectable.onToggle() else onClick() },
                 onLongClick = selectable.onToggle,
@@ -162,8 +170,20 @@ fun GridCard(
                     }
                 }
             }
-    } else {
-        focusMod.combinedClickable(onClick = onClick)
+        onLongClick != null -> focusMod
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // Desktop right-click opens the same action sheet (combinedClickable's long-press covers
+            // touch/TV only), mirroring ShelfCard / TrackListCard.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val event = awaitPointerEvent()
+                    if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                        currentOnLongClick.value?.invoke()
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+        else -> focusMod.combinedClickable(onClick = onClick)
     }
     // Presentation comes from the shared [ItemCard]; this only injects library behaviour. The click /
     // long-press / shift-select / TV-focus chain rides in on contentModifier, so it lands inside the
@@ -213,6 +233,8 @@ fun AsyncImageGridCard(
     // When both are provided and a LocalLibrarySelection is present, the card becomes multi-selectable.
     selectableKind: SelectableKind? = null,
     selectionId: String? = null,
+    // Long-press / right-click action sheet for cards that aren't part of the multi-selection (playlists).
+    onLongClick: (() -> Unit)? = null,
     // TV D-pad: the item's stable id for focus registration. Defaults to selectionId so callers that
     // already pass selectionId get focus tracking for free — only pass explicitly when selectionId is absent.
     focusKey: String? = selectionId,
@@ -239,6 +261,7 @@ fun AsyncImageGridCard(
         title = title,
         subtitle = subtitle,
         selectable = gridSelection,
+        onLongClick = onLongClick,
         dimmed = dimmed,
         focusKey = focusKey,
     )

@@ -65,7 +65,14 @@ class SubsonicApi(
      * Auth params are appended automatically. Returns the deserialized [SubsonicResponseBody],
      * throwing [SubsonicException] on `status == "failed"`.
      */
-    private suspend fun get(endpoint: String, params: Map<String, String?> = emptyMap()): SubsonicResponseBody {
+    private suspend fun get(endpoint: String, params: Map<String, String?> = emptyMap()): SubsonicResponseBody =
+        request(endpoint, params.mapNotNull { (k, v) -> v?.let { k to it } })
+
+    /**
+     * Like [get] but takes a list of pairs so a key can repeat — Subsonic's playlist edits use
+     * multi-valued params (`songId`, `songIdToAdd`, `songIndexToRemove`) that a [Map] can't express.
+     */
+    private suspend fun request(endpoint: String, params: List<Pair<String, String>>): SubsonicResponseBody {
         val salt = buildSalt()
         val token = md5Hex(password + salt)
         val envelope: SubsonicEnvelope = client.get("$serverUrl/rest/$endpoint") {
@@ -75,7 +82,7 @@ class SubsonicApi(
             parameter("v", apiVersion)
             parameter("c", "Yama")
             parameter("f", "json")
-            params.forEach { (k, v) -> if (v != null) parameter(k, v) }
+            params.forEach { (k, v) -> parameter(k, v) }
         }.body()
         val body = envelope.response
         if (body.status == "failed") {
@@ -179,6 +186,40 @@ class SubsonicApi(
     /** Playlist detail including track list (`getPlaylist?id=`). */
     suspend fun getPlaylist(id: String): SubsonicPlaylistDto =
         get("getPlaylist", mapOf("id" to id)).playlist ?: error("getPlaylist returned no playlist for $id")
+
+    /**
+     * Create a playlist (`createPlaylist`), optionally seeded with songs (in order). Newer servers
+     * echo the created `<playlist>` back (id included); older ones return nothing, so the caller
+     * must resolve the id via [getPlaylists] on a null return.
+     */
+    suspend fun createPlaylist(name: String, songIds: List<String> = emptyList()): SubsonicPlaylistDto? =
+        request("createPlaylist", buildList {
+            add("name" to name)
+            songIds.forEach { add("songId" to it) }
+        }).playlist
+
+    /**
+     * Update a playlist (`updatePlaylist`) — one endpoint backs rename, append-songs, and
+     * remove-by-index. Omitted arguments leave that aspect unchanged.
+     */
+    suspend fun updatePlaylist(
+        playlistId: String,
+        name: String? = null,
+        songIdsToAdd: List<String> = emptyList(),
+        songIndexesToRemove: List<Int> = emptyList(),
+    ) {
+        request("updatePlaylist", buildList {
+            add("playlistId" to playlistId)
+            if (name != null) add("name" to name)
+            songIdsToAdd.forEach { add("songIdToAdd" to it) }
+            songIndexesToRemove.forEach { add("songIndexToRemove" to it.toString()) }
+        })
+    }
+
+    /** Delete a playlist (`deletePlaylist?id=`). */
+    suspend fun deletePlaylist(playlistId: String) {
+        request("deletePlaylist", listOf("id" to playlistId))
+    }
 
     /** Songs for a given genre, paginated (`getSongsByGenre`). */
     suspend fun getSongsByGenre(

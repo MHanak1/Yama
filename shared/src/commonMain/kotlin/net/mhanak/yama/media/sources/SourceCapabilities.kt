@@ -14,6 +14,7 @@ import net.mhanak.yama.media.model.Track
  * - [FavoriteCapable]   — favouriting items (Jellyfin: yes; LocalSource: no)
  * - [PlaybackReporting] — now-playing / scrobble reporting (Jellyfin: yes; LocalSource: no)
  * - [OfflineCapable]    — offline downloads, catalog hydration, staleness checking (Jellyfin: yes; LocalSource: no)
+ * - [PlaylistWritable]  — creating/editing playlists (Jellyfin & Subsonic: yes; LocalSource: not yet)
  */
 
 /**
@@ -33,6 +34,40 @@ interface FavoriteCapable {
 
     /** Persist the favourite state for an item. Only called for kinds [supportsFavorites] allows. */
     suspend fun setFavorite(kind: FavoritableKind, id: String, favorite: Boolean)
+}
+
+/**
+ * Implemented by sources that support creating and editing playlists. Callers detect presence with
+ * `(source as? PlaylistWritable)` and hide the edit affordances (create / add-to-playlist / rename /
+ * delete / remove-track) for sources that omit the interface (e.g. LocalSource, which has no playlist
+ * concept yet).
+ *
+ * Implementations update their own `_playlists` StateFlow after a successful mutation so the UI
+ * reflects the change without waiting for a full refresh — the same stale-while-revalidate contract
+ * [FavoriteCapable.setFavorite] follows for cached browse lists.
+ *
+ * All calls are made only when the source is reachable; [net.mhanak.yama.coordinators.PlaylistsCoordinator]
+ * gates on `isReachable` (offline playlist edits are a later seam — see TODO.exclude.md).
+ */
+interface PlaylistWritable {
+    /** Create a playlist, optionally seeded with tracks (in order). Returns the new playlist's id. */
+    suspend fun createPlaylist(name: String, trackIds: List<String> = emptyList()): String
+
+    /** Rename an existing playlist. */
+    suspend fun renamePlaylist(playlistId: String, name: String)
+
+    /** Delete a playlist. */
+    suspend fun deletePlaylist(playlistId: String)
+
+    /** Append tracks (in order) to the end of a playlist. */
+    suspend fun addTracksToPlaylist(playlistId: String, trackIds: List<String>)
+
+    /**
+     * Remove entries by their **position** in the playlist — the cross-source common denominator (a
+     * track can appear more than once, so track ids are ambiguous). Subsonic removes by `songIndexToRemove`;
+     * Jellyfin maps each index to its entry's `playlistItemId` internally.
+     */
+    suspend fun removeTracksFromPlaylist(playlistId: String, entryIndexes: List<Int>)
 }
 
 /**

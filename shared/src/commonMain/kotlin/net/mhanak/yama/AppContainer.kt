@@ -25,6 +25,7 @@ import net.mhanak.yama.coordinators.CatalogReader
 import net.mhanak.yama.coordinators.FavoritesCoordinator
 import net.mhanak.yama.coordinators.OfflineSyncOrchestrator
 import net.mhanak.yama.coordinators.PlayCountRecorder
+import net.mhanak.yama.coordinators.PlaylistsCoordinator
 import net.mhanak.yama.coordinators.QueuePersistence
 import net.mhanak.yama.ui.home.HomeContentStore
 import net.mhanak.yama.media.download.CatalogCache
@@ -209,6 +210,10 @@ class AppContainer {
         userData = userData,
         libraryStore = libraryStore,
     )
+
+    /** Single seam for playlist edits (create/rename/delete/add/remove). Online-only for now; the
+     *  offline outbox is a later seam (see TODO.exclude.md). */
+    val playlists = PlaylistsCoordinator(source = { activeMusicSource })
 
     /** Read-through track-list cache with offline fallback to the downloads index. */
     val catalog = CatalogReader(

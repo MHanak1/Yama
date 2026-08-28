@@ -1,22 +1,14 @@
 package net.mhanak.yama.ui.components.settings
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
@@ -25,7 +17,6 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
@@ -36,10 +27,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
+import net.mhanak.yama.ui.components.input.GlassPrimaryActionButton
+import net.mhanak.yama.ui.components.input.LabeledGlassAction
 import net.mhanak.yama.ui.theme.GlassFilledIconButton
-import net.mhanak.yama.ui.theme.glassEffect
 
 /**
  * The kinds of library item that can be multi-selected for batch playback. Playlists and tracks are
@@ -135,7 +126,7 @@ fun LibrarySelectionButtons(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         StaggeredAction(visible = visible && dlShown, stagger = if (favShown) 3 else 2) {
-            LabeledAction(label = "Download") {
+            LabeledGlassAction(label = "Download") {
                 GlassFilledIconButton(onClick = onDownload, modifier = Modifier.size(48.dp)) {
                     Icon(
                         Icons.Outlined.Download,
@@ -146,7 +137,7 @@ fun LibrarySelectionButtons(
             }
         }
         StaggeredAction(visible = visible && favShown, stagger = 2) {
-            LabeledAction(label = if (favActive) "Unfavourite" else "Favourite") {
+            LabeledGlassAction(label = if (favActive) "Unfavourite" else "Favourite") {
                 GlassFilledIconButton(onClick = onToggleFavorite, modifier = Modifier.size(48.dp)) {
                     Icon(
                         if (favActive) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
@@ -157,32 +148,20 @@ fun LibrarySelectionButtons(
             }
         }
         StaggeredAction(visible = visible, stagger = 1) {
-            LabeledAction(label = "Play") {
+            LabeledGlassAction(label = "Play") {
                 GlassFilledIconButton(onClick = onPlay, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = "Play selected", tint = MaterialTheme.colorScheme.onPrimary)
                 }
             }
         }
         StaggeredAction(visible = visible, stagger = 0) {
-            LabeledAction(label = "Shuffle") {
-                // Expressive press feedback on the primary action: while held, the button squishes
-                // (scale) and its shape morphs from a circle (corner = half the 72.dp size) toward a
-                // rounded square, then springs back on release via the expressive motion scheme.
-                val interaction = remember { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                val scale by animateFloatAsState(if (pressed) 0.90f else 1f, label = "shuffleScale")
-                val corner by animateDpAsState(if (pressed) 20.dp else 36.dp, label = "shuffleCorner")
-                GlassFilledIconButton(
-                    onClick = onShuffle,
-                    modifier = Modifier.size(72.dp).scale(scale),
-                    shape = RoundedCornerShape(corner),
-                    interactionSource = interaction,
-                ) {
+            LabeledGlassAction(label = "Shuffle") {
+                GlassPrimaryActionButton(onClick = onShuffle) {
                     Icon(
                         Icons.Filled.Shuffle,
                         contentDescription = "Shuffle selected",
                         modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.onPrimary
+                        tint = MaterialTheme.colorScheme.onPrimary,
                     )
                 }
             }
@@ -216,27 +195,3 @@ private fun StaggeredAction(
     }
 }
 
-/** A selection action button with a glassy text [label] pill to its left. */
-@Composable
-private fun LabeledAction(
-    label: String,
-    button: @Composable () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            Modifier
-                .glassEffect(MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        button()
-    }
-}

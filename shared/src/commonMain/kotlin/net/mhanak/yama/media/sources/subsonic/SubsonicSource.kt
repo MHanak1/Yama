@@ -26,6 +26,7 @@ import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.MusicSource
 import net.mhanak.yama.media.sources.OfflineCapable
 import net.mhanak.yama.media.sources.PlaybackReporting
+import net.mhanak.yama.media.sources.PlaylistWritable
 import net.mhanak.yama.media.sources.RemoteCommand
 import net.mhanak.yama.media.sources.SourceAccount
 import net.mhanak.yama.media.sources.SourceType
@@ -42,7 +43,7 @@ import java.security.MessageDigest
 import java.util.UUID
 
 class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
-    StaleWhileRevalidateSource(), FavoriteCapable, PlaybackReporting, OfflineCapable, AccountedSource {
+    StaleWhileRevalidateSource(), FavoriteCapable, PlaybackReporting, OfflineCapable, AccountedSource, PlaylistWritable {
 
     // --- MusicSource identity -----------------------------------------------
 
@@ -426,6 +427,53 @@ class SubsonicSource(private val sessionRepository: SubsonicSessionRepository) :
         return runCatching {
             currentApi.getPlaylist(playlistId).songs.map { it.toTrack(currentApi) }
         }.getOrDefault(emptyList())
+    }
+
+    // --- PlaylistWritable ---------------------------------------------------------------
+    // Subsonic's single `updatePlaylist` endpoint backs rename, append, and remove-by-index; create
+    // and delete map directly. After each edit we re-pull the playlist list so counts/artwork refresh.
+
+    override suspend fun createPlaylist(name: String, trackIds: List<String>): String {
+        val currentApi = api ?: error("Not connected")
+        val created = currentApi.createPlaylist(name, trackIds)
+        reloadPlaylists()
+        // Newer servers echo the created playlist (id included); older ones return nothing, so fall
+        // back to resolving by name from the just-reloaded list (best-effort on duplicate names).
+        return created?.id
+            ?: _playlists.value.lastOrNull { it.name == name }?.id
+            ?: error("Playlist created but its id could not be resolved")
+    }
+
+    override suspend fun renamePlaylist(playlistId: String, name: String) {
+        val currentApi = api ?: return
+        currentApi.updatePlaylist(playlistId, name = name)
+        reloadPlaylists()
+    }
+
+    override suspend fun deletePlaylist(playlistId: String) {
+        val currentApi = api ?: return
+        currentApi.deletePlaylist(playlistId)
+        _playlists.value = _playlists.value.filterNot { it.id == playlistId }
+    }
+
+    override suspend fun addTracksToPlaylist(playlistId: String, trackIds: List<String>) {
+        val currentApi = api ?: return
+        if (trackIds.isEmpty()) return
+        currentApi.updatePlaylist(playlistId, songIdsToAdd = trackIds)
+        reloadPlaylists()
+    }
+
+    override suspend fun removeTracksFromPlaylist(playlistId: String, entryIndexes: List<Int>) {
+        val currentApi = api ?: return
+        if (entryIndexes.isEmpty()) return
+        currentApi.updatePlaylist(playlistId, songIndexesToRemove = entryIndexes)
+        reloadPlaylists()
+    }
+
+    private suspend fun reloadPlaylists() {
+        val currentApi = api ?: return
+        runCatching { currentApi.getPlaylists().map { it.toPlaylist(currentApi) } }
+            .getOrNull()?.let { _playlists.value = it }
     }
 
     override suspend fun getAlbumsForArtist(artistId: String): List<Album> {

@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Favorite
@@ -35,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +68,7 @@ import net.mhanak.yama.media.playback.Player
 import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.OfflineCapable
+import net.mhanak.yama.media.sources.PlaylistWritable
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import net.mhanak.yama.ui.components.state.LocalAvailability
@@ -72,6 +76,7 @@ import net.mhanak.yama.ui.components.state.rememberTrackFavorite
 import net.mhanak.yama.ui.theme.GlassElevatedCard
 import net.mhanak.yama.ui.components.input.QualityPickerDialog
 import net.mhanak.yama.ui.components.interaction.contentFocusItem
+import net.mhanak.yama.ui.components.playlist.AddToPlaylistSheet
 
 /** Drag distance past which releasing fires the swipe action. */
 private val SwipeTriggerDistance = 64.dp
@@ -105,11 +110,16 @@ fun TrackListCard(
     // TV D-pad: stable id for per-item FocusRequester registration. Defaults to the track id so
     // callers inside a ListView don't need to pass it explicitly.
     focusKey: String? = track.id,
+    // Non-null when this row lives in an editable playlist (PlaylistDetailView passes it, keyed by
+    // index): renders a "Remove from playlist" menu item that invokes this. Optional so every other
+    // call site (album/artist/genre) is unaffected.
+    onRemoveFromPlaylist: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     // Where to anchor the menu: the cursor for right-clicks, top-start for long-presses.
     var menuOffset by remember { mutableStateOf(DpOffset.Zero) }
     var showQualityDialog by remember { mutableStateOf(false) }
+    var showAddToPlaylist by remember { mutableStateOf(false) }
 
     val appContainer = LocalAppContainer.current
     val source = appContainer.activeMusicSource
@@ -143,6 +153,9 @@ fun TrackListCard(
     val addToQueue = { if (playable) player.addToQueue(listOf(track)); Unit }
 
     val favoritesSupported = remember(source) { (source as? FavoriteCapable)?.supportsFavorites(FavoritableKind.Track) == true }
+    // "Add to playlist" is online-only for now, so gate on both the capability and live reachability.
+    val reachable by source.isReachable.collectAsState()
+    val canAddToPlaylist = source is PlaylistWritable && reachable
     // Favourite state reads through the shared TrackUserDataStore (overlaying the model seed), so a
     // toggle anywhere recomposes this row — no per-row mirror, no resync LaunchedEffect, no manual queue
     // patching. The tap writes the store synchronously in setFavorite, so it stays optimistic.
@@ -279,6 +292,16 @@ fun TrackListCard(
                     if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 ) { menuExpanded = false; toggleFavorite() }
             }
+            if (canAddToPlaylist) {
+                TrackMenuItem("Add to playlist", Icons.AutoMirrored.Filled.PlaylistAdd) {
+                    menuExpanded = false; showAddToPlaylist = true
+                }
+            }
+            if (onRemoveFromPlaylist != null) {
+                TrackMenuItem("Remove from playlist", Icons.Filled.PlaylistRemove) {
+                    menuExpanded = false; onRemoveFromPlaylist()
+                }
+            }
             if (downloadKey != null) {
                 if (isCached) {
                     // Cached entry: offer to explicitly download (pin) it; no "Change quality" offered.
@@ -313,6 +336,10 @@ fun TrackListCard(
             onDismiss = { showQualityDialog = false },
             onPick = { quality -> appContainer.downloadManager.redownload(listOf(track), quality) },
         )
+    }
+
+    if (showAddToPlaylist) {
+        AddToPlaylistSheet(trackIds = listOf(track.id), onDismiss = { showAddToPlaylist = false })
     }
 }
 

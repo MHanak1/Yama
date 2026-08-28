@@ -23,7 +23,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
+import net.mhanak.yama.coordinators.PlaylistEditResult
+import net.mhanak.yama.media.sources.PlaylistWritable
+import net.mhanak.yama.ui.components.image.CardImage
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -48,10 +53,17 @@ import net.mhanak.yama.media.sources.FavoritableKind
 @Composable
 fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any) -> Unit = {}, modifier: Modifier = Modifier, contentPadding: PaddingValues = PaddingValues()) {
     val appContainer = LocalAppContainer.current
-    val playlists by appContainer.activeMusicSource.playlists.collectAsState()
+    val source = appContainer.activeMusicSource
+    val playlists by source.playlists.collectAsState()
     val playlist = playlists.find { it.id == playlistId }
     var retryKey by remember { mutableStateOf(0) }
     var tracksState by remember { mutableStateOf<LoadState<List<Track>>>(LoadState.Loading) }
+
+    // Removing a track is online-only and only where the source supports it (rename/delete of the whole
+    // playlist moved to the grid's PlaylistActionSheet).
+    val reachable by source.isReachable.collectAsState()
+    val editable = source is PlaylistWritable && reachable
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(playlistId, retryKey) {
         tracksState = LoadState.Loading
@@ -86,6 +98,8 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     DownloadButton(kind = DownloadableKind.Playlist, id = playlistId)
                     FavoriteButton(kind = FavoritableKind.Playlist, itemId = playlistId, initial = playlist?.favorite)
+                    // Rename/Delete live on the grid card's long-press action sheet (PlaylistActionSheet),
+                    // not here — matching how home-shelf items expose their per-item actions.
                 }
             }
         }
@@ -134,6 +148,21 @@ fun PlaylistDetailView(playlistId: String, onBack: () -> Unit, onNavigate: (Any)
                     tracks = state.value,
                     index = index,
                     player = appContainer.playback.viewed,
+                    // A playlist mixes tracks from many albums, so each row shows its own cover (unlike
+                    // AlbumDetailView, which shows track numbers against the one shared album art).
+                    image = { CardImage(imageUrl = track.imageUrl) },
+                    // Remove by position (server order == the loaded order); on success drop it locally so
+                    // the list updates without a full reload. A failure leaves the row in place.
+                    onRemoveFromPlaylist = if (editable) {
+                        {
+                            scope.launch {
+                                val result = appContainer.playlists.removeTracksFromPlaylist(playlistId, listOf(index))
+                                if (result is PlaylistEditResult.Ok) {
+                                    tracksState = LoadState.Success(state.value.filterIndexed { i, _ -> i != index })
+                                }
+                            }
+                        }
+                    } else null,
                 )
             }
         }

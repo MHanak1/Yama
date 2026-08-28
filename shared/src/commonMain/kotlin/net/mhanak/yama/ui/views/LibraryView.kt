@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.plus
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -24,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.MusicNote
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import net.mhanak.yama.ui.platform.PullToRefreshContainer
@@ -59,6 +62,9 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.mhanak.yama.LocalAppContainer
+import net.mhanak.yama.coordinators.PlaylistEditResult
+import net.mhanak.yama.ui.components.input.GlassPrimaryActionButton
+import net.mhanak.yama.ui.components.playlist.PlaylistNameDialog
 import net.mhanak.yama.ui.components.state.ErrorCard
 import net.mhanak.yama.ui.components.state.LogError
 import net.mhanak.yama.ui.components.settings.LibrarySelectionButtons
@@ -73,6 +79,7 @@ import net.mhanak.yama.media.model.Track
 import net.mhanak.yama.media.sources.FavoritableKind
 import net.mhanak.yama.media.sources.FavoriteCapable
 import net.mhanak.yama.media.sources.OfflineCapable
+import net.mhanak.yama.media.sources.PlaylistWritable
 
 private const val TAB_ANIM_DURATION = 300
 
@@ -123,6 +130,7 @@ fun LibraryView(
     // Narrow-only swipeable pager; seeded from the hoisted tab and synced both ways below.
     val pagerState = rememberPagerState(initialPage = selectedTab.ordinal, pageCount = { LibraryTab.entries.size })
     val isRefreshing by appContainer.activeMusicSource.isRefreshing.collectAsState()
+    val reachable by appContainer.activeMusicSource.isReachable.collectAsState()
 
     // Keep the narrow pager and the hoisted tab in step. An external change (segmented-row tap) scrolls
     // the pager; a swipe reports the new page back up. The equality guards keep the two from fighting.
@@ -234,6 +242,29 @@ fun LibraryView(
         selection.clear()
     }
 
+    // New-playlist creation is hosted here rather than inside PlaylistsView so its glass FAB can frost
+    // the grid: a glass surface only blurs content it isn't nested within, and PlaylistsView sits inside
+    // the pager's own haze source. As a sibling of the pager (like LibrarySelectionButtons) the FAB
+    // frosts the tab content behind it. Offered only on the Playlists tab, where an editable source is
+    // reachable — playlists can't be multi-selected, so it never collides with the selection controls.
+    val canCreatePlaylist = selectedTab == LibraryTab.Playlists &&
+        appContainer.activeMusicSource is PlaylistWritable && reachable
+    var showCreatePlaylist by remember { mutableStateOf(false) }
+    if (showCreatePlaylist) {
+        PlaylistNameDialog(
+            title = "New playlist",
+            confirmLabel = "Create",
+            onDismiss = { showCreatePlaylist = false },
+            onConfirm = { name ->
+                scope.launch {
+                    // Jump straight into the freshly-created playlist on success.
+                    val result = appContainer.playlists.createPlaylist(name)
+                    if (result is PlaylistEditResult.Created) onPlaylistClick(result.playlistId)
+                }
+            },
+        )
+    }
+
     CompositionLocalProvider(LocalLibrarySelection provides selection) {
     Box(
         modifier = modifier
@@ -323,6 +354,26 @@ fun LibraryView(
                 .padding(16.dp)
                 .padding(bottom = bottomContentPadding),
         )
+
+        // New-playlist FAB, a sibling of the pager so its glass frosts the grid behind it. Same corner
+        // (bottom-end) and inset formula as LibrarySelectionButtons; the two are mutually exclusive by tab.
+        if (canCreatePlaylist) {
+            GlassPrimaryActionButton(
+                onClick = { showCreatePlaylist = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(WindowInsets.navigationBars.asPaddingValues())
+                    .padding(16.dp)
+                    .padding(bottom = bottomContentPadding),
+            ) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = "New playlist",
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+        }
 
         // Back clears the selection instead of leaving the library.
         PlatformBackHandler(enabled = selection.isActive) { selection.clear() }
