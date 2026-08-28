@@ -141,7 +141,12 @@ fun LibraryView(
     }
     LaunchedEffect(pagerState, usePager) {
         if (usePager) {
-            snapshotFlow { pagerState.currentPage }.collect { page -> onTabChanged(LibraryTab.entries[page]) }
+            // Report the *settled* page, not currentPage. currentPage flips to each intermediate page
+            // mid-animation as the scroll offset crosses snap midpoints; reporting those back up would
+            // rewrite selectedTab to a page we're only passing through, which then re-triggers the
+            // animateScrollToPage effect above and strands us one stop short of the tapped tab.
+            // settledPage only updates once the scroll fully comes to rest, so the loop can't close.
+            snapshotFlow { pagerState.settledPage }.collect { page -> onTabChanged(LibraryTab.entries[page]) }
         }
     }
 
