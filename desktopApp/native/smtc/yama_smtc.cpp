@@ -12,7 +12,10 @@
 // The associated window's message pump (AWT's) must be running for media keys to reach SMTC; that's
 // already the case for the Compose window whose HWND we bind to, so we need no pump of our own.
 //
-// Build (see .github/workflows/release.yml): cl /LD /std:c++17 /EHsc ... /link RuntimeObject.lib
+// Build (see .github/workflows/release.yml): cl /LD /std:c++20 /EHsc ... /link RuntimeObject.lib
+// C++20 is required, not preference: we use no coroutines ourselves, but <winrt/Windows.Foundation.h>
+// always pulls in coroutine support for IAsyncAction, and under C++17 that resolves to
+// <experimental/coroutine>, which the VS 2026 MSVC STL rejects outright (error STL1011).
 
 #include <windows.h>
 #include <systemmediatransportcontrolsinterop.h>

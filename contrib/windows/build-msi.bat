@@ -202,7 +202,7 @@ if not defined SDK_OK (
 )
 set "SMTC_DST=desktopApp\resources\windows-x64\smtc"
 if not exist "%SMTC_DST%" mkdir "%SMTC_DST%"
-cl /nologo /LD /std:c++17 /EHsc /permissive- /DUNICODE /D_UNICODE ^
+cl /nologo /LD /std:c++20 /EHsc /permissive- /DUNICODE /D_UNICODE ^
    /I "%WindowsSdkDir%Include\%WindowsSDKVersion%cppwinrt" ^
    desktopApp\native\smtc\yama_smtc.cpp ^
    /Fe:%SMTC_DST%\yama_smtc.dll ^
